@@ -1,0 +1,7 @@
+# Architecture references checked 2026-09-26
+
+- Apple, Adopting Liquid Glass: https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass — system SwiftUI/UIKit navigation bars, tab bars, controls and sheets automatically adopt system materials; Apple advises using standard components and applying custom Liquid Glass sparingly.
+- Apple, Applying Liquid Glass to custom views: https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views — SwiftUI `glassEffect(_:in:)` is the custom-view API used conditionally for iOS 26; the prototype falls back to ultra-thin material on earlier iOS.
+- Apple, `tabBarMinimizeBehavior(_:)`: https://developer.apple.com/documentation/swiftui/view/tabbarminimizebehavior(_:) and `.onScrollDown`: https://developer.apple.com/documentation/swiftui/tabbarminimizebehavior/onscrolldown — native tab bar can minimize on downward scroll on iPhone in iOS 26; prototype uses availability check and leaves standard behavior on iOS 17–25.
+- Codemagic, native iOS apps: https://docs.codemagic.io/yaml-quick-start/building-a-native-ios-app/ — native Xcode projects can be built/signed via codemagic.yaml and Codemagic code-signing identities.
+- React Native Skia animation reference used to compare alternatives: https://shopify.github.io/react-native-skia/docs/animations/animations/ — Skia can combine with Reanimated for UI-thread custom animation, but remains a cross-platform recreation rather than direct use of Apple's system glass.

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.tmp/
+.DS_Store
+.AppleDouble
+*.ipa
+
+# Xcode/CocoaPods generated files
+ios/App/Pods/
+ios/App/build/
+ios/App/DerivedData/
+ios/App/xcuserdata/
+ios/App/*.xcuserstate
