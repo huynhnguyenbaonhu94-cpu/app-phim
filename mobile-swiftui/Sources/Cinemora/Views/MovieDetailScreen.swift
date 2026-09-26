@@ -3,6 +3,7 @@ import SwiftUI
 struct MovieDetailScreen: View {
     let slug: String
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var showPlayer = false
@@ -35,11 +36,26 @@ struct MovieDetailScreen: View {
                         }
                     }
                     .frame(width: contentWidth, alignment: .leading)
-                    .padding(.top, 12)
+                    .padding(.top, 58)
                     .padding(.bottom, 112)
                 }
                 .frame(maxWidth: .infinity)
                 .scrollIndicators(.hidden)
+            }
+            .overlay(alignment: .topLeading) {
+                Button { dismiss() } label: {
+                    Label("Trở lại", systemImage: "chevron.left")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.7))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 20)
+                .padding(.top, 8)
+                .accessibilityLabel("Trở lại danh sách phim")
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -94,6 +110,25 @@ struct MovieDetailScreen: View {
             .frame(width: width, alignment: .leading)
         }
 
+        HStack(spacing: 8) {
+            if let rating = movie.rating, rating > 0 { metricPill(icon: "star.fill", title: "Đánh giá", value: String(format: "%.1f/10", rating)) }
+            if let views = movie.views { metricPill(icon: "eye.fill", title: "Lượt xem", value: formattedViews(views)) }
+            if let status = movie.status, !status.isEmpty { metricPill(icon: "circle.fill", title: "Cập nhật", value: status) }
+        }
+        .frame(width: width, alignment: .leading)
+
+        if let profiles = movie.actorProfiles, !profiles.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeading(eyebrow: "DIỄN VIÊN", title: "Dàn diễn viên")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(profiles) { profile in actorCard(profile) }
+                    }
+                }
+            }
+            .frame(width: width, alignment: .leading)
+        }
+
         if !servers.isEmpty {
             VStack(alignment: .leading, spacing: 13) {
                 SectionHeading(eyebrow: "SẴN SÀNG PHÁT", title: "Tập & nguồn")
@@ -137,8 +172,23 @@ struct MovieDetailScreen: View {
                 metadataRow("Thể loại", movie.categories?.map(\.name).joined(separator: ", "))
                 metadataRow("Quốc gia", movie.countries?.map(\.name).joined(separator: ", "))
                 metadataRow("Đạo diễn", movie.directors?.joined(separator: ", "))
-                metadataRow("Diễn viên", movie.actors?.joined(separator: ", "))
-                metadataRow("Tập phim", movie.episodeCurrent)
+                if movie.actorProfiles?.isEmpty != false { metadataRow("Diễn viên", movie.actors?.joined(separator: ", ")) }
+                metadataRow("Đánh giá", movie.rating.map { String(format: "%.1f/10", $0) })
+                metadataRow("Lượt xem", movie.views.map { formattedViews($0) })
+                metadataRow("Cập nhật", movie.updatedAt.map { formattedDate($0) })
+            }
+            .padding(15).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.045))
+        }
+        .frame(width: width, alignment: .leading)
+
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeading(eyebrow: "THÔNG TIN BỔ SUNG", title: "Thông tin khác")
+            VStack(spacing: 0) {
+                metadataRow("Tên khác", movie.alternativeNames?.joined(separator: ", "))
+                metadataRow("Tập hiện tại", movie.episodeCurrent)
+                metadataRow("Ngày tạo", movie.createdAt.map { formattedDate($0) })
+                metadataRow("TMDB", movie.tmdbId)
+                metadataRow("IMDB", movie.imdbId)
             }
             .padding(15).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.045))
         }
@@ -147,6 +197,71 @@ struct MovieDetailScreen: View {
 
     private func metaChip(_ text: String) -> some View {
         Text(text).font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.86)).padding(.horizontal, 9).padding(.vertical, 6).background(.white.opacity(0.12), in: Capsule())
+    }
+
+    private func metricPill(icon: String, title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.52))
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
+    }
+
+    private func actorCard(_ profile: MovieActorProfile) -> some View {
+        VStack(spacing: 7) {
+            AsyncImage(url: profile.imageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty, .failure:
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Color.cinemaAccent.opacity(0.72))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.white.opacity(0.08))
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(width: 72, height: 88)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14), lineWidth: 0.7))
+
+            Text(profile.name)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.84))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 82)
+        }
+    }
+
+    private func formattedViews(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = "."
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    private func formattedDate(_ value: String) -> String {
+        let input = ISO8601DateFormatter()
+        input.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = input.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        guard let date else { return value }
+        let output = DateFormatter()
+        output.locale = Locale(identifier: "vi_VN")
+        output.dateFormat = "dd/MM/yyyy"
+        return output.string(from: date)
     }
 
     private func metadataRow(_ label: String, _ value: String?) -> some View {

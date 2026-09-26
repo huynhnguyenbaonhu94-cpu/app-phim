@@ -18,8 +18,15 @@ struct Movie: Decodable, Identifiable, Hashable {
     let categories: [MovieTag]?
     let countries: [MovieTag]?
     let actors: [String]?
+    let actorProfiles: [MovieActorProfile]?
     let directors: [String]?
     let views: Int?
+    let alternativeNames: [String]?
+    let status: String?
+    let tmdbId: String?
+    let imdbId: String?
+    let createdAt: String?
+    let updatedAt: String?
     let servers: [MovieServer]?
 
     var id: String { apiID ?? slug }
@@ -30,8 +37,17 @@ struct Movie: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case apiID = "id", slug, name, originName, poster, backdrop, year, quality
         case episodeCurrent, episodeTotal, time, lang, description, rating, categories
-        case countries, actors, directors, views, servers
+        case countries, actors, actorProfiles, directors, views, alternativeNames, status
+        case tmdbId, imdbId, createdAt, updatedAt, servers
     }
+}
+
+struct MovieActorProfile: Decodable, Hashable, Identifiable {
+    let name: String
+    let image: String?
+
+    var id: String { name }
+    var imageURL: URL? { CinemaAPI.absoluteURL(image) }
 }
 
 struct MovieTag: Decodable, Hashable, Identifiable {
