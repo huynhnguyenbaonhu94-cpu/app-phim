@@ -1,0 +1,45 @@
+workflows:
+  cinemora-ios:
+    name: Cinemora Native iOS IPA
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      cocoapods: default
+      node: 22
+      ios_signing:
+        distribution_type: ad_hoc
+        bundle_identifier: app.serval4238.taurus3258
+      vars:
+        API_BASE_URL: https://cungcapicloud.id.vn
+    scripts:
+      - name: Install mobile dependencies
+        script: |
+          cd mobile
+          npm ci --legacy-peer-deps
+
+      - name: Generate clean native iOS project
+        script: |
+          cd mobile
+          rm -rf ios
+          API_BASE_URL="$API_BASE_URL" npx expo prebuild --platform ios --clean --non-interactive
+
+      - name: Install CocoaPods dependencies
+        script: |
+          cd mobile/ios
+          pod install --repo-update
+
+      - name: Configure iOS signing profiles
+        script: |
+          xcode-project use-profiles
+
+      - name: Build signed IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace mobile/ios/Cinemora.xcworkspace \
+            --scheme Cinemora \
+            --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - mobile/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log

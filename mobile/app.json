@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Cinemora",
+    "slug": "cinemora",
+    "version": "1.0.0",
+    "orientation": "default",
+    "scheme": "cinemora",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon-cinemora.png",
+    "splash": {
+      "image": "./assets/icon-cinemora.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#080A10"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.serval4238.taurus3258",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        },
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-video",
+      "expo-font"
+    ],
+    "extra": {
+      "apiBaseUrl": "https://cungcapicloud.id.vn"
+    }
+  }
+}
