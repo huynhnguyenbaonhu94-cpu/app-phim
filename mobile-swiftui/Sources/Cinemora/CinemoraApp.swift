@@ -21,7 +21,7 @@ private struct LaunchLoader: View {
 
     var body: some View {
         ZStack {
-            Color.cinemaBackground.ignoresSafeArea()
+            Color.cinemaInk.ignoresSafeArea()
             Circle().fill(Color.cinemaAccent.opacity(0.08)).frame(width: 260, height: 260).blur(radius: 22)
             VStack(spacing: 8) {
                 Image(systemName: "sparkles.tv.fill")

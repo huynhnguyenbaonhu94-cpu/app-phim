@@ -229,7 +229,7 @@ struct CinemaPlayerScreen: View {
                 }
                 Section("Tốc độ phát") {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                        Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: \"%g\")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
+                        Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
                     }
                 }
                 Button { controlsLocked = true; controlsVisible = false; hideTask?.cancel() } label: { Label("Khóa điều khiển", systemImage: "lock") }
