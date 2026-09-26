@@ -28,6 +28,9 @@ function formatTime(seconds: number) {
 
 type VideoFit = "contain" | "fill" | "cover";
 const VIDEO_FIT_LABELS: Record<VideoFit, string> = { contain: "Vừa", fill: "Đầy", cover: "Phủ" };
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+type PlaybackRate = typeof PLAYBACK_RATES[number];
+const playbackRateLabel = (rate: PlaybackRate) => `${rate}x`;
 
 function SeekBar({
   currentTime,
@@ -150,6 +153,10 @@ function PlayerControls({
   fitMenuOpen,
   onFitMenuToggle,
   onFitSelect,
+  playbackRate,
+  speedMenuOpen,
+  onSpeedMenuToggle,
+  onSpeedSelect,
   episodes,
   servers,
   episodeIndex,
@@ -180,6 +187,10 @@ function PlayerControls({
   fitMenuOpen: boolean;
   onFitMenuToggle: () => void;
   onFitSelect: (fit: VideoFit) => void;
+  playbackRate: PlaybackRate;
+  speedMenuOpen: boolean;
+  onSpeedMenuToggle: () => void;
+  onSpeedSelect: (rate: PlaybackRate) => void;
   episodes: Episode[];
   servers: MovieServer[];
   episodeIndex: number;
@@ -217,6 +228,18 @@ function PlayerControls({
             {(Object.keys(VIDEO_FIT_LABELS) as VideoFit[]).map(fit => <Pressable key={fit} accessibilityLabel={`Tỷ lệ ${VIDEO_FIT_LABELS[fit]}`} onPress={() => { onFitSelect(fit); onInteraction(); }} style={[playerStyles.fitOption, fit === videoFit && playerStyles.fitOptionActive]}>
               <Text style={[playerStyles.fitOptionText, fit === videoFit && playerStyles.fitOptionTextActive]}>{VIDEO_FIT_LABELS[fit]}</Text>
               {fit === videoFit && <Ionicons name="checkmark" size={15} color={C.accent} />}
+            </Pressable>)}
+          </View>}
+        </View> : null}
+        {fullscreen ? <View style={playerStyles.fitMenuWrap}>
+          <Pressable accessibilityLabel="Tốc độ phát" onPress={() => { onInteraction(); onSpeedMenuToggle(); }} style={playerStyles.speedButton}>
+            <Ionicons name="speedometer-outline" size={17} color={C.text} />
+            <Text style={playerStyles.fitButtonText}>{playbackRateLabel(playbackRate)}</Text>
+          </Pressable>
+          {speedMenuOpen && <View style={[playerStyles.fitMenu, playerStyles.speedMenu]}>
+            {PLAYBACK_RATES.map(rate => <Pressable key={rate} accessibilityLabel={`Tốc độ ${playbackRateLabel(rate)}`} onPress={() => { onSpeedSelect(rate); onInteraction(); }} style={[playerStyles.fitOption, rate === playbackRate && playerStyles.fitOptionActive]}>
+              <Text style={[playerStyles.fitOptionText, rate === playbackRate && playerStyles.fitOptionTextActive]}>{rate === 1 ? "Bình thường · 1x" : playbackRateLabel(rate)}</Text>
+              {rate === playbackRate && <Ionicons name="checkmark" size={15} color={C.accent} />}
             </Pressable>)}
           </View>}
         </View> : null}
@@ -334,6 +357,8 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
   const [fullscreen, setFullscreen] = useState(false);
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
   const [fitMenuOpen, setFitMenuOpen] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(1);
+  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState<"episodes" | "servers" | null>(null);
   const pendingSeek = useRef<{ target: number; from: number; expiresAt: number; resume: boolean } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -358,6 +383,7 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
   const retryingRef = useRef(false);
   const revealControlsRef = useRef<() => void>(() => undefined);
   const showLockRef = useRef<() => void>(() => undefined);
+  const enterFullscreenRef = useRef<() => void>(() => undefined);
   onEndedRef.current = onEnded;
   volumeRef.current = volume;
   lockedRef.current = locked;
@@ -388,6 +414,9 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    player.playbackRate = 1;
+    setPlaybackRate(1);
+    setSpeedMenuOpen(false);
     setControlsVisible(fullscreenRef.current);
 
     const statusSubscription = player.addListener("statusChange", event => {
@@ -686,6 +715,12 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     }
   }, [clearLockHideTimer]);
 
+  const changePlaybackRate = useCallback((rate: PlaybackRate) => {
+    player.playbackRate = rate;
+    setPlaybackRate(rate);
+    setSpeedMenuOpen(false);
+  }, [player]);
+
   const gestureResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
@@ -705,6 +740,10 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
       const moved = Math.abs(gesture.moveX - start.x) > 14 || Math.abs(gesture.moveY - start.y) > 14;
       if (start.x >= gestureWidthRef.current - 92 && moved) return;
       if (moved) return;
+      if (!fullscreenRef.current) {
+        enterFullscreenRef.current();
+        return;
+      }
       if (lockedRef.current) {
         showLockRef.current();
         return;
@@ -736,14 +775,17 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     try { await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE); } catch { /* orientation lock may be unavailable on some devices */ }
     setFullscreen(true);
     setFitMenuOpen(false);
+    setSpeedMenuOpen(false);
     resetHideTimer();
   }, [clearHideTimer, resetHideTimer]);
+  enterFullscreenRef.current = enterFullscreen;
 
   const exitFullscreen = useCallback(async () => {
     clearHideTimer();
     setPickerOpen(null);
     setFullscreen(false);
     setFitMenuOpen(false);
+    setSpeedMenuOpen(false);
     setControlsVisible(true);
     try { await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP); } catch { /* keep the current orientation if the platform refuses */ }
     resetHideTimer();
@@ -807,6 +849,10 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
       fitMenuOpen={fitMenuOpen}
       onFitMenuToggle={() => setFitMenuOpen(open => !open)}
       onFitSelect={fit => { setVideoFit(fit); setFitMenuOpen(false); }}
+      playbackRate={playbackRate}
+      speedMenuOpen={speedMenuOpen}
+      onSpeedMenuToggle={() => { setFitMenuOpen(false); setSpeedMenuOpen(open => !open); }}
+      onSpeedSelect={changePlaybackRate}
       episodes={episodes}
       servers={servers}
       episodeIndex={episodeIndex}
@@ -870,8 +916,10 @@ const playerStyles = StyleSheet.create({
   fullscreenSpacer: { width: 38, height: 38 },
   fitMenuWrap: { position: "relative", zIndex: 10 },
   fitButton: { minWidth: 66, height: 38, paddingHorizontal: 10, borderRadius: 13, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "rgba(15,18,24,0.88)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  speedButton: { minWidth: 62, height: 38, paddingHorizontal: 9, borderRadius: 13, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "rgba(15,18,24,0.88)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   fitButtonText: { color: C.text, fontSize: 10, fontWeight: "800" },
   fitMenu: { position: "absolute", top: 45, right: 0, minWidth: 126, padding: 5, borderRadius: 14, backgroundColor: "rgba(15,18,24,0.98)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 14, elevation: 8 },
+  speedMenu: { minWidth: 156 },
   fitOption: { minHeight: 36, paddingHorizontal: 10, borderRadius: 9, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   fitOptionActive: { backgroundColor: "rgba(210,243,107,0.12)" },
   fitOptionText: { color: "#c5c9d1", fontSize: 11, fontWeight: "700" },
