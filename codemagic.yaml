@@ -18,8 +18,10 @@ workflows:
 
       - name: Generate and validate native SwiftUI Xcode project
         script: |
+          set -euo pipefail
           cd "$CM_BUILD_DIR/mobile-swiftui"
           xcodegen generate --spec project.yml
+          test -d Cinemora.xcodeproj
           xcodebuild -list -project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj"
 
       - name: Configure iOS signing profiles
@@ -28,6 +30,7 @@ workflows:
 
       - name: Build signed SwiftUI IPA
         script: |
+          set -euo pipefail
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj" \
             --scheme Cinemora \
