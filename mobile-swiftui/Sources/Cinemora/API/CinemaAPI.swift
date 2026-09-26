@@ -45,7 +45,15 @@ struct CinemaAPI {
     func isFavorite(slug: String) async throws -> Bool { try await query("account.isFavorite", input: ["movieSlug": slug]) }
     func addFavorite(movie: Movie) async throws { _ = try await mutate("account.addFavorite", input: movieSnapshot(movie)) as Bool }
     func removeFavorite(slug: String) async throws { _ = try await mutate("account.removeFavorite", input: ["movieSlug": slug]) as Bool }
-    func removeHistory(id: Int) async throws { _ = try await mutate("account.removeHistory", input: ["id": id]) as Bool }
+    func removeHistory(id: Int) async throws {
+        do {
+            _ = try await mutate("account.removeHistory", input: ["id": id]) as Bool
+        } catch APIError.server(let message) where message.localizedCaseInsensitiveContains("No procedure found") || message.localizedCaseInsensitiveContains("removeHistory") {
+            // Older deployments do not expose this procedure yet. The mobile UI handles
+            // this compatibility case without showing a raw tRPC error to the user.
+            throw APIError.procedureUnavailable
+        }
+    }
     func recordHistory(movie: Movie, episode: MovieEpisode?, sourceName: String?, watchedSeconds: Int, durationSeconds: Int) async throws {
         var payload = movieSnapshot(movie)
         if let episode { payload["episodeSlug"] = episode.slug; payload["episodeName"] = episode.name }
@@ -157,7 +165,7 @@ struct WatchHistoryItem: Decodable, Identifiable {
 }
 
 enum APIError: LocalizedError {
-    case invalidURL, invalidResponse
+    case invalidURL, invalidResponse, procedureUnavailable
     case http(Int)
     case server(String)
     case decoding(String)
@@ -166,6 +174,7 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidURL: return "Địa chỉ API không hợp lệ."
         case .invalidResponse: return "Máy chủ trả về dữ liệu chưa đúng định dạng."
+        case .procedureUnavailable: return "Tính năng này chưa được bật trên máy chủ hiện tại."
         case .http(let code): return "Máy chủ phản hồi lỗi (\(code)). Vui lòng thử lại."
         case .server(let message): return message
         case .decoding(let message): return "Không đọc được dữ liệu phim: \(message)"

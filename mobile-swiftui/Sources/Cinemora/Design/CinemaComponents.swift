@@ -5,42 +5,81 @@ import UIKit
 @MainActor
 final class CinemaImageLoader: ObservableObject {
     static let cache = NSCache<NSURL, UIImage>()
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        configuration.urlCache = URLCache.shared
+        return URLSession(configuration: configuration)
+    }()
+    private static let diskCacheURL: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let folder = base.appendingPathComponent("cinemora-posters", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
     @Published private(set) var image: UIImage?
     @Published private(set) var loading = false
     @Published private(set) var failed = false
     private var task: Task<Void, Never>?
     private var loadedURL: URL?
+    private var displayedURL: URL?
 
     func load(_ url: URL?) {
+        guard loadedURL != url || displayedURL == nil else { return }
         task?.cancel()
-        image = nil
         failed = false
         loadedURL = url
-        guard let url else { loading = false; return }
-        if let cached = Self.cache.object(forKey: url as NSURL) { image = cached; loading = false; return }
+        guard let url else { image = nil; displayedURL = nil; loading = false; return }
+        if let cached = Self.cache.object(forKey: url as NSURL) {
+            image = cached; displayedURL = url; loading = false; return
+        }
+        if let cached = Self.diskImage(for: url) {
+            image = cached
+            displayedURL = url
+            Self.cache.setObject(cached, forKey: url as NSURL)
+            loading = false
+            // Keep the disk image visible while checking for a newer response.
+        }
         loading = true
         task = Task { [weak self] in
             guard let self else { return }
-            for attempt in 0..<3 {
+            for attempt in 0..<4 {
                 guard !Task.isCancelled else { return }
                 do {
-                    var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+                    var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30)
                     request.setValue("image/avif,image/webp,image/jpeg,image/png,*/*", forHTTPHeaderField: "Accept")
-                    let (data, response) = try await URLSession.shared.data(for: request)
+                    let (data, response) = try await Self.session.data(for: request)
                     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let decoded = UIImage(data: data) else { throw URLError(.cannotDecodeContentData) }
                     Self.cache.setObject(decoded, forKey: url as NSURL)
+                    Self.storeOnDisk(data, for: url)
                     guard !Task.isCancelled, loadedURL == url else { return }
-                    image = decoded; loading = false; failed = false; return
+                    image = decoded; displayedURL = url; loading = false; failed = false; return
                 } catch {
-                    if attempt < 2 { try? await Task.sleep(for: .milliseconds(350 * (attempt + 1))) }
+                    if attempt < 3 { try? await Task.sleep(for: .milliseconds(300 * (1 << attempt))) }
                 }
             }
             guard !Task.isCancelled, loadedURL == url else { return }
-            loading = false; failed = true
+            loading = false; failed = image == nil
         }
     }
 
     func retry() { load(loadedURL) }
+
+    private static func diskKey(for url: URL) -> String {
+        Data(url.absoluteString.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func diskImage(for url: URL) -> UIImage? {
+        guard let data = try? Data(contentsOf: diskCacheURL.appendingPathComponent(diskKey(for: url))) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private static func storeOnDisk(_ data: Data, for url: URL) {
+        try? data.write(to: diskCacheURL.appendingPathComponent(diskKey(for: url)), options: .atomic)
+    }
 }
 
 struct CinemaRemoteImage: View {
@@ -53,7 +92,13 @@ struct CinemaRemoteImage: View {
     var body: some View {
         ZStack {
             fallback
-            if let image = loader.image { Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode) }
+            if let image = loader.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .clipped()
+            }
             else if loader.loading { ProgressView().tint(.cinemaAccent) }
             else if loader.failed {
                 Button { loader.retry() } label: { Label("Thử lại ảnh", systemImage: "arrow.clockwise") }
@@ -87,7 +132,18 @@ struct CinemaHeader: View {
 
 struct PosterArt: View {
     let url: URL?
-    var body: some View { CinemaRemoteImage(url: url).frame(maxWidth: .infinity).clipped() }
+    let contentMode: ContentMode
+
+    init(url: URL?, contentMode: ContentMode = .fill) {
+        self.url = url
+        self.contentMode = contentMode
+    }
+
+    var body: some View {
+        CinemaRemoteImage(url: url, contentMode: contentMode)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .clipped()
+    }
 }
 
 struct MoviePosterCard: View {
@@ -96,11 +152,17 @@ struct MoviePosterCard: View {
         NavigationLink(value: movie) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack(alignment: .topLeading) {
-                    PosterArt(url: movie.posterURL).aspectRatio(0.69, contentMode: .fit)
+                    PosterArt(url: movie.posterURL)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     LinearGradient(colors: [.clear, .black.opacity(0.2)], startPoint: .center, endPoint: .bottom)
                     if let quality = movie.quality, !quality.isEmpty { Text(quality.uppercased()).font(.system(size: 9, weight: .black, design: .rounded)).tracking(0.8).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 8).padding(.vertical, 5).background(.black.opacity(0.7), in: Capsule()).padding(9) }
                     if let rating = movie.rating, rating > 0 { HStack(spacing: 3) { Image(systemName: "star.fill"); Text(rating, format: .number.precision(.fractionLength(1))) }.font(.system(size: 9, weight: .bold)).foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 5).background(.black.opacity(0.66), in: Capsule()).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(8) }
-                }.clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(.white.opacity(0.13), lineWidth: 0.7)).shadow(color: .black.opacity(0.28), radius: 12, y: 8)
+                }
+                .frame(maxWidth: .infinity)
+                .aspectRatio(0.69, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(.white.opacity(0.13), lineWidth: 0.7))
+                .shadow(color: .black.opacity(0.28), radius: 12, y: 8)
                 Text(movie.name).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2).multilineTextAlignment(.leading)
                 Text([movie.originName, movie.year.map { String($0) }].compactMap { $0 }.joined(separator: " · ")).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.54)).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
