@@ -13,25 +13,34 @@ struct MovieDetailScreen: View {
     private var episode: MovieEpisode? { episodes.indices.contains(selectedEpisode) ? episodes[selectedEpisode] : nil }
 
     var body: some View {
-        ZStack {
-            CinemaBackground()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    if let movie {
-                        detailContent(movie)
-                    } else if store.detailLoading {
-                        ProgressView("Đang tải chi tiết phim…").tint(.cinemaAccent).foregroundStyle(.white.opacity(0.65)).frame(maxWidth: .infinity).padding(.top, 150)
-                    } else {
-                        StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError, actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
-                            .padding(.top, 80)
+        GeometryReader { proxy in
+            let contentWidth = min(max(proxy.size.width - 40, 280), 720)
+
+            ZStack {
+                CinemaBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        if let movie {
+                            detailContent(movie, width: contentWidth)
+                        } else if store.detailLoading {
+                            ProgressView("Đang tải chi tiết phim…")
+                                .tint(.cinemaAccent)
+                                .foregroundStyle(.white.opacity(0.65))
+                                .frame(width: contentWidth)
+                                .padding(.top, 150)
+                        } else {
+                            StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError, actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
+                                .frame(width: contentWidth)
+                                .padding(.top, 80)
+                        }
                     }
+                    .frame(width: contentWidth, alignment: .leading)
+                    .padding(.top, 12)
+                    .padding(.bottom, 112)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 112)
+                .frame(maxWidth: .infinity)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: slug) { store.loadDetail(slug: slug) }
@@ -45,9 +54,9 @@ struct MovieDetailScreen: View {
         }
     }
 
-    @ViewBuilder private func detailContent(_ movie: Movie) -> some View {
+    @ViewBuilder private func detailContent(_ movie: Movie, width: CGFloat) -> some View {
         ZStack(alignment: .bottomLeading) {
-            PosterArt(url: movie.backdropURL).frame(height: 430)
+            PosterArt(url: movie.backdropURL).frame(width: width, height: 430)
             LinearGradient(colors: [.clear, Color.cinemaInk.opacity(0.25), Color.cinemaInk], startPoint: .center, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 9) {
                 if let quality = movie.quality { Text(quality.uppercased()).font(.system(size: 9, weight: .black)).tracking(1).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 9).padding(.vertical, 6).background(.black.opacity(0.42), in: Capsule()) }
@@ -68,7 +77,7 @@ struct MovieDetailScreen: View {
             }
             .padding(22)
         }
-        .frame(maxWidth: .infinity, minHeight: 430, maxHeight: 430, alignment: .bottomLeading)
+        .frame(width: width, height: 430, alignment: .bottomLeading)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
 
@@ -79,10 +88,10 @@ struct MovieDetailScreen: View {
                     .font(.system(size: 13))
                     .lineSpacing(5)
                     .foregroundStyle(.white.opacity(0.68))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(width: width, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: width, alignment: .leading)
         }
 
         if !servers.isEmpty {
@@ -119,7 +128,7 @@ struct MovieDetailScreen: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: width, alignment: .leading)
         }
 
         VStack(alignment: .leading, spacing: 12) {
@@ -133,6 +142,7 @@ struct MovieDetailScreen: View {
             }
             .padding(15).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.045))
         }
+        .frame(width: width, alignment: .leading)
     }
 
     private func metaChip(_ text: String) -> some View {
