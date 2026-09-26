@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
-import { router, useNavigation } from "expo-router";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  Animated,
+  Easing,
   Modal,
   Pressable,
   StyleSheet,
@@ -19,20 +21,7 @@ import { imageUrl, Movie } from "./api";
 import { blur, C, colors, radius, spacing, typography } from "./design";
 export { C } from "./design";
 
-export const TAB_BAR_VISIBLE = {
-  position: "absolute" as const,
-  left: 12,
-  right: 12,
-  bottom: 12,
-  height: 72,
-  paddingTop: 9,
-  paddingBottom: 9,
-  borderRadius: radius.xl,
-  overflow: "hidden" as const,
-  elevation: 0,
-  borderWidth: 1,
-  borderColor: colors.borderStrong,
-};
+export const tabBarHideProgress = new Animated.Value(0);
 
 export function ScreenAtmosphere() {
   return <View pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -77,35 +66,28 @@ export function GlassState({ icon, title, message, action, actionLabel }: { icon
 }
 
 export function useAutoHideTabBar() {
-  const navigation = useNavigation();
   const lastOffset = useRef(0);
   const hidden = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animateBar = useCallback((toHidden: boolean) => {
-    if (timer.current) clearTimeout(timer.current);
-    const start = toHidden ? 0 : 1;
-    const end = toHidden ? 1 : 0;
-    let step = 0;
-    const tick = () => {
-      const p = Math.min(1, ++step / 10);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const value = start + (end - start) * eased;
-      navigation.setOptions({ tabBarStyle: { ...TAB_BAR_VISIBLE, height: 72 - value * 50, paddingTop: 9 - value * 9, paddingBottom: 9 - value * 9, borderRadius: radius.xl - value * 12, opacity: 1 - value * 0.82, transform: [{ translateY: value * 36 }] } });
-      if (p < 1) timer.current = setTimeout(tick, 16); else timer.current = null;
-    };
-    tick();
-  }, [navigation]);
+    tabBarHideProgress.stopAnimation();
+    Animated.timing(tabBarHideProgress, {
+      toValue: toHidden ? 1 : 0,
+      duration: toHidden ? 310 : 360,
+      easing: toHidden ? Easing.out(Easing.cubic) : Easing.out(Easing.back(1.12)),
+      useNativeDriver: true,
+    }).start();
+  }, []);
   useEffect(() => {
     lastOffset.current = 0;
     hidden.current = false;
-    navigation.setOptions({ tabBarStyle: TAB_BAR_VISIBLE });
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [navigation]);
+    tabBarHideProgress.stopAnimation();
+    tabBarHideProgress.setValue(0);
+  }, []);
   return useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offset = Math.max(0, event.nativeEvent.contentOffset.y);
     const delta = offset - lastOffset.current;
     if (delta > 12 && offset > 42 && !hidden.current) { hidden.current = true; animateBar(true); }
-    else if (delta < -12 && hidden.current) { hidden.current = false; animateBar(false); }
+    else if ((delta < -12 || offset < 12) && hidden.current) { hidden.current = false; animateBar(false); }
     lastOffset.current = offset;
   }, [animateBar]);
 }
