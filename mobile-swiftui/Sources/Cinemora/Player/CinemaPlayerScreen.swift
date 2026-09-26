@@ -142,7 +142,7 @@ struct CinemaPlayerScreen: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
-                if let url = playback.activeURL {
+                if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { toggleControls() }
                 } else if let embed = episode?.embedURL {

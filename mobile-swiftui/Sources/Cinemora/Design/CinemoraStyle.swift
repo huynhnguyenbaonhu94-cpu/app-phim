@@ -28,7 +28,7 @@ struct GlassSurface<S: Shape>: ViewModifier {
         } else {
             content.background(.ultraThinMaterial, in: shape)
                 .background(tint.opacity(0.5), in: shape)
-                .overlay(shape.strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
+                .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 0.8))
         }
     }
 }

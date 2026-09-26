@@ -34,7 +34,7 @@ struct MovieDetailScreen: View {
         .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
         .fullScreenCover(isPresented: $showPlayer) {
-            if let movie, let episode {
+            if let movie, episode != nil {
                 CinemaPlayerScreen(movie: movie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode)
                     .preferredColorScheme(.dark)
             }
