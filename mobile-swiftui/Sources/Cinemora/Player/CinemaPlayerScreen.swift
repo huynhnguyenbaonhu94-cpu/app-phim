@@ -537,12 +537,10 @@ struct CinemaPlayerScreen: View {
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) else { return }
         let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-        if #available(iOS 16.0, *) {
-            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
-        }
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        UIViewController.attemptRotationToDeviceOrientation()
+        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+        let keyWindow = windowScene.windows.first(where: \.isKeyWindow)
+        keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
     }
 
     private func formatTime(_ value: Double) -> String {
