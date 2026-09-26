@@ -540,9 +540,9 @@ struct CinemaPlayerScreen: View {
         if #available(iOS 16.0, *) {
             let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+            windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         }
         UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        UIViewController.attemptRotationToDeviceOrientation()
     }
 
     private func formatTime(_ value: Double) -> String {
