@@ -1,0 +1,6 @@
+Cinemora.xcodeproj/
+Cinemora.xcworkspace/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/

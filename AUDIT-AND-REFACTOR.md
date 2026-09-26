@@ -176,3 +176,12 @@ Trên Codemagic, chỉ cần commit toàn bộ repository và chọn workflow `c
 - Thay tab bar mặc định bằng custom tab bar kính mờ có lớp specular, viền sáng, capsule active và chấm chỉ báo hoạt động.
 - Chuyển động đổi tab dùng spring native-driver cho icon/capsule; khi cuộn nội dung xuống, thanh trượt khỏi cạnh dưới và mờ nhẹ; vuốt lên hoặc về đầu trang thì trượt lại.
 - Không thêm package animation mới; dùng `Animated` của React Native cùng Expo Blur.
+
+## SwiftUI native migration trial — 2026-09-26
+
+- Đã thêm thư mục `mobile-swiftui/` như một app iOS native độc lập chạy song song; không xóa hoặc thay workflow Expo `cinemora-ios` đang có.
+- Prototype có SwiftUI screens: Trang Chủ, Thư Viện, Tìm Kiếm, Tài Khoản, chi tiết phim; kết nối các procedure tRPC `cinema.home`, `list`, `search`, `detail`, `meta` hiện có.
+- Dùng system `TabView` và `.tabBarMinimizeBehavior(.onScrollDown)` trên iOS 26; áp dụng `glassEffect` cho các bề mặt tùy chỉnh, fallback material cho iOS 17–25.
+- Player dùng AVPlayer cho đường dẫn HLS và WKWebView cho nguồn embed; picker tập/nguồn là overlay trong fullscreen, điều khiển âm lượng có slider và mute riêng.
+- Workflow `cinemora-swiftui-ios` tạo project Xcode bằng XcodeGen và build IPA đã được thêm riêng trong `codemagic.yaml`.
+- Môi trường sửa source là Ubuntu, không có Swift/Xcode; vì vậy chưa xác nhận compile, preview thiết bị hoặc IPA. Cần chạy workflow thử trên Codemagic trước khi chọn workflow mới thay vì `cinemora-ios`.

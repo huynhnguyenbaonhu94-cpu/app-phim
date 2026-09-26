@@ -43,6 +43,17 @@ cd ios && pod install
 
 Workflow hiện dùng signing của Codemagic (`xcode-project use-profiles`), không còn tắt code signing như bản Capacitor cũ. Vì vậy cần provisioning profile hợp lệ. Nếu muốn TestFlight/App Store, dùng distribution certificate và App Store provisioning profile; nếu cài trực tiếp lên thiết bị, dùng Ad Hoc profile có UDID.
 
+## Thử nghiệm app SwiftUI native riêng
+
+Đã thêm prototype SwiftUI trong `mobile-swiftui/`, nhưng giữ nguyên Expo app và workflow hiện tại để có thể quay lại ngay nếu bản thử nghiệm chưa đạt.
+
+1. Push source cập nhật lên GitHub như các lần trước.
+2. Trong Codemagic, chọn workflow **Cinemora SwiftUI Native iOS IPA (trial)** (`cinemora-swiftui-ios`). Workflow này cài XcodeGen, tạo `Cinemora.xcodeproj`, ký rồi build IPA.
+3. Kiểm tra IPA trên iPhone thật, đặc biệt đăng nhập API, ảnh, phát HLS và nguồn embed.
+4. Nếu bản thử nghiệm build lỗi hoặc chưa đạt, chọn lại workflow cũ **Cinemora Native iOS IPA** (`cinemora-ios`); app Expo cũ vẫn còn nguyên.
+
+Prototype SwiftUI có giao diện native; dùng Liquid Glass hệ thống trên iOS 26 và material fallback trên iOS 17–25. Source được rà cú pháp và cấu hình trong môi trường Linux nhưng chưa compile bằng Xcode, chạy Simulator hay ký IPA; cần xem build Codemagic đầu tiên là bước kiểm thử bắt buộc trước khi chuyển hẳn sang SwiftUI.
+
 ## Lưu ý backend
 
 Backend phải cho phép request từ app native và vẫn phục vụ route `https://cungcapicloud.id.vn/api/trpc`. Phần phim, danh mục, tìm kiếm, chi tiết, episode và link stream được native app gọi trực tiếp từ các procedure `cinema.*`. Đăng nhập, yêu thích và lịch sử là phần backend đã có; màn hình tài khoản native đang để sẵn điểm tích hợp, có thể nối tiếp mà không cần đổi API.
