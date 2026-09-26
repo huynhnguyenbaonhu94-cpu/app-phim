@@ -541,7 +541,6 @@ struct CinemaPlayerScreen: View {
             let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         }
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
     }
 
     private func formatTime(_ value: Double) -> String {
