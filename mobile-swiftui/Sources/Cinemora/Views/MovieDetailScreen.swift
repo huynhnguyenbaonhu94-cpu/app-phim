@@ -26,8 +26,12 @@ struct MovieDetailScreen: View {
                             .padding(.top, 80)
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 38)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 112)
             }
+            .scrollIndicators(.hidden)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: slug) { store.loadDetail(slug: slug) }
@@ -47,7 +51,7 @@ struct MovieDetailScreen: View {
             LinearGradient(colors: [.clear, Color.cinemaInk.opacity(0.25), Color.cinemaInk], startPoint: .center, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 9) {
                 if let quality = movie.quality { Text(quality.uppercased()).font(.system(size: 9, weight: .black)).tracking(1).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 9).padding(.vertical, 6).background(.black.opacity(0.42), in: Capsule()) }
-                Text(movie.name).font(.system(size: 30, weight: .black, design: .rounded)).tracking(-0.7).foregroundStyle(.white).lineLimit(3)
+                Text(movie.name).font(.system(size: 30, weight: .black, design: .rounded)).tracking(-0.7).foregroundStyle(.white).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 if let origin = movie.originName, !origin.isEmpty { Text(origin).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.72)).lineLimit(2) }
                 HStack(spacing: 8) {
                     if let year = movie.year { metaChip(String(year)) }
@@ -64,15 +68,21 @@ struct MovieDetailScreen: View {
             }
             .padding(22)
         }
-        .frame(height: 430)
+        .frame(maxWidth: .infinity, minHeight: 430, maxHeight: 430, alignment: .bottomLeading)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
 
         if let description = movie.description, !description.isEmpty {
             VStack(alignment: .leading, spacing: 9) {
                 SectionHeading(eyebrow: "CÂU CHUYỆN", title: "Nội dung phim")
-                Text(description).font(.system(size: 13)).lineSpacing(5).foregroundStyle(.white.opacity(0.68)).fixedSize(horizontal: false, vertical: true)
+                Text(description)
+                    .font(.system(size: 13))
+                    .lineSpacing(5)
+                    .foregroundStyle(.white.opacity(0.68))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         if !servers.isEmpty {
@@ -109,6 +119,7 @@ struct MovieDetailScreen: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         VStack(alignment: .leading, spacing: 12) {
@@ -131,7 +142,11 @@ struct MovieDetailScreen: View {
     private func metadataRow(_ label: String, _ value: String?) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.48)).frame(width: 75, alignment: .leading)
-            Text(value?.isEmpty == false ? value! : "Đang cập nhật").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(value?.isEmpty == false ? 0.82 : 0.38)).frame(maxWidth: .infinity, alignment: .leading)
+            Text(value?.isEmpty == false ? value! : "Đang cập nhật")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(value?.isEmpty == false ? 0.82 : 0.38))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.07)).frame(height: 0.5) }
