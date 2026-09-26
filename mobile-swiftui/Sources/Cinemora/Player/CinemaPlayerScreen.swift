@@ -12,6 +12,7 @@ final class PlaybackController: ObservableObject {
     @Published var isPlaying = false
     @Published var isMuted = false
     @Published var isLoading = false
+    @Published var playbackRate: Float = 1
     @Published var errorMessage: String?
     @Published var activeURL: URL?
     private var timeObserver: Any?
@@ -75,6 +76,8 @@ final class PlaybackController: ObservableObject {
         }
         player.replaceCurrentItem(with: item)
         player.play()
+        player.defaultRate = playbackRate
+        player.rate = playbackRate
         isPlaying = true
         loadTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(18))
@@ -98,6 +101,12 @@ final class PlaybackController: ObservableObject {
         player.volume = Float(min(1, max(0, value)))
     }
 
+    func setPlaybackRate(_ value: Float) {
+        playbackRate = value
+        player.defaultRate = value
+        if player.timeControlStatus == .playing { player.rate = value }
+    }
+
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
         player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -118,11 +127,14 @@ struct CinemaPlayerScreen: View {
     @State private var picker: PickerKind?
     @State private var volume = 1.0
     @State private var volumePopoverOpen = false
+    @State private var controlsLocked = false
+    @State private var videoFit: VideoFit = .fit
     @State private var isScrubbing = false
     @State private var scrubValue = 0.0
     @State private var hideTask: Task<Void, Never>?
 
     private enum PickerKind { case episodes, sources }
+    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
@@ -143,15 +155,15 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
-                    NativeVideoSurface(player: playback.player).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    Color.clear.contentShape(Rectangle()).onTapGesture { toggleControls() }
+                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
+                    Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
                 }
 
-                if controlsVisible {
+                if controlsVisible && !controlsLocked {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
@@ -174,6 +186,10 @@ struct CinemaPlayerScreen: View {
                 }
 
                 if let picker { pickerOverlay(picker).transition(.opacity.combined(with: .scale(scale: 0.97))) }
+                if controlsLocked {
+                    Button { controlsLocked = false; controlsVisible = true; scheduleHide() } label: { Image(systemName: "lock.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white).frame(width: 52, height: 52).background(.black.opacity(0.65), in: Circle()) }
+                        .buttonStyle(.plain).accessibilityLabel("Mở khóa điều khiển")
+                }
             }
             .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
             .animation(.easeInOut(duration: 0.2), value: controlsVisible)
@@ -183,8 +199,8 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onAppear { loadCurrentEpisode(); scheduleHide() }
-            .onDisappear { hideTask?.cancel(); playback.shutdown() }
+            .onAppear { forceLandscape(); loadCurrentEpisode(); scheduleHide() }
+            .onDisappear { hideTask?.cancel(); playback.shutdown(); forcePortrait() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -205,6 +221,22 @@ struct CinemaPlayerScreen: View {
                 Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
             }
+            Menu {
+                Section("Tỷ lệ khung hình") {
+                    ForEach(VideoFit.allCases, id: \.self) { fit in
+                        Button { videoFit = fit } label: { Label(fit.rawValue, systemImage: fit == videoFit ? "checkmark" : "rectangle") }
+                    }
+                }
+                Section("Tốc độ phát") {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: \"%g\")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
+                    }
+                }
+                Button { controlsLocked = true; controlsVisible = false; hideTask?.cancel() } label: { Label("Khóa điều khiển", systemImage: "lock") }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 18, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tùy chọn trình phát")
         }
     }
 
@@ -353,6 +385,16 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    private func forceLandscape() {
+        UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+        UIViewController.attemptRotationToDeviceOrientation()
+    }
+
+    private func forcePortrait() {
+        UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        UIViewController.attemptRotationToDeviceOrientation()
+    }
+
     private func formatTime(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
@@ -382,16 +424,28 @@ private final class PlayerLayerView: UIView {
 
 private struct NativeVideoSurface: UIViewRepresentable {
     let player: AVPlayer
+    let fit: CinemaPlayerScreen.VideoFit
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
         view.backgroundColor = .black
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = fit.gravity
         return view
     }
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        view.playerLayer.videoGravity = fit.gravity
+    }
+}
+
+private extension CinemaPlayerScreen.VideoFit {
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fit: return .resizeAspect
+        case .fill: return .resize
+        case .cover: return .resizeAspectFill
+        }
     }
 }

@@ -179,9 +179,9 @@ Trên Codemagic, chỉ cần commit toàn bộ repository và chọn workflow `c
 
 ## SwiftUI native migration trial — 2026-09-26
 
-- Đã thêm thư mục `mobile-swiftui/` như một app iOS native độc lập chạy song song; không xóa hoặc thay workflow Expo `cinemora-ios` đang có.
+- Đã thêm thư mục `mobile-swiftui/` như một app iOS native độc lập. Workflow mặc định `cinemora-ios` giờ build SwiftUI; app Expo vẫn có trong `mobile/` và workflow riêng `cinemora-expo-ios` làm fallback.
 - Prototype có SwiftUI screens: Trang Chủ, Thư Viện, Tìm Kiếm, Tài Khoản, chi tiết phim; kết nối các procedure tRPC `cinema.home`, `list`, `search`, `detail`, `meta` hiện có.
 - Dùng system `TabView` và `.tabBarMinimizeBehavior(.onScrollDown)` trên iOS 26; áp dụng `glassEffect` cho các bề mặt tùy chỉnh, fallback material cho iOS 17–25.
 - Player dùng AVPlayer cho đường dẫn HLS và WKWebView cho nguồn embed; picker tập/nguồn là overlay trong fullscreen, điều khiển âm lượng có slider và mute riêng.
-- Workflow `cinemora-swiftui-ios` tạo project Xcode bằng XcodeGen và build IPA đã được thêm riêng trong `codemagic.yaml`.
-- Môi trường sửa source là Ubuntu, không có Swift/Xcode; vì vậy chưa xác nhận compile, preview thiết bị hoặc IPA. Cần chạy workflow thử trên Codemagic trước khi chọn workflow mới thay vì `cinemora-ios`.
+- Workflow `cinemora-ios` cài XcodeGen, sinh project Xcode, chạy `xcodebuild -list` kiểm tra scheme, rồi build IPA; Expo workflow đổi tên thành `cinemora-expo-ios`.
+- Môi trường sửa source là Ubuntu, không có Swift/Xcode; vì vậy chưa xác nhận compile, preview thiết bị hoặc IPA. Kiểm tra build Codemagic và chạy thử trên thiết bị vẫn là điều kiện trước khi phát hành.

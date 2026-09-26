@@ -3,7 +3,7 @@
 Source đã được chuyển từ mô hình **Capacitor bọc React/Vite WebView** sang **React Native/Expo native**. App nằm trong thư mục `mobile/`, còn backend Node/tRPC hiện có ở thư mục gốc vẫn được giữ lại. Giao diện iPhone không còn chạy từ `dist/public` và không còn phụ thuộc vào Capacitor.
 
 
-> Lưu ý: Source này ưu tiên build ứng dụng iOS bằng **Codemagic trên website**. Không cần và không nên build `.ipa` trực tiếp trong sandbox/local; chỉ commit toàn bộ repository lên GitHub rồi chạy workflow `cinemora-ios` trong Codemagic.
+> Bản hiện tại đặt **SwiftUI native** làm app mặc định cho Codemagic. Không cần build `.ipa` trong sandbox/local; commit toàn bộ repository lên GitHub rồi chạy workflow `cinemora-ios`.
 
 ## Cấu trúc mới
 
@@ -36,23 +36,23 @@ cd ios && pod install
 
 ## Build IPA trên Codemagic
 
-1. Đưa toàn bộ repository lên GitHub, bao gồm thư mục `mobile/` và file `codemagic.yaml`.
-2. Trong Codemagic chọn workflow **Cinemora Native iOS IPA**.
+1. Đưa toàn bộ repository lên GitHub, bao gồm thư mục `mobile-swiftui/`, `mobile/` và file `codemagic.yaml`.
+2. Trong Codemagic chọn workflow **Cinemora Native iOS IPA (SwiftUI)** (`cinemora-ios`). Đây là workflow mặc định; Codemagic cài XcodeGen, tạo project Xcode từ SwiftUI source, kiểm tra scheme rồi build IPA.
 3. Kết nối Apple Developer và cấu hình signing/provisioning cho Bundle ID `app.serval4238.taurus3258`.
-4. Chạy build. Codemagic sẽ tự sinh `mobile/ios`, chạy CocoaPods và xuất `.ipa` ở Artifacts.
+4. Chạy build. IPA xuất hiện trong Artifacts khi build thành công.
 
 Workflow hiện dùng signing của Codemagic (`xcode-project use-profiles`), không còn tắt code signing như bản Capacitor cũ. Vì vậy cần provisioning profile hợp lệ. Nếu muốn TestFlight/App Store, dùng distribution certificate và App Store provisioning profile; nếu cài trực tiếp lên thiết bị, dùng Ad Hoc profile có UDID.
 
 ## Thử nghiệm app SwiftUI native riêng
 
-Đã thêm prototype SwiftUI trong `mobile-swiftui/`, nhưng giữ nguyên Expo app và workflow hiện tại để có thể quay lại ngay nếu bản thử nghiệm chưa đạt.
+Ứng dụng SwiftUI nằm riêng trong `mobile-swiftui/`. App Expo trong `mobile/` vẫn được giữ làm phương án quay lại nếu bản SwiftUI chưa đạt.
 
 1. Push source cập nhật lên GitHub như các lần trước.
-2. Trong Codemagic, chọn workflow **Cinemora SwiftUI Native iOS IPA (trial)** (`cinemora-swiftui-ios`). Workflow này cài XcodeGen, tạo `Cinemora.xcodeproj`, ký rồi build IPA.
+2. Trong Codemagic, chọn workflow **Cinemora Native iOS IPA (SwiftUI)** (`cinemora-ios`). Workflow này cài XcodeGen, tạo `Cinemora.xcodeproj`, ký rồi build IPA.
 3. Kiểm tra IPA trên iPhone thật, đặc biệt đăng nhập API, ảnh, phát HLS và nguồn embed.
-4. Nếu bản thử nghiệm build lỗi hoặc chưa đạt, chọn lại workflow cũ **Cinemora Native iOS IPA** (`cinemora-ios`); app Expo cũ vẫn còn nguyên.
+4. Nếu bản SwiftUI build lỗi hoặc chưa đạt, chọn workflow **Cinemora Expo iOS IPA (fallback)** (`cinemora-expo-ios`); app Expo cũ vẫn còn nguyên.
 
-Prototype SwiftUI có giao diện native; dùng Liquid Glass hệ thống trên iOS 26 và material fallback trên iOS 17–25. Source được rà cú pháp và cấu hình trong môi trường Linux nhưng chưa compile bằng Xcode, chạy Simulator hay ký IPA; cần xem build Codemagic đầu tiên là bước kiểm thử bắt buộc trước khi chuyển hẳn sang SwiftUI.
+App SwiftUI có giao diện native; dùng Liquid Glass hệ thống trên iOS 26 và material fallback trên iOS 17–25. Source đã rà cú pháp và API trong môi trường Linux nhưng chưa compile bằng Xcode, chạy Simulator hay ký IPA; cần kiểm tra log và thử IPA Codemagic trước khi phát hành.
 
 ## Lưu ý backend
 

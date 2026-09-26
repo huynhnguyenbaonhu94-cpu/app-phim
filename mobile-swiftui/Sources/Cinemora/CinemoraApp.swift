@@ -16,9 +16,33 @@ struct CinemoraApp: App {
     }
 }
 
+private struct LaunchLoader: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Color.cinemaBackground.ignoresSafeArea()
+            Circle().fill(Color.cinemaAccent.opacity(0.08)).frame(width: 260, height: 260).blur(radius: 22)
+            VStack(spacing: 8) {
+                Image(systemName: "sparkles.tv.fill")
+                    .font(.system(size: 46, weight: .black))
+                    .foregroundStyle(Color.cinemaAccent)
+                    .scaleEffect(pulse ? 1.08 : 0.92)
+                    .opacity(pulse ? 0.78 : 1)
+                Text("CINEMORA").font(.system(size: 24, weight: .black, design: .rounded)).tracking(3).foregroundStyle(.white)
+                Text("PHIM HAY MỖI NGÀY").font(.system(size: 9, weight: .bold)).tracking(1.8).foregroundStyle(.white.opacity(0.52))
+                Capsule().fill(Color.cinemaAccent).frame(width: 88, height: 3).opacity(pulse ? 0.7 : 1).padding(.top, 20)
+            }
+        }
+        .onAppear { withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { pulse = true } }
+        .zIndex(100)
+    }
+}
+
 @MainActor
 struct CinemoraTabShell: View {
     @EnvironmentObject private var connectivity: ConnectivityMonitor
+    @State private var showLaunchLoader = true
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -52,8 +76,13 @@ struct CinemoraTabShell: View {
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+            if showLaunchLoader { LaunchLoader().transition(.opacity) }
         }
         .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
+        .task {
+            try? await Task.sleep(for: .milliseconds(1500))
+            withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
+        }
     }
 
     private func tabRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
