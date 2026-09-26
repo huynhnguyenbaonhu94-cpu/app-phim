@@ -110,7 +110,17 @@ final class PlaybackController: ObservableObject {
 
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
-        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let target = max(0, min(seconds, duration > 0 ? duration : seconds))
+        currentTime = target
+        let time = CMTime(seconds: target, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard finished, let self else { return }
+            Task { @MainActor in
+                let actual = self.player.currentTime().seconds
+                guard actual.isFinite else { return }
+                self.currentTime = actual
+            }
+        }
     }
 }
 
@@ -161,7 +171,9 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
-                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
+                    PosterArt(url: movie.backdropURL).ignoresSafeArea()
+                        .overlay(Color.black.opacity(playback.isLoading ? 0.28 : 0.05))
+                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().opacity(playback.isLoading ? 0.12 : 1).accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
@@ -173,7 +185,15 @@ struct CinemaPlayerScreen: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
+                        if playback.isLoading {
+                            VStack(spacing: 8) {
+                                ProgressView().tint(.cinemaAccent).scaleEffect(1.15)
+                                Text(resumeSeconds > 0 ? "Đang tiếp tục từ \(formatTime(Double(resumeSeconds)))…" : "Đang tải nguồn phát…")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                                Text("Bạn có thể chờ trong giây lát").font(.system(size: 10)).foregroundStyle(.white.opacity(0.62))
+                            }
+                            .padding(.horizontal, 20).padding(.vertical, 16).cinemaGlass(in: RoundedRectangle(cornerRadius: 18), tint: .black.opacity(0.52))
+                        }
                         if let error = playback.errorMessage {
                             errorCard(error)
                         } else if episode?.streamURL == nil && episode?.embedURL == nil {
@@ -305,7 +325,7 @@ struct CinemaPlayerScreen: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Text(formatTime(isScrubbing ? scrubValue : playback.currentTime)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .leading)
-                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in if !editing { playback.seek(to: scrubValue); isScrubbing = false; scheduleHide() } })
+                Slider(value: Binding(get: { isScrubbing ? scrubValue : min(max(0, playback.currentTime), max(1, playback.duration)) }, set: { value in if !isScrubbing { scrubValue = value }; scrubValue = value }), in: 0...max(1, playback.duration), onEditingChanged: { editing in if editing { scrubValue = min(max(0, playback.currentTime), max(1, playback.duration)); isScrubbing = true } else { playback.seek(to: scrubValue); isScrubbing = false; scheduleHide() } })
                     .tint(Color.cinemaAccent)
                 Text(formatTime(playback.duration)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .trailing)
                 Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {

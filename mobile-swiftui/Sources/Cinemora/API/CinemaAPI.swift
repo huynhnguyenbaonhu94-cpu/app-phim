@@ -87,8 +87,8 @@ struct CinemaAPI {
         let result = envelope["result"] as? [String: Any]
         let resultData = result?["data"] as? [String: Any]
         let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
-        guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
-        let decodedData = try JSONSerialization.data(withJSONObject: payload)
+        guard JSONSerialization.isValidJSONObject(payload) || payload is Bool || payload is NSNumber || payload is String else { throw APIError.invalidResponse }
+        let decodedData = try JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed])
         do { return try JSONDecoder().decode(T.self, from: decodedData) }
         catch { throw APIError.decoding(error.localizedDescription) }
     }
@@ -118,8 +118,8 @@ struct CinemaAPI {
         let result = envelope["result"] as? [String: Any]
         let resultData = result?["data"] as? [String: Any]
         let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
-        guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
-        return try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: payload))
+        guard JSONSerialization.isValidJSONObject(payload) || payload is Bool || payload is NSNumber || payload is String else { throw APIError.invalidResponse }
+        return try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed]))
     }
 }
 

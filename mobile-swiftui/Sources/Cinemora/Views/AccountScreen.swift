@@ -10,6 +10,7 @@ struct AccountScreen: View {
     @State private var history: [WatchHistoryItem] = []
     @State private var loading = false
     @State private var errorMessage: String?
+    @State private var accountMessage: String?
     private let api = CinemaAPI.shared
 
     var body: some View {
@@ -29,6 +30,10 @@ struct AccountScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await loadSession() }
+        .onAppear { if user != nil { Task { await loadAccountData() } } }
+        .alert("Tài khoản", isPresented: Binding(get: { accountMessage != nil }, set: { if !$0 { accountMessage = nil } })) {
+            Button("Đóng", role: .cancel) { accountMessage = nil }
+        } message: { Text(accountMessage ?? "") }
     }
 
     private var authView: some View {
@@ -114,13 +119,17 @@ struct AccountScreen: View {
     }
 
     private func deleteFavorite(_ item: FavoriteMovie) async {
-        try? await api.removeFavorite(slug: item.movieSlug)
-        favorites.removeAll { $0.id == item.id }
+        do {
+            try await api.removeFavorite(slug: item.movieSlug)
+            favorites.removeAll { $0.id == item.id }
+        } catch { accountMessage = error.localizedDescription }
     }
 
     private func deleteHistory(_ item: WatchHistoryItem) async {
-        try? await api.removeHistory(id: item.id)
-        history.removeAll { $0.id == item.id }
+        do {
+            try await api.removeHistory(id: item.id)
+            history.removeAll { $0.id == item.id }
+        } catch { accountMessage = error.localizedDescription }
     }
 
     private func emptyRow(_ text: String, icon: String) -> some View { Label(text, systemImage: icon).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.5)).frame(maxWidth: .infinity, alignment: .leading).padding(15).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 15)) }
