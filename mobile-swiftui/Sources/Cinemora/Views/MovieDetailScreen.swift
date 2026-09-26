@@ -94,7 +94,7 @@ struct MovieDetailScreen: View {
     }
 
     private func applyResumeSelection() {
-        guard movie != nil, !didApplyResume else { return }
+        guard let movie, !didApplyResume else { return }
         let restoredServerIndex = initialSourceName.flatMap { source in servers.firstIndex(where: { $0.name == source }) } ?? 0
         selectedServer = restoredServerIndex
         let currentServer = servers.indices.contains(restoredServerIndex) ? servers[restoredServerIndex] : nil
