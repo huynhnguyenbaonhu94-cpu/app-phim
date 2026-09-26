@@ -85,7 +85,7 @@ export async function removeFavorite(userId: number, movieSlug: string) {
   return true;
 }
 
-export async function recordWatchHistory(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null; episodeSlug?: string; episodeName?: string; watchedSeconds?: number; durationSeconds?: number }) {
+export async function recordWatchHistory(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null; episodeSlug?: string; episodeName?: string; sourceName?: string; watchedSeconds?: number; durationSeconds?: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const safeEpisode = input.episodeSlug || "movie";
@@ -96,6 +96,7 @@ export async function recordWatchHistory(input: { userId: number; movieSlug: str
     year: input.year || null,
     episodeSlug: safeEpisode,
     episodeName: input.episodeName || "Phim",
+    sourceName: input.sourceName || null,
     watchedSeconds: Math.max(0, Math.floor(input.watchedSeconds || 0)),
     durationSeconds: Math.max(0, Math.floor(input.durationSeconds || 0)),
     lastWatchedAt: new Date(),
@@ -106,6 +107,7 @@ export async function recordWatchHistory(input: { userId: number; movieSlug: str
       posterUrl: input.posterUrl || null,
       year: input.year || null,
       episodeName: input.episodeName || "Phim",
+      sourceName: input.sourceName || null,
       watchedSeconds: Math.max(0, Math.floor(input.watchedSeconds || 0)),
       durationSeconds: Math.max(0, Math.floor(input.durationSeconds || 0)),
       lastWatchedAt: sql`CURRENT_TIMESTAMP`,
@@ -118,4 +120,11 @@ export async function listWatchHistory(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(movieWatchHistory).where(eq(movieWatchHistory.userId, userId)).orderBy(desc(movieWatchHistory.lastWatchedAt)).limit(100);
+}
+
+export async function removeWatchHistory(userId: number, historyId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(movieWatchHistory).where(and(eq(movieWatchHistory.userId, userId), eq(movieWatchHistory.id, historyId)));
+  return true;
 }

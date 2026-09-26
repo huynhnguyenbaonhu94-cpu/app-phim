@@ -6,6 +6,10 @@ struct CinemoraApp: App {
     @StateObject private var store = CinemaStore()
     @StateObject private var connectivity = ConnectivityMonitor()
 
+    init() {
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024, diskPath: "cinemora-images")
+    }
+
     var body: some Scene {
         WindowGroup {
             CinemoraTabShell()
@@ -41,7 +45,9 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
+    @EnvironmentObject private var store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showLaunchLoader = true
 
     var body: some View {
@@ -82,6 +88,9 @@ struct CinemoraTabShell: View {
         .task {
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await store.refreshHome() } }
         }
     }
 

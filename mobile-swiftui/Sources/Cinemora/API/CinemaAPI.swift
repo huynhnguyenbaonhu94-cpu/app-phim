@@ -45,9 +45,11 @@ struct CinemaAPI {
     func isFavorite(slug: String) async throws -> Bool { try await query("account.isFavorite", input: ["movieSlug": slug]) }
     func addFavorite(movie: Movie) async throws { _ = try await mutate("account.addFavorite", input: movieSnapshot(movie)) as Bool }
     func removeFavorite(slug: String) async throws { _ = try await mutate("account.removeFavorite", input: ["movieSlug": slug]) as Bool }
-    func recordHistory(movie: Movie, episode: MovieEpisode?, watchedSeconds: Int, durationSeconds: Int) async throws {
+    func removeHistory(id: Int) async throws { _ = try await mutate("account.removeHistory", input: ["id": id]) as Bool }
+    func recordHistory(movie: Movie, episode: MovieEpisode?, sourceName: String?, watchedSeconds: Int, durationSeconds: Int) async throws {
         var payload = movieSnapshot(movie)
         if let episode { payload["episodeSlug"] = episode.slug; payload["episodeName"] = episode.name }
+        if let sourceName { payload["sourceName"] = sourceName }
         payload["watchedSeconds"] = watchedSeconds
         payload["durationSeconds"] = durationSeconds
         _ = try await mutate("account.recordHistory", input: payload) as Bool
@@ -147,6 +149,8 @@ struct WatchHistoryItem: Decodable, Identifiable {
     let movieName: String
     let posterUrl: String?
     let episodeName: String?
+    let episodeSlug: String?
+    let sourceName: String?
     let watchedSeconds: Int
     let durationSeconds: Int
     let lastWatchedAt: String

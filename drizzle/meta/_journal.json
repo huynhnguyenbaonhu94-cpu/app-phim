@@ -22,6 +22,13 @@
       "when": 1789806072679,
       "tag": "0002_flat_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789810000000,
+      "tag": "0003_add_history_source",
+      "breakpoints": true
     }
   ]
 }

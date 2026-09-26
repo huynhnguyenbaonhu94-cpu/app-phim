@@ -2,6 +2,10 @@ import SwiftUI
 
 struct MovieDetailScreen: View {
     let slug: String
+    let initialEpisodeSlug: String?
+    let initialSourceName: String?
+    let resumeSeconds: Int
+    let autoPlay: Bool
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
@@ -9,7 +13,17 @@ struct MovieDetailScreen: View {
     @State private var showPlayer = false
     @State private var favorite = false
     @State private var favoriteBusy = false
+    @State private var didApplyResume = false
+    @State private var favoriteMessage: String?
     private let api = CinemaAPI.shared
+
+    init(slug: String, initialEpisodeSlug: String? = nil, initialSourceName: String? = nil, resumeSeconds: Int = 0, autoPlay: Bool = false) {
+        self.slug = slug
+        self.initialEpisodeSlug = initialEpisodeSlug
+        self.initialSourceName = initialSourceName
+        self.resumeSeconds = resumeSeconds
+        self.autoPlay = autoPlay
+    }
 
     private var movie: Movie? { store.detailMovie }
     private var servers: [MovieServer] { movie?.servers ?? [] }
@@ -66,14 +80,27 @@ struct MovieDetailScreen: View {
             store.loadDetail(slug: slug)
             favorite = (try? await api.isFavorite(slug: slug)) ?? false
         }
-        .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
+        .onChange(of: store.detailMovie?.id) { _, _ in applyResumeSelection() }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
         .fullScreenCover(isPresented: $showPlayer) {
             if let movie, episode != nil {
-                CinemaPlayerScreen(movie: movie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode)
+                CinemaPlayerScreen(movie: movie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode, resumeSeconds: resumeSeconds)
                     .preferredColorScheme(.dark)
             }
         }
+        .alert("Yêu thích phim", isPresented: Binding(get: { favoriteMessage != nil }, set: { if !$0 { favoriteMessage = nil } })) {
+            Button("Đóng", role: .cancel) { favoriteMessage = nil }
+        } message: { Text(favoriteMessage ?? "") }
+    }
+
+    private func applyResumeSelection() {
+        guard let movie, !didApplyResume else { return }
+        let restoredServerIndex = initialSourceName.flatMap { source in servers.firstIndex(where: { $0.name == source }) } ?? 0
+        selectedServer = restoredServerIndex
+        let currentServer = servers.indices.contains(restoredServerIndex) ? servers[restoredServerIndex] : nil
+        if let episodeSlug = initialEpisodeSlug, let episodeIndex = currentServer?.episodes.firstIndex(where: { $0.slug == episodeSlug }) { selectedEpisode = episodeIndex }
+        didApplyResume = true
+        if autoPlay { Task { try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }; showPlayer = true } }
     }
 
     private func toggleFavorite(_ movie: Movie) async {
@@ -82,7 +109,8 @@ struct MovieDetailScreen: View {
             if favorite { try await api.removeFavorite(slug: movie.slug) }
             else { try await api.addFavorite(movie: movie) }
             favorite.toggle()
-        } catch { }
+            favoriteMessage = favorite ? "Đã thêm phim vào danh sách yêu thích." : "Đã xóa phim khỏi danh sách yêu thích."
+        } catch { favoriteMessage = error.localizedDescription }
         favoriteBusy = false
     }
 
@@ -244,20 +272,7 @@ struct MovieDetailScreen: View {
 
     private func actorCard(_ profile: MovieActorProfile) -> some View {
         VStack(spacing: 7) {
-            AsyncImage(url: profile.imageURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .empty, .failure:
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Color.cinemaAccent.opacity(0.72))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.white.opacity(0.08))
-                @unknown default:
-                    EmptyView()
-                }
-            }
+            CinemaRemoteImage(url: profile.imageURL)
             .frame(width: 72, height: 88)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14), lineWidth: 0.7))

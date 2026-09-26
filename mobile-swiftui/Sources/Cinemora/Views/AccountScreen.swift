@@ -69,19 +69,58 @@ struct AccountScreen: View {
             .padding(18).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.06))
             SectionHeading(eyebrow: "ĐÃ LƯU", title: "Phim yêu thích")
             if favorites.isEmpty { emptyRow("Chưa có phim yêu thích", icon: "heart") }
-            else { ForEach(favorites) { item in itemRow(title: item.movieName, subtitle: item.year.map { String($0) } ?? "Phim", icon: "heart.fill") } }
+            else { ForEach(favorites) { item in favoriteRow(item) } }
             SectionHeading(eyebrow: "GẦN ĐÂY", title: "Lịch sử xem")
             if history.isEmpty { emptyRow("Chưa có lịch sử xem", icon: "clock") }
-            else { ForEach(history) { item in itemRow(title: item.movieName, subtitle: item.episodeName ?? "Phim", icon: "clock.arrow.circlepath") } }
+            else { ForEach(history) { item in historyRow(item) } }
         }
     }
 
-    private func itemRow(title: String, subtitle: String, icon: String) -> some View {
+    private func favoriteRow(_ item: FavoriteMovie) -> some View {
+        HStack(spacing: 8) {
+            NavigationLink { MovieDetailScreen(slug: item.movieSlug) } label: { itemContent(title: item.movieName, subtitle: item.year.map { String($0) } ?? "Phim", icon: "heart.fill") }
+            deleteButton { await deleteFavorite(item) }
+        }
+    }
+
+    private func historyRow(_ item: WatchHistoryItem) -> some View {
+        HStack(spacing: 8) {
+            NavigationLink {
+                MovieDetailScreen(slug: item.movieSlug, initialEpisodeSlug: item.episodeSlug, initialSourceName: item.sourceName, resumeSeconds: item.watchedSeconds, autoPlay: true)
+            } label: {
+                itemContent(title: item.movieName, subtitle: "\(item.episodeName ?? "Phim") · \(item.sourceName ?? "Nguồn mặc định") · \(formatProgress(item))", icon: "clock.arrow.circlepath")
+            }
+            deleteButton { await deleteHistory(item) }
+        }
+    }
+
+    private func itemContent(title: String, subtitle: String, icon: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundStyle(Color.cinemaAccent).frame(width: 38, height: 38).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
-            VStack(alignment: .leading, spacing: 3) { Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1); Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)) }
-            Spacer()
+            VStack(alignment: .leading, spacing: 3) { Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1); Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)).lineLimit(2) }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.28))
         }.padding(12).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func deleteButton(action: @escaping () async -> Void) -> some View {
+        Button { Task { await action() } } label: { Image(systemName: "trash").font(.system(size: 12, weight: .bold)).foregroundStyle(.red.opacity(0.85)).frame(width: 42, height: 50).background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14)) }
+            .buttonStyle(.plain).accessibilityLabel("Xóa")
+    }
+
+    private func formatProgress(_ item: WatchHistoryItem) -> String {
+        guard item.durationSeconds > 0 else { return "Đã lưu" }
+        return "\(Int(Double(item.watchedSeconds) / Double(item.durationSeconds) * 100))%"
+    }
+
+    private func deleteFavorite(_ item: FavoriteMovie) async {
+        try? await api.removeFavorite(slug: item.movieSlug)
+        favorites.removeAll { $0.id == item.id }
+    }
+
+    private func deleteHistory(_ item: WatchHistoryItem) async {
+        try? await api.removeHistory(id: item.id)
+        history.removeAll { $0.id == item.id }
     }
 
     private func emptyRow(_ text: String, icon: String) -> some View { Label(text, systemImage: icon).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.5)).frame(maxWidth: .infinity, alignment: .leading).padding(15).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 15)) }

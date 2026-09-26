@@ -44,7 +44,7 @@ final class PlaybackController: ObservableObject {
         itemObservation = nil
     }
 
-    func load(_ episode: MovieEpisode) {
+    func load(_ episode: MovieEpisode, startAt: Double = 0) {
         loadTask?.cancel()
         activeRequestID = UUID()
         let requestID = activeRequestID
@@ -67,6 +67,7 @@ final class PlaybackController: ObservableObject {
                 switch item.status {
                 case .readyToPlay:
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
+                    if startAt > 0 { self.player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false
                     self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
@@ -119,6 +120,7 @@ struct CinemaPlayerScreen: View {
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
+    let resumeSeconds: Int
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playback = PlaybackController()
     @State private var serverIndex = 0
@@ -142,11 +144,12 @@ struct CinemaPlayerScreen: View {
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeSeconds: Int = 0) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
+        self.resumeSeconds = max(0, resumeSeconds)
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
         _serverIndex = State(initialValue: server)
@@ -232,7 +235,7 @@ struct CinemaPlayerScreen: View {
                 let total = Int(playback.duration.rounded())
                 let movieSnapshot = movie
                 let episodeSnapshot = episode
-                Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, watchedSeconds: watched, durationSeconds: total) }
+                Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, sourceName: server?.name, watchedSeconds: watched, durationSeconds: total) }
                 playback.shutdown(); forcePortrait()
             }
             .statusBarHidden(true)
@@ -405,7 +408,8 @@ struct CinemaPlayerScreen: View {
 
     private func loadCurrentEpisode() {
         guard let episode else { return }
-        playback.load(episode)
+        let resume = serverIndex == initialServer && episodeIndex == initialEpisode ? Double(resumeSeconds) : 0
+        playback.load(episode, startAt: resume)
     }
 
     private func toggleControls() {

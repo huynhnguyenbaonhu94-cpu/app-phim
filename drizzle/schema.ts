@@ -39,6 +39,7 @@ export const movieWatchHistory = mysqlTable("movie_watch_history", {
   year: int("year"),
   episodeSlug: varchar("episodeSlug", { length: 140 }),
   episodeName: varchar("episodeName", { length: 255 }),
+  sourceName: varchar("sourceName", { length: 255 }),
   watchedSeconds: int("watchedSeconds").default(0).notNull(),
   durationSeconds: int("durationSeconds").default(0).notNull(),
   lastWatchedAt: timestamp("lastWatchedAt").defaultNow().notNull(),
