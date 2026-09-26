@@ -93,9 +93,15 @@ struct AccountScreen: View {
     }
 
     private func submitAuth() async {
-        loading = true; errorMessage = nil
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        errorMessage = nil
+        guard cleanEmail.contains("@"), cleanEmail.contains(".") else { errorMessage = "Vui lòng nhập email hợp lệ."; return }
+        guard password.count >= 8 else { errorMessage = "Mật khẩu phải có ít nhất 8 ký tự."; return }
+        if registerMode && cleanName.count < 2 { errorMessage = "Tên hiển thị phải có ít nhất 2 ký tự."; return }
+        loading = true
         do {
-            let account = registerMode ? try await api.register(name: name, email: email, password: password) : try await api.login(email: email, password: password)
+            let account = registerMode ? try await api.register(name: cleanName, email: cleanEmail, password: password) : try await api.login(email: cleanEmail, password: password)
             await MainActor.run { user = account; password = "" }
             await loadAccountData()
         } catch { errorMessage = error.localizedDescription }

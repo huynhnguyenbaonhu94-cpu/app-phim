@@ -102,7 +102,14 @@ struct CinemaAPI {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input])
         request.timeoutInterval = 25
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1) }
+        guard let http = response as? HTTPURLResponse else { throw APIError.http(-1) }
+        guard (200..<300).contains(http.statusCode) else {
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = root["error"] as? [String: Any],
+               let json = error["json"] as? [String: Any],
+               let message = json["message"] as? String { throw APIError.server(message) }
+            throw APIError.http(http.statusCode)
+        }
         let root = try JSONSerialization.jsonObject(with: data)
         guard let envelope = root as? [String: Any] else { throw APIError.invalidResponse }
         if let error = envelope["error"] as? [String: Any], let message = (error["json"] as? [String: Any])?["message"] as? String { throw APIError.server(message) }
