@@ -64,3 +64,14 @@ Backend phải cho phép request từ app native và vẫn phục vụ route `ht
 
 - Nhãn phim trong fullscreen nằm trong hàng điều khiển, dùng phần không gian co giãn ở giữa title và các nút; tên dài tự cắt bằng dấu ba chấm thay vì phủ icon.
 - Icon loa giờ đổi trạng thái tiếng ngay ở lần chạm đầu tiên. Bật tiếng phục hồi mức âm lượng gần nhất; kéo thanh về 0 rồi chạm icon cũng khôi phục mức đó. Thanh chỉnh âm lượng vẫn mở tạm thời khi chạm icon.
+
+## Patch v7 — volume controls và error fullscreen
+
+- Chạm icon loa ngoài chỉ mở/ẩn thanh chỉnh âm lượng; không còn đổi mute ngoài ý muốn. Thanh kéo có nút mute/unmute riêng với hit-target lớn, giữ chế độ một chạm và khôi phục âm lượng gần nhất.
+- Trạng thái lỗi trong fullscreen có nút `Trở lại` ở góc trên trái để thoát fullscreen về player ở màn chi tiết.
+
+## Patch v8 — thanh điều hướng Liquid Glass
+
+- Thay tab bar mặc định bằng custom tab bar kính mờ có lớp specular, viền sáng, capsule active và chấm chỉ báo hoạt động.
+- Chuyển động đổi tab dùng spring native-driver cho icon/capsule; khi cuộn nội dung xuống, thanh trượt khỏi cạnh dưới và mờ nhẹ; vuốt lên hoặc về đầu trang thì trượt lại.
+- Không thêm package animation mới; dùng `Animated` của React Native cùng Expo Blur.

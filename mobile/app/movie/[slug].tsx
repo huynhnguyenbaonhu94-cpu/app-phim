@@ -196,8 +196,12 @@ function PlayerControls({
   const revealVolume = () => { setVolumeOpen(true); if (volumeTimer.current) clearTimeout(volumeTimer.current); volumeTimer.current = setTimeout(() => setVolumeOpen(false), 3500); };
   const handleVolumeIcon = () => {
     onInteraction();
-    onMute();
-    revealVolume();
+    if (volumeOpen) {
+      if (volumeTimer.current) clearTimeout(volumeTimer.current);
+      setVolumeOpen(false);
+    } else {
+      revealVolume();
+    }
   };
   return <View style={[playerStyles.controls, fullscreen && playerStyles.fullscreenControls]}>
     <View style={playerStyles.topControls}>
@@ -235,8 +239,14 @@ function PlayerControls({
       </Pressable>
     </View>
     <View style={[playerStyles.adjustmentControls, fullscreen && playerStyles.fullscreenAdjustmentControls]}>
-      {volumeOpen && <View style={playerStyles.volumePopover}><Text style={playerStyles.volumePercent}>{Math.round(volume * 100)}%</Text><VolumeSlider value={volume} onChange={value => { onVolumeChange(value - volumeRef.current); }} onInteraction={revealVolume} /></View>}
-      <Pressable accessibilityRole="button" accessibilityLabel={muted || volume === 0 ? "Bật âm thanh" : "Tắt âm thanh"} accessibilityHint="Chạm một lần để bật hoặc tắt tiếng" onPress={handleVolumeIcon} style={playerStyles.volumeButton}><Ionicons name={muted || volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"} size={22} color={C.text} /></Pressable>
+      {volumeOpen && <View style={playerStyles.volumePopover}>
+        <Text style={playerStyles.volumePercent}>{Math.round(volume * 100)}%</Text>
+        <VolumeSlider value={volume} onChange={value => { onVolumeChange(value - volumeRef.current); }} onInteraction={revealVolume} />
+        <Pressable accessibilityRole="button" accessibilityLabel={muted || volume === 0 ? "Bật âm thanh" : "Tắt âm thanh"} hitSlop={6} onPress={onMute} style={playerStyles.popoverMuteButton}>
+          <Ionicons name={muted || volume === 0 ? "volume-mute" : "volume-high"} size={18} color={C.text} />
+        </Pressable>
+      </View>}
+      <Pressable accessibilityRole="button" accessibilityLabel={volumeOpen ? "Ẩn thanh âm lượng" : "Hiện thanh âm lượng"} accessibilityHint="Chạm để mở hoặc đóng thanh chỉnh âm lượng" onPress={handleVolumeIcon} style={playerStyles.volumeButton}><Ionicons name={muted || volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"} size={22} color={C.text} /></Pressable>
     </View>
     <View style={playerStyles.bottomControls}>
       <Text style={[playerStyles.timeText, fullscreen && playerStyles.fullscreenTime]}>{formatTime(currentTime)}</Text>
@@ -770,6 +780,7 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     />}
     {status === "loading" && <View pointerEvents="none" style={playerStyles.centerStatus}><ActivityIndicator color={C.accent} size="large" /><Text style={playerStyles.statusText}>{fullscreenRef.current ? "Đang chuyển tập / nguồn…" : "Đang tải nguồn phát…"}</Text></View>}
     {status === "error" ? <View style={playerStyles.errorLayer}>
+      {large && fullscreen && <Pressable accessibilityRole="button" accessibilityLabel="Trở lại trình phát" onPress={() => { void exitFullscreen(); }} style={playerStyles.errorBackButton}><Ionicons name="arrow-back" size={18} color={C.text} /><Text style={playerStyles.errorBackText}>Trở lại</Text></Pressable>}
       <Ionicons name="cloud-offline-outline" color={C.text} size={28} />
       <Text style={playerStyles.errorTitle}>Không thể phát video</Text>
       <Text style={playerStyles.statusText} numberOfLines={2}>{message}</Text>
@@ -874,7 +885,8 @@ const playerStyles = StyleSheet.create({
   adjustmentControls: { position: "absolute", right: 14, bottom: 56, zIndex: 4, alignItems: "flex-end" },
   fullscreenAdjustmentControls: { right: 28, bottom: 62 },
   volumeButton: { width: 44, height: 44, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(10,13,18,0.76)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
-  volumePopover: { minWidth: 156, flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 8, paddingHorizontal: 11, height: 42, borderRadius: 13, backgroundColor: "rgba(10,13,18,0.88)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  volumePopover: { minWidth: 212, flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 8, paddingHorizontal: 11, height: 48, borderRadius: 15, backgroundColor: "rgba(20,25,37,0.96)", borderWidth: 1, borderColor: "rgba(225,232,255,0.2)" },
+  popoverMuteButton: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   volumePercent: { color: C.text, fontSize: 10, fontWeight: "800", minWidth: 31, textAlign: "center" },
   volumeSliderTouch: { flex: 1, height: 28, justifyContent: "center" }, volumeTrack: { height: 4, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.26)", position: "relative" }, volumeFill: { height: 4, borderRadius: 3, backgroundColor: C.accent }, volumeThumb: { width: 12, height: 12, borderRadius: 6, backgroundColor: C.accent, position: "absolute", top: -4, marginLeft: -6 },
   pickerLayer: { ...StyleSheet.absoluteFillObject, zIndex: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 14 },
@@ -910,6 +922,8 @@ const playerStyles = StyleSheet.create({
   progressThumb: { width: 11, height: 11, borderRadius: 6, backgroundColor: C.accent, position: "absolute", top: -4, marginLeft: -5.5 },
   lockBadge: { position: "absolute", top: 12, right: 12, zIndex: 5, width: 54, height: 54, borderRadius: 27, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,18,24,0.9)", borderWidth: 1, borderColor: "rgba(255,255,255,0.28)" },
   errorLayer: { ...StyleSheet.absoluteFillObject, zIndex: 4, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(5,7,10,0.92)", padding: 18 },
+  errorBackButton: { position: "absolute", top: 18, left: 18, zIndex: 2, minHeight: 42, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 13, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  errorBackText: { color: C.text, fontSize: 12, fontWeight: "800" },
   errorTitle: { color: C.text, fontSize: 15, fontWeight: "800", marginTop: 8 },
   retryButton: { marginTop: 10, borderRadius: 13, backgroundColor: C.accent, paddingHorizontal: 15, paddingVertical: 8 },
   retryText: { color: "#11150a", fontSize: 11, fontWeight: "900" },
