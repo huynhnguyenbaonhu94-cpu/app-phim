@@ -23,9 +23,13 @@ struct GlassSurface<S: Shape>: ViewModifier {
     let tint: Color
 
     func body(content: Content) -> some View {
-        content.background(.ultraThinMaterial, in: shape)
-            .background(tint.opacity(0.5), in: shape)
-            .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 0.8))
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.tint(tint), in: shape)
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+                .background(tint.opacity(0.5), in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.16), lineWidth: 0.8))
+        }
     }
 }
 

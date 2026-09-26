@@ -148,8 +148,8 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
     private let api = CinemaAPI.shared
 
-    private enum PickerKind: Equatable { case episodes, sources, fit, speed }
-    fileprivate enum VideoFit: String, CaseIterable, Hashable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
+    private enum PickerKind { case episodes, sources }
+    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
@@ -244,6 +244,11 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                forceLandscape()
+            }
             .onDisappear {
                 hideTask?.cancel(); lockHideTask?.cancel()
                 let watched = Int(playback.currentTime.rounded())
@@ -251,7 +256,7 @@ struct CinemaPlayerScreen: View {
                 let movieSnapshot = movie
                 let episodeSnapshot = episode
                 Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, sourceName: server?.name, watchedSeconds: watched, durationSeconds: total) }
-                playback.shutdown()
+                playback.shutdown(); forcePortrait()
             }
             .statusBarHidden(true)
         }
@@ -273,14 +278,22 @@ struct CinemaPlayerScreen: View {
                 Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
             }
-            Button { withAnimation { picker = .fit }; controlsVisible = true } label: {
-                Image(systemName: "rectangle.on.rectangle").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).frame(width: 42, height: 42)
+            Menu {
+                ForEach(VideoFit.allCases, id: \.self) { fit in
+                    Button { videoFit = fit } label: { Label(fit.rawValue, systemImage: fit == videoFit ? "checkmark" : "rectangle") }
+                }
+            } label: {
+                Image(systemName: "rectangle.on.rectangle").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
             }
-            .buttonStyle(.plain).contentShape(Circle()).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
-            Button { withAnimation { picker = .speed }; controlsVisible = true } label: {
-                Image(systemName: "speedometer").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).frame(width: 42, height: 42)
+            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
+            Menu {
+                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
+                }
+            } label: {
+                Image(systemName: "speedometer").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
             }
-            .buttonStyle(.plain).contentShape(Circle()).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
+            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
             Button { lockControls() } label: {
                 Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
             }
@@ -364,9 +377,9 @@ struct CinemaPlayerScreen: View {
                 Capsule().fill(.white.opacity(0.36)).frame(width: 40, height: 4).padding(.top, 3)
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        SectionEyebrow(text: pickerEyebrow(for: kind))
-                        Text(pickerTitle(for: kind)).font(.system(size: 22, weight: .black, design: .rounded)).foregroundStyle(.white)
-                        Text(pickerSubtitle(for: kind)).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.57)).lineLimit(1)
+                        SectionEyebrow(text: kind == .episodes ? "CINEMORA · TẬP PHIM" : "CINEMORA · CHẤT LƯỢNG")
+                        Text(kind == .episodes ? "Danh sách tập" : "Chọn nguồn phát").font(.system(size: 22, weight: .black, design: .rounded)).foregroundStyle(.white)
+                        Text("Đang phát: \(kind == .episodes ? (episode?.name ?? "") : (server?.name ?? ""))").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.57)).lineLimit(1)
                     }
                     Spacer()
                     Button { withAnimation { picker = nil }; scheduleHide() } label: { Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white).frame(width: 40, height: 40).background(.white.opacity(0.1), in: Circle()) }.buttonStyle(.plain).accessibilityLabel("Đóng danh sách")
@@ -378,30 +391,14 @@ struct CinemaPlayerScreen: View {
                                     pickerRow(number: index + 1, title: episodes[index].name, selected: index == episodeIndex) {
                                         episodeIndex = index
                                         controlsVisible = true
-                                        withAnimation { picker = nil }
                                     }
                             }
-                        } else if kind == .sources {
+                        } else {
                             ForEach(servers.indices, id: \.self) { index in
                                     pickerRow(number: index + 1, title: servers[index].name, selected: index == serverIndex) {
                                         serverIndex = index
                                         controlsVisible = true
-                                        withAnimation { picker = nil }
                                     }
-                            }
-                        } else if kind == .fit {
-                            ForEach(VideoFit.allCases, id: \.self) { value in
-                                pickerRow(number: VideoFit.allCases.firstIndex(of: value)! + 1, title: value.rawValue, selected: value == videoFit) {
-                                    videoFit = value
-                                    withAnimation { picker = nil }
-                                }
-                            }
-                        } else {
-                            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                                pickerRow(number: Int(rate * 2), title: rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", selected: playback.playbackRate == Float(rate)) {
-                                    playback.setPlaybackRate(Float(rate))
-                                    withAnimation { picker = nil }
-                                }
                             }
                         }
                     }
@@ -414,33 +411,6 @@ struct CinemaPlayerScreen: View {
             .padding(.horizontal, 22)
         }
         .zIndex(10)
-    }
-
-    private func pickerEyebrow(for kind: PickerKind) -> String {
-        switch kind {
-        case .episodes: return "CINEMORA · TẬP PHIM"
-        case .sources: return "CINEMORA · CHẤT LƯỢNG"
-        case .fit: return "CINEMORA · KHUNG HÌNH"
-        case .speed: return "CINEMORA · TỐC ĐỘ"
-        }
-    }
-
-    private func pickerTitle(for kind: PickerKind) -> String {
-        switch kind {
-        case .episodes: return "Danh sách tập"
-        case .sources: return "Chọn nguồn phát"
-        case .fit: return "Tỷ lệ khung hình"
-        case .speed: return "Tốc độ phát"
-        }
-    }
-
-    private func pickerSubtitle(for kind: PickerKind) -> String {
-        switch kind {
-        case .episodes: return "Đang phát: \(episode?.name ?? "")"
-        case .sources: return "Đang phát: \(server?.name ?? "")"
-        case .fit: return "Hiện tại: \(videoFit.rawValue)"
-        case .speed: return "Hiện tại: \(playback.playbackRate, specifier: "%g")x"
-        }
     }
 
     private func pickerRow(number: Int, title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -509,6 +479,25 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    private func forceLandscape() {
+        forceOrientation(.landscapeRight)
+    }
+
+    private func forcePortrait() {
+        forceOrientation(.portrait)
+    }
+
+    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+           #available(iOS 16.0, *) {
+            let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        }
+        UIViewController.attemptRotationToDeviceOrientation()
+    }
+
     private func formatTime(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
@@ -534,11 +523,6 @@ private struct EmbedWebPlayer: UIViewRepresentable {
 private final class PlayerLayerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        playerLayer.frame = bounds
-    }
 }
 
 private struct NativeVideoSurface: UIViewRepresentable {

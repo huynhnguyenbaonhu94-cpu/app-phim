@@ -129,10 +129,6 @@ struct AccountScreen: View {
         do {
             try await api.removeHistory(id: item.id)
             history.removeAll { $0.id == item.id }
-            clearLocalHistoryTombstone(item.id)
-        } catch APIError.procedureUnavailable {
-            saveLocalHistoryTombstone(item.id)
-            history.removeAll { $0.id == item.id }
         } catch { accountMessage = error.localizedDescription }
     }
 
@@ -164,29 +160,12 @@ struct AccountScreen: View {
         async let saved = api.favorites()
         async let watched = api.history()
         if let values = try? await saved { favorites = values }
-        if let values = try? await watched { history = values.filter { !localHistoryTombstones.contains($0.id) } }
+        if let values = try? await watched { history = values }
     }
 
     private func signOut() async {
         try? await api.logout()
         user = nil; favorites = []; history = []
-    }
-
-    private var localHistoryTombstones: Set<Int> {
-        Set(UserDefaults.standard.array(forKey: "cinemora.deletedHistoryIDs") as? [Int] ?? [])
-    }
-
-    private func saveLocalHistoryTombstone(_ id: Int) {
-        var values = localHistoryTombstones
-        values.insert(id)
-        UserDefaults.standard.set(Array(values), forKey: "cinemora.deletedHistoryIDs")
-        accountMessage = "Đã ẩn mục này trên thiết bị. Máy chủ hiện tại chưa hỗ trợ đồng bộ thao tác xóa lịch sử."
-    }
-
-    private func clearLocalHistoryTombstone(_ id: Int) {
-        var values = localHistoryTombstones
-        values.remove(id)
-        UserDefaults.standard.set(Array(values), forKey: "cinemora.deletedHistoryIDs")
     }
 }
 
