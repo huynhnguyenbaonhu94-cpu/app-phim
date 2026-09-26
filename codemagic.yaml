@@ -1,6 +1,43 @@
 workflows:
   cinemora-ios:
-    name: Cinemora Native iOS IPA
+    name: Cinemora Native iOS IPA (SwiftUI)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: ad_hoc
+        bundle_identifier: app.serval4238.taurus3258
+      vars:
+        API_BASE_URL: https://cungcapicloud.id.vn
+    scripts:
+      - name: Install XcodeGen
+        script: |
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+
+      - name: Generate and validate native SwiftUI Xcode project
+        script: |
+          cd "$CM_BUILD_DIR/mobile-swiftui"
+          xcodegen generate --spec project.yml
+          xcodebuild -list -project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj"
+
+      - name: Configure iOS signing profiles
+        script: |
+          xcode-project use-profiles
+
+      - name: Build signed SwiftUI IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj" \
+            --scheme Cinemora \
+            --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+  cinemora-expo-ios:
+    name: Cinemora Expo iOS IPA (fallback)
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
@@ -33,7 +70,7 @@ workflows:
         script: |
           xcode-project use-profiles
 
-      - name: Build signed IPA
+      - name: Build signed Expo IPA
         script: |
           xcode-project build-ipa \
             --workspace mobile/ios/Cinemora.xcworkspace \
@@ -42,40 +79,4 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - mobile/build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
-
-  cinemora-swiftui-ios:
-    name: Cinemora SwiftUI Native iOS IPA (trial)
-    max_build_duration: 120
-    instance_type: mac_mini_m2
-    environment:
-      xcode: latest
-      cocoapods: default
-      ios_signing:
-        distribution_type: ad_hoc
-        bundle_identifier: app.serval4238.taurus3258
-      vars:
-        API_BASE_URL: https://cungcapicloud.id.vn
-    scripts:
-      - name: Install XcodeGen
-        script: |
-          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
-
-      - name: Generate native SwiftUI Xcode project
-        script: |
-          cd mobile-swiftui
-          xcodegen generate --spec project.yml
-
-      - name: Configure iOS signing profiles
-        script: |
-          xcode-project use-profiles
-
-      - name: Build signed SwiftUI IPA
-        script: |
-          xcode-project build-ipa \
-            --project mobile-swiftui/Cinemora.xcodeproj \
-            --scheme Cinemora \
-            --config Release
-    artifacts:
-      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
