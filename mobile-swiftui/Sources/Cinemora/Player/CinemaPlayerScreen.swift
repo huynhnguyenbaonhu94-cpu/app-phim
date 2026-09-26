@@ -199,7 +199,12 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onAppear { forceLandscape(); loadCurrentEpisode(); scheduleHide() }
+            .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                forceLandscape()
+            }
             .onDisappear { hideTask?.cancel(); playback.shutdown(); forcePortrait() }
             .statusBarHidden(true)
         }
@@ -222,21 +227,25 @@ struct CinemaPlayerScreen: View {
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
             }
             Menu {
-                Section("Tỷ lệ khung hình") {
-                    ForEach(VideoFit.allCases, id: \.self) { fit in
-                        Button { videoFit = fit } label: { Label(fit.rawValue, systemImage: fit == videoFit ? "checkmark" : "rectangle") }
-                    }
+                ForEach(VideoFit.allCases, id: \.self) { fit in
+                    Button { videoFit = fit } label: { Label(fit.rawValue, systemImage: fit == videoFit ? "checkmark" : "rectangle") }
                 }
-                Section("Tốc độ phát") {
-                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                        Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
-                    }
-                }
-                Button { controlsLocked = true; controlsVisible = false; hideTask?.cancel() } label: { Label("Khóa điều khiển", systemImage: "lock") }
             } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 18, weight: .semibold)).frame(width: 42, height: 42)
+                Image(systemName: "rectangle.on.rectangle").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
             }
-            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tùy chọn trình phát")
+            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
+            Menu {
+                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
+                }
+            } label: {
+                Image(systemName: "speedometer").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
+            Button { controlsLocked = true; controlsVisible = false; hideTask?.cancel() } label: {
+                Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
         }
     }
 
@@ -386,12 +395,21 @@ struct CinemaPlayerScreen: View {
     }
 
     private func forceLandscape() {
-        UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
-        UIViewController.attemptRotationToDeviceOrientation()
+        forceOrientation(.landscapeRight)
     }
 
     private func forcePortrait() {
-        UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        forceOrientation(.portrait)
+    }
+
+    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+           #available(iOS 16.0, *) {
+            let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        }
         UIViewController.attemptRotationToDeviceOrientation()
     }
 
