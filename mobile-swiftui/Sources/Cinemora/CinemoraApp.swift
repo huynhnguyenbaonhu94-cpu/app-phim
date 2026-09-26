@@ -4,11 +4,13 @@ import SwiftUI
 @MainActor
 struct CinemoraApp: App {
     @StateObject private var store = CinemaStore()
+    @StateObject private var connectivity = ConnectivityMonitor()
 
     var body: some Scene {
         WindowGroup {
             CinemoraTabShell()
                 .environmentObject(store)
+                .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
         }
     }
@@ -16,30 +18,42 @@ struct CinemoraApp: App {
 
 @MainActor
 struct CinemoraTabShell: View {
+    @EnvironmentObject private var connectivity: ConnectivityMonitor
+
     var body: some View {
-        TabView {
-            tabRoot {
-                HomeScreen()
-            }
-            .tabItem { Label("Trang Chủ", systemImage: "sparkles.tv") }
+        ZStack(alignment: .top) {
+            TabView {
+                tabRoot {
+                    HomeScreen()
+                }
+                .tabItem { Label("Trang Chủ", systemImage: "sparkles.tv") }
 
-            tabRoot {
-                LibraryScreen()
-            }
-            .tabItem { Label("Thư Viện", systemImage: "square.grid.2x2") }
+                tabRoot {
+                    LibraryScreen()
+                }
+                .tabItem { Label("Thư Viện", systemImage: "square.grid.2x2") }
 
-            tabRoot {
-                SearchScreen()
-            }
-            .tabItem { Label("Tìm Kiếm", systemImage: "magnifyingglass") }
+                tabRoot {
+                    SearchScreen()
+                }
+                .tabItem { Label("Tìm Kiếm", systemImage: "magnifyingglass") }
 
-            tabRoot {
-                AccountScreen()
+                tabRoot {
+                    AccountScreen()
+                }
+                .tabItem { Label("Tài Khoản", systemImage: "person.crop.circle") }
             }
-            .tabItem { Label("Tài Khoản", systemImage: "person.crop.circle") }
+            .tint(.cinemaAccent)
+            .modifier(ScrollMinimizingTabBar())
+
+            if !connectivity.isConnected {
+                OfflineBanner()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
-        .tint(.cinemaAccent)
-        .modifier(ScrollMinimizingTabBar())
+        .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
     }
 
     private func tabRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -49,6 +63,32 @@ struct CinemoraTabShell: View {
                     MovieDetailScreen(slug: movie.slug)
                 }
         }
+    }
+}
+
+private struct OfflineBanner: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Không có kết nối Internet")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(.yellow.opacity(0.35), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.3), radius: 14, y: 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
     }
 }
 
