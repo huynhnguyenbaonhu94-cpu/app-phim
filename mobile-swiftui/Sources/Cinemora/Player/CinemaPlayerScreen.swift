@@ -146,7 +146,6 @@ struct CinemaPlayerScreen: View {
     @State private var scrubValue = 0.0
     @State private var hideTask: Task<Void, Never>?
     @State private var lockHideTask: Task<Void, Never>?
-    @State private var orientationTask: Task<Void, Never>?
     private let api = CinemaAPI.shared
 
     private enum PickerKind: Equatable { case episodes, sources, fit, speed }
@@ -245,28 +244,14 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
-            .task {
-                orientationTask?.cancel()
-                orientationTask = Task { @MainActor in
-                    // The presentation transition can temporarily reject a geometry update.
-                    // Retry after the transition and once more after the first layout pass.
-                    for delay in [120, 420] {
-                        try? await Task.sleep(for: .milliseconds(delay))
-                        guard !Task.isCancelled else { return }
-                        forceLandscape()
-                    }
-                }
-            }
             .onDisappear {
                 hideTask?.cancel(); lockHideTask?.cancel()
-                orientationTask?.cancel()
                 let watched = Int(playback.currentTime.rounded())
                 let total = Int(playback.duration.rounded())
                 let movieSnapshot = movie
                 let episodeSnapshot = episode
                 Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, sourceName: server?.name, watchedSeconds: watched, durationSeconds: total) }
                 playback.shutdown()
-                forcePortrait()
             }
             .statusBarHidden(true)
         }
@@ -522,25 +507,6 @@ struct CinemaPlayerScreen: View {
             guard !Task.isCancelled else { return }
             if (playback.isPlaying || (episode?.streamURL == nil && episode?.embedURL != nil)) && picker == nil { withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false } }
         }
-    }
-
-    private func forceLandscape() {
-        forceOrientation(.landscapeRight)
-    }
-
-    private func forcePortrait() {
-        forceOrientation(.portrait)
-    }
-
-    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) else { return }
-        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-        let keyWindow = windowScene.windows.first(where: \.isKeyWindow)
-        keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
     }
 
     private func formatTime(_ value: Double) -> String {
