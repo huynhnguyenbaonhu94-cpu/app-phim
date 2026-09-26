@@ -128,10 +128,13 @@ struct CinemaPlayerScreen: View {
     @State private var volume = 1.0
     @State private var volumePopoverOpen = false
     @State private var controlsLocked = false
+    @State private var lockIndicatorVisible = true
     @State private var videoFit: VideoFit = .fit
     @State private var isScrubbing = false
     @State private var scrubValue = 0.0
     @State private var hideTask: Task<Void, Never>?
+    @State private var lockHideTask: Task<Void, Never>?
+    private let api = CinemaAPI.shared
 
     private enum PickerKind { case episodes, sources }
     fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
@@ -187,8 +190,26 @@ struct CinemaPlayerScreen: View {
 
                 if let picker { pickerOverlay(picker).transition(.opacity.combined(with: .scale(scale: 0.97))) }
                 if controlsLocked {
-                    Button { controlsLocked = false; controlsVisible = true; scheduleHide() } label: { Image(systemName: "lock.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white).frame(width: 52, height: 52).background(.black.opacity(0.65), in: Circle()) }
-                        .buttonStyle(.plain).accessibilityLabel("Mở khóa điều khiển")
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+                        .onTapGesture { showLockIndicator() }
+                    VStack {
+                        HStack {
+                            Spacer()
+                            if lockIndicatorVisible {
+                                Button { unlockControls() } label: {
+                                    Image(systemName: "lock.fill").font(.system(size: 16, weight: .bold)).foregroundStyle(.white).frame(width: 48, height: 48).background(.black.opacity(0.72), in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Mở khóa điều khiển")
+                                .transition(.opacity)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, max(18, proxy.safeAreaInsets.top + 8))
+                    .padding(.trailing, max(18, proxy.safeAreaInsets.trailing + 8))
                 }
             }
             .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
@@ -205,7 +226,15 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear { hideTask?.cancel(); playback.shutdown(); forcePortrait() }
+            .onDisappear {
+                hideTask?.cancel(); lockHideTask?.cancel()
+                let watched = Int(playback.currentTime.rounded())
+                let total = Int(playback.duration.rounded())
+                let movieSnapshot = movie
+                let episodeSnapshot = episode
+                Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, watchedSeconds: watched, durationSeconds: total) }
+                playback.shutdown(); forcePortrait()
+            }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -233,7 +262,7 @@ struct CinemaPlayerScreen: View {
             } label: {
                 Image(systemName: "rectangle.on.rectangle").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
             }
-            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
+            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
             Menu {
                 ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
                     Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
@@ -241,8 +270,8 @@ struct CinemaPlayerScreen: View {
             } label: {
                 Image(systemName: "speedometer").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
             }
-            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
-            Button { controlsLocked = true; controlsVisible = false; hideTask?.cancel() } label: {
+            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
+            Button { lockControls() } label: {
                 Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
             }
             .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
@@ -380,8 +409,40 @@ struct CinemaPlayerScreen: View {
     }
 
     private func toggleControls() {
+        guard !controlsLocked else { showLockIndicator(); return }
         withAnimation(.easeInOut(duration: 0.2)) { controlsVisible.toggle() }
         if controlsVisible { scheduleHide() } else { hideTask?.cancel() }
+    }
+
+    private func lockControls() {
+        controlsLocked = true
+        controlsVisible = false
+        volumePopoverOpen = false
+        hideTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { lockIndicatorVisible = true }
+        scheduleLockIndicatorHide()
+    }
+
+    private func unlockControls() {
+        lockHideTask?.cancel()
+        controlsLocked = false
+        withAnimation(.easeOut(duration: 0.2)) { lockIndicatorVisible = false; controlsVisible = true }
+        scheduleHide()
+    }
+
+    private func showLockIndicator() {
+        guard controlsLocked else { return }
+        withAnimation(.easeOut(duration: 0.2)) { lockIndicatorVisible = true }
+        scheduleLockIndicatorHide()
+    }
+
+    private func scheduleLockIndicatorHide() {
+        lockHideTask?.cancel()
+        lockHideTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, controlsLocked else { return }
+            withAnimation(.easeIn(duration: 0.25)) { lockIndicatorVisible = false }
+        }
     }
 
     private func scheduleHide() {

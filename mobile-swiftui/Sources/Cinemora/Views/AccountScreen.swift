@@ -1,57 +1,122 @@
 import SwiftUI
 
 struct AccountScreen: View {
+    @State private var user: AccountUser?
+    @State private var email = ""
+    @State private var password = ""
+    @State private var name = ""
+    @State private var registerMode = false
+    @State private var favorites: [FavoriteMovie] = []
+    @State private var history: [WatchHistoryItem] = []
+    @State private var loading = false
+    @State private var errorMessage: String?
+    private let api = CinemaAPI.shared
+
     var body: some View {
         ZStack {
             CinemaBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 20) {
                     CinemaHeader(eyebrow: "CINEMORA · CÁ NHÂN HÓA", title: "TÀI KHOẢN")
-                    VStack(alignment: .leading, spacing: 14) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 34, weight: .light)).foregroundStyle(Color.cinemaAccent)
-                            .frame(width: 64, height: 64).background(Color.cinemaAccent.opacity(0.11), in: RoundedRectangle(cornerRadius: 23))
-                        Text("Không gian của bạn").font(.system(size: 24, weight: .black, design: .rounded)).foregroundStyle(.white)
-                        Text("Đăng nhập và đồng bộ trải nghiệm cá nhân sẽ sớm có mặt trên Cinemora.")
-                            .font(.system(size: 13)).lineSpacing(5).foregroundStyle(.white.opacity(0.62))
-                        HStack(spacing: 7) {
-                            Circle().fill(Color.cinemaAccent).frame(width: 6, height: 6)
-                            Text("ĐANG HOÀN THIỆN").font(.system(size: 9, weight: .black)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
-                        }
-                        .padding(.horizontal, 11).padding(.vertical, 9).background(Color.cinemaAccent.opacity(0.1), in: Capsule())
+                    if let user {
+                        signedInView(user)
+                    } else {
+                        authView
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(22)
-                    .cinemaGlass(in: RoundedRectangle(cornerRadius: 28), tint: .white.opacity(0.06))
-
-                    SectionHeading(eyebrow: "SẮP CÓ TRÊN CINEMORA", title: "Xem theo cách của bạn")
-                    VStack(spacing: 0) {
-                        feature("heart", title: "Danh sách yêu thích", detail: "Lưu lại bộ phim muốn xem.")
-                        Divider().overlay(.white.opacity(0.08)).padding(.leading, 58)
-                        feature("clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục đúng nơi bạn đã dừng.")
-                        Divider().overlay(.white.opacity(0.08)).padding(.leading, 58)
-                        feature("iphone.and.arrow.forward", title: "Đồng bộ thiết bị", detail: "Trải nghiệm liền mạch mọi lúc.")
-                    }
-                    .padding(.horizontal, 14).cinemaGlass(in: RoundedRectangle(cornerRadius: 24), tint: .white.opacity(0.045))
-                    Text("Chức năng tài khoản cần backend đăng nhập riêng; giao diện này chưa giả lập đăng nhập hoặc lưu dữ liệu.")
-                        .font(.system(size: 10)).lineSpacing(4).foregroundStyle(.white.opacity(0.42))
                 }
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 38)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task { await loadSession() }
     }
 
-    private func feature(_ icon: String, title: String, detail: String) -> some View {
-        HStack(spacing: 13) {
-            Image(systemName: icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.cinemaAccent)
-                .frame(width: 42, height: 42).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                Text(detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.54))
-            }
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.28))
+    private var authView: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Image(systemName: registerMode ? "person.badge.plus" : "person.crop.circle.fill")
+                .font(.system(size: 34, weight: .light)).foregroundStyle(Color.cinemaAccent)
+                .frame(width: 64, height: 64).background(Color.cinemaAccent.opacity(0.11), in: RoundedRectangle(cornerRadius: 23))
+            Text(registerMode ? "Tạo tài khoản" : "Đăng nhập").font(.system(size: 24, weight: .black, design: .rounded)).foregroundStyle(.white)
+            Text(registerMode ? "Lưu lịch sử xem và phim yêu thích trên mọi thiết bị." : "Đăng nhập để đồng bộ lịch sử xem và danh sách yêu thích.")
+                .font(.system(size: 13)).lineSpacing(4).foregroundStyle(.white.opacity(0.62))
+            if registerMode { TextField("Tên hiển thị", text: $name).textContentType(.name).authField() }
+            TextField("Email", text: $email).textInputAutocapitalization(.never).keyboardType(.emailAddress).textContentType(.emailAddress).authField()
+            SecureField("Mật khẩu", text: $password).textContentType(registerMode ? .newPassword : .password).authField()
+            if let errorMessage { Text(errorMessage).font(.system(size: 11)).foregroundStyle(.red.opacity(0.9)) }
+            Button { Task { await submitAuth() } } label: {
+                HStack { if loading { ProgressView().tint(Color.cinemaInk) }; Text(registerMode ? "Đăng ký" : "Đăng nhập") }
+                    .font(.system(size: 13, weight: .black)).foregroundStyle(Color.cinemaInk).frame(maxWidth: .infinity).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
+            }.buttonStyle(.plain).disabled(loading)
+            Button { registerMode.toggle(); errorMessage = nil } label: {
+                Text(registerMode ? "Đã có tài khoản? Đăng nhập" : "Chưa có tài khoản? Đăng ký ngay")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaAccent).frame(maxWidth: .infinity)
+            }.buttonStyle(.plain)
         }
-        .padding(.vertical, 13).padding(.horizontal, 4)
+        .padding(22).cinemaGlass(in: RoundedRectangle(cornerRadius: 28), tint: .white.opacity(0.06))
+    }
+
+    private func signedInView(_ account: AccountUser) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 13) {
+                Image(systemName: "person.crop.circle.fill").font(.system(size: 40)).foregroundStyle(Color.cinemaAccent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(account.name ?? "Người dùng").font(.system(size: 18, weight: .black, design: .rounded)).foregroundStyle(.white)
+                    Text(account.email ?? "").font(.system(size: 11)).foregroundStyle(.white.opacity(0.58))
+                }
+                Spacer()
+                Button { Task { await signOut() } } label: { Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(.white.opacity(0.7)) }.buttonStyle(.plain).accessibilityLabel("Đăng xuất")
+            }
+            .padding(18).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.06))
+            SectionHeading(eyebrow: "ĐÃ LƯU", title: "Phim yêu thích")
+            if favorites.isEmpty { emptyRow("Chưa có phim yêu thích", icon: "heart") }
+            else { ForEach(favorites) { item in itemRow(title: item.movieName, subtitle: item.year.map { String($0) } ?? "Phim", icon: "heart.fill") } }
+            SectionHeading(eyebrow: "GẦN ĐÂY", title: "Lịch sử xem")
+            if history.isEmpty { emptyRow("Chưa có lịch sử xem", icon: "clock") }
+            else { ForEach(history) { item in itemRow(title: item.movieName, subtitle: item.episodeName ?? "Phim", icon: "clock.arrow.circlepath") } }
+        }
+    }
+
+    private func itemRow(title: String, subtitle: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(Color.cinemaAccent).frame(width: 38, height: 38).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 3) { Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1); Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5)) }
+            Spacer()
+        }.padding(12).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func emptyRow(_ text: String, icon: String) -> some View { Label(text, systemImage: icon).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.5)).frame(maxWidth: .infinity, alignment: .leading).padding(15).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 15)) }
+
+    private func loadSession() async {
+        guard let account = try? await api.me() else { return }
+        await MainActor.run { user = account }
+        await loadAccountData()
+    }
+
+    private func submitAuth() async {
+        loading = true; errorMessage = nil
+        do {
+            let account = registerMode ? try await api.register(name: name, email: email, password: password) : try await api.login(email: email, password: password)
+            await MainActor.run { user = account; password = "" }
+            await loadAccountData()
+        } catch { errorMessage = error.localizedDescription }
+        loading = false
+    }
+
+    private func loadAccountData() async {
+        async let saved = api.favorites()
+        async let watched = api.history()
+        if let values = try? await saved { favorites = values }
+        if let values = try? await watched { history = values }
+    }
+
+    private func signOut() async {
+        try? await api.logout()
+        user = nil; favorites = []; history = []
+    }
+}
+
+private extension View {
+    func authField() -> some View {
+        self.font(.system(size: 13)).foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 13).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 }

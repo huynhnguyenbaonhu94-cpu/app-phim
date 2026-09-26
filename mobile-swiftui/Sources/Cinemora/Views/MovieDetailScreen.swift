@@ -7,6 +7,9 @@ struct MovieDetailScreen: View {
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var showPlayer = false
+    @State private var favorite = false
+    @State private var favoriteBusy = false
+    private let api = CinemaAPI.shared
 
     private var movie: Movie? { store.detailMovie }
     private var servers: [MovieServer] { movie?.servers ?? [] }
@@ -59,7 +62,10 @@ struct MovieDetailScreen: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: slug) { store.loadDetail(slug: slug) }
+        .task(id: slug) {
+            store.loadDetail(slug: slug)
+            favorite = (try? await api.isFavorite(slug: slug)) ?? false
+        }
         .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
         .fullScreenCover(isPresented: $showPlayer) {
@@ -68,6 +74,16 @@ struct MovieDetailScreen: View {
                     .preferredColorScheme(.dark)
             }
         }
+    }
+
+    private func toggleFavorite(_ movie: Movie) async {
+        favoriteBusy = true
+        do {
+            if favorite { try await api.removeFavorite(slug: movie.slug) }
+            else { try await api.addFavorite(movie: movie) }
+            favorite.toggle()
+        } catch { }
+        favoriteBusy = false
     }
 
     @ViewBuilder private func detailContent(_ movie: Movie, width: CGFloat) -> some View {
@@ -84,12 +100,21 @@ struct MovieDetailScreen: View {
                     if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
                     if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
                 }
-                Button { showPlayer = true } label: {
-                    Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
-                        .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
-                        .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
+                HStack(spacing: 9) {
+                    Button { showPlayer = true } label: {
+                        Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
+                            .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
+                            .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
+                    }
+                    .buttonStyle(.plain).disabled(episode == nil).opacity(episode == nil ? 0.5 : 1)
+                    Button { Task { await toggleFavorite(movie) } } label: {
+                        Image(systemName: favorite ? "heart.fill" : "heart")
+                            .font(.system(size: 16, weight: .bold)).foregroundStyle(favorite ? Color.cinemaInk : .white)
+                            .frame(width: 46, height: 46).background(favorite ? Color.cinemaAccent : .white.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain).disabled(favoriteBusy).accessibilityLabel(favorite ? "Bỏ yêu thích" : "Thêm vào yêu thích")
                 }
-                .buttonStyle(.plain).disabled(episode == nil).opacity(episode == nil ? 0.5 : 1).padding(.top, 5)
+                .padding(.top, 5)
             }
             .padding(22)
         }
