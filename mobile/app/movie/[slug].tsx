@@ -156,6 +156,8 @@ function PlayerControls({
   serverIndex,
   onSelectEpisode,
   onSelectServer,
+  pickerOpen,
+  onPickerToggle,
 }: {
   title: string;
   playing: boolean;
@@ -184,28 +186,18 @@ function PlayerControls({
   serverIndex: number;
   onSelectEpisode: (index: number) => void;
   onSelectServer: (index: number) => void;
+  pickerOpen: "episodes" | "servers" | null;
+  onPickerToggle: (picker: "episodes" | "servers") => void;
 }) {
   const [volumeOpen, setVolumeOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState<"episodes" | "servers" | null>(null);
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
   const volumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const volumeTapRef = useRef<number | null>(null);
   const revealVolume = () => { setVolumeOpen(true); if (volumeTimer.current) clearTimeout(volumeTimer.current); volumeTimer.current = setTimeout(() => setVolumeOpen(false), 3500); };
   const handleVolumeIcon = () => {
     onInteraction();
-    const now = Date.now();
-    const previousTap = volumeTapRef.current;
-    if (previousTap !== null && now - previousTap <= 280) {
-      volumeTapRef.current = null;
-      onMute();
-      revealVolume();
-      return;
-    }
-    // A single tap only reveals/reveals the slider. It is never a mute action.
-    volumeTapRef.current = now;
+    onMute();
     revealVolume();
-    setTimeout(() => { if (volumeTapRef.current === now) volumeTapRef.current = null; }, 320);
   };
   return <View style={[playerStyles.controls, fullscreen && playerStyles.fullscreenControls]}>
     <View style={playerStyles.topControls}>
@@ -224,19 +216,13 @@ function PlayerControls({
             </Pressable>)}
           </View>}
         </View> : null}
-        {fullscreen ? <Pressable accessibilityLabel="Danh sách tập" onPress={() => { onInteraction(); setPickerOpen(pickerOpen === "episodes" ? null : "episodes"); }} style={playerStyles.iconButton}><Ionicons name="list-outline" size={18} color={C.text} /></Pressable> : null}
-        {fullscreen && servers.length > 1 ? <Pressable accessibilityLabel="Đổi nguồn phát" onPress={() => { onInteraction(); setPickerOpen(pickerOpen === "servers" ? null : "servers"); }} style={playerStyles.iconButton}><Ionicons name="layers-outline" size={18} color={C.text} /></Pressable> : null}
+        {fullscreen ? <Pressable accessibilityLabel="Danh sách tập" onPress={() => { onInteraction(); onPickerToggle("episodes"); }} style={playerStyles.iconButton}><Ionicons name="list-outline" size={18} color={C.text} /></Pressable> : null}
+        {fullscreen && servers.length > 1 ? <Pressable accessibilityLabel="Đổi nguồn phát" onPress={() => { onInteraction(); onPickerToggle("servers"); }} style={playerStyles.iconButton}><Ionicons name="layers-outline" size={18} color={C.text} /></Pressable> : null}
         {fullscreen ? <Pressable accessibilityLabel={locked ? "Mở khóa điều khiển" : "Khóa điều khiển"} onPress={onLockToggle} style={playerStyles.iconButton}><Ionicons name={locked ? "lock-closed" : "lock-open-outline"} size={17} color={C.text} /></Pressable> : null}
         {!fullscreen ? <Pressable accessibilityLabel="Toàn màn hình" onPress={onFullscreen} style={playerStyles.iconButton}><Ionicons name="expand-outline" size={18} color={C.text} /></Pressable> : <View style={playerStyles.fullscreenSpacer} />}
       </View>
     </View>
-    {fullscreen && pickerOpen && <Pressable style={playerStyles.pickerBackdrop} onPress={() => setPickerOpen(null)} accessibilityLabel="Đóng danh sách">
-      <Pressable style={playerStyles.pickerPanel} onPress={event => event.stopPropagation()}>
-        <View style={playerStyles.pickerGrabber} />
-        <View style={playerStyles.pickerHeader}><View><Text style={playerStyles.pickerKicker}>CINEMORA</Text><Text style={playerStyles.pickerTitle}>{pickerOpen === "episodes" ? "Danh sách tập" : "Nguồn phát"}</Text></View><Pressable accessibilityLabel="Đóng" onPress={() => setPickerOpen(null)} style={playerStyles.pickerClose}><Ionicons name="close" size={20} color={C.text} /></Pressable></View>
-        <ScrollView horizontal nestedScrollEnabled directionalLockEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={playerStyles.pickerRow} onStartShouldSetResponderCapture={() => true}>{(pickerOpen === "episodes" ? episodes.map((item, index) => ({ label: item.name || `Tập ${index + 1}`, index, active: index === episodeIndex })) : servers.map((item, index) => ({ label: item.name || `Nguồn ${index + 1}`, index, active: index === serverIndex }))).map(item => <Pressable key={`${pickerOpen}-${item.index}`} onPress={() => { if (pickerOpen === "episodes") onSelectEpisode(item.index); else onSelectServer(item.index); setPickerOpen(null); }} style={[playerStyles.pickerItem, item.active && playerStyles.pickerItemActive]}><Text style={[playerStyles.pickerItemText, item.active && playerStyles.pickerItemTextActive]} numberOfLines={1}>{item.label}</Text></Pressable>)}</ScrollView>
-      </Pressable>
-    </Pressable>}
+
     <View style={[playerStyles.centerControls, fullscreen && playerStyles.fullscreenCenterControls]}>
       <Pressable accessibilityLabel="Lùi 10 giây" onPress={() => { onInteraction(); onSkip(-10); }} style={playerStyles.skipButton}>
         <Ionicons name="play-back" size={20} color={C.text} />
@@ -250,12 +236,75 @@ function PlayerControls({
     </View>
     <View style={[playerStyles.adjustmentControls, fullscreen && playerStyles.fullscreenAdjustmentControls]}>
       {volumeOpen && <View style={playerStyles.volumePopover}><Text style={playerStyles.volumePercent}>{Math.round(volume * 100)}%</Text><VolumeSlider value={volume} onChange={value => { onVolumeChange(value - volumeRef.current); }} onInteraction={revealVolume} /></View>}
-      <Pressable accessibilityLabel={volumeOpen ? (muted ? "Bật âm thanh" : "Tắt âm thanh") : "Hiện thanh âm lượng"} onPress={handleVolumeIcon} style={playerStyles.volumeButton}><Ionicons name={muted || volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"} size={22} color={C.text} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={muted || volume === 0 ? "Bật âm thanh" : "Tắt âm thanh"} accessibilityHint="Chạm một lần để bật hoặc tắt tiếng" onPress={handleVolumeIcon} style={playerStyles.volumeButton}><Ionicons name={muted || volume === 0 ? "volume-mute" : volume < 0.5 ? "volume-low" : "volume-high"} size={22} color={C.text} /></Pressable>
     </View>
     <View style={playerStyles.bottomControls}>
       <Text style={[playerStyles.timeText, fullscreen && playerStyles.fullscreenTime]}>{formatTime(currentTime)}</Text>
       <SeekBar currentTime={currentTime} duration={duration} onSeek={onSeek} onInteraction={onInteraction} />
       <Text style={[playerStyles.timeText, fullscreen && playerStyles.fullscreenTime]}>{duration > 0 ? formatTime(duration) : "--:--"}</Text>
+    </View>
+  </View>;
+}
+
+
+function EpisodePicker({
+  kind,
+  episodes,
+  servers,
+  episodeIndex,
+  serverIndex,
+  onSelectEpisode,
+  onSelectServer,
+  onClose,
+}: {
+  kind: "episodes" | "servers";
+  episodes: Episode[];
+  servers: MovieServer[];
+  episodeIndex: number;
+  serverIndex: number;
+  onSelectEpisode: (index: number) => void;
+  onSelectServer: (index: number) => void;
+  onClose: () => void;
+}) {
+  const isEpisodes = kind === "episodes";
+  const selectedName = isEpisodes
+    ? (episodes[episodeIndex]?.name || `Tập ${episodeIndex + 1}`)
+    : (servers[serverIndex]?.name || `Nguồn ${serverIndex + 1}`);
+  const count = isEpisodes ? episodes.length : servers.length;
+  return <View style={playerStyles.pickerLayer}>
+    <Pressable accessibilityLabel="Đóng danh sách" onPress={onClose} style={playerStyles.pickerBackdrop} />
+    <View style={playerStyles.pickerPanel}>
+      <View style={playerStyles.pickerGrabber} />
+      <View style={playerStyles.pickerHeader}>
+        <View style={playerStyles.pickerHeadingCopy}>
+          <Text style={playerStyles.pickerKicker}>CINEMORA  ·  {isEpisodes ? "TẬP PHIM" : "CHẤT LƯỢNG PHÁT"}</Text>
+          <Text style={playerStyles.pickerTitle}>{isEpisodes ? "Danh sách tập" : "Chọn nguồn phát"}</Text>
+          <Text style={playerStyles.pickerSubtitle}>{count} lựa chọn  ·  Đang chọn: {selectedName}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Đóng danh sách" hitSlop={8} onPress={onClose} style={playerStyles.pickerClose}>
+          <Ionicons name="close" size={21} color={C.text} />
+        </Pressable>
+      </View>
+      <ScrollView style={playerStyles.pickerScroll} contentContainerStyle={playerStyles.pickerGrid} showsVerticalScrollIndicator nestedScrollEnabled>
+        {isEpisodes
+          ? episodes.map((item, index) => {
+              const active = index === episodeIndex;
+              return <Pressable key={`${item.slug || item.name || "episode"}-${index}`} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => onSelectEpisode(index)} style={[playerStyles.pickerItem, active && playerStyles.pickerItemActive]}>
+                <Text style={[playerStyles.pickerItemIndex, active && playerStyles.pickerItemIndexActive]}>{String(index + 1).padStart(2, "0")}</Text>
+                <Text style={[playerStyles.pickerItemText, active && playerStyles.pickerItemTextActive]} numberOfLines={2}>{item.name || `Tập ${index + 1}`}</Text>
+                {active && <Ionicons name="checkmark-circle" size={19} color="#11150a" />}
+              </Pressable>;
+            })
+          : servers.map((item, index) => {
+              const active = index === serverIndex;
+              return <Pressable key={`${item.name || "server"}-${index}`} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => onSelectServer(index)} style={[playerStyles.pickerItem, active && playerStyles.pickerItemActive]}>
+                <View style={[playerStyles.serverSourceIcon, active && playerStyles.serverSourceIconActive]}><Ionicons name={item.isAi ? "sparkles-outline" : "play"} size={15} color={active ? "#11150a" : C.accent} /></View>
+                <View style={playerStyles.pickerItemCopy}><Text style={[playerStyles.pickerItemText, active && playerStyles.pickerItemTextActive]} numberOfLines={2}>{item.name || `Nguồn ${index + 1}`}</Text><Text style={[playerStyles.pickerItemHint, active && playerStyles.pickerItemHintActive]}>{active ? "ĐANG PHÁT" : "CHẠM ĐỂ CHỌN"}</Text></View>
+                {active && <Ionicons name="checkmark-circle" size={19} color="#11150a" />}
+              </Pressable>;
+            })}
+      </ScrollView>
+      <Text style={playerStyles.pickerFootnote}>Chạm một lựa chọn để chuyển phát. Danh sách sẽ giữ mở.</Text>
     </View>
   </View>;
 }
@@ -275,6 +324,7 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
   const [fullscreen, setFullscreen] = useState(false);
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
   const [fitMenuOpen, setFitMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState<"episodes" | "servers" | null>(null);
   const pendingSeek = useRef<{ target: number; from: number; expiresAt: number; resume: boolean } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lockHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -285,6 +335,7 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
   const endedRef = useRef(false);
   const onEndedRef = useRef(onEnded);
   const volumeRef = useRef(volume);
+  const lastAudibleVolumeRef = useRef(1);
   const gestureWidthRef = useRef(0);
   const gestureStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const lastTapRef = useRef<{ x: number; time: number } | null>(null);
@@ -417,20 +468,20 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     // Controls must auto-hide in both inline and fullscreen playback. The
     // previous fullscreen-only guard left the inline toolbar permanently
     // visible and also prevented a newly revealed toolbar from re-arming.
-    if (locked || !playing || status !== "ready" || !controlsVisible) return;
+    if (locked || pickerOpen || !playing || status !== "ready" || !controlsVisible) return;
     if (playing && status === "ready" && controlsVisible) {
       hideTimer.current = setTimeout(() => setControlsVisible(false), 2_800);
     }
-  }, [clearHideTimer, controlsVisible, locked, playing, status]);
+  }, [clearHideTimer, controlsVisible, locked, pickerOpen, playing, status]);
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     clearHideTimer();
-    if (!locked && playing && status === "ready") {
+    if (!locked && !pickerOpen && playing && status === "ready") {
       // Do not call resetHideTimer here: its closure still sees the previous
       // controlsVisible=false during this render, so it would return early.
       hideTimer.current = setTimeout(() => setControlsVisible(false), 2_800);
     }
-  }, [clearHideTimer, locked, playing, status]);
+  }, [clearHideTimer, locked, pickerOpen, playing, status]);
   const toggleControls = useCallback(() => {
     if (controlsVisible) {
       clearHideTimer();
@@ -580,12 +631,35 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
     }
   }, [duration, player, playing, recoverAfterSeek]);
   onSkipRef.current = skip;
-  const toggleMute = useCallback(() => { player.muted = !player.muted; }, [player]);
+  const toggleMute = useCallback(() => {
+    const silent = player.muted || player.volume <= 0.001;
+    if (silent) {
+      const restoreVolume = Math.max(0.05, Math.min(1, lastAudibleVolumeRef.current || 1));
+      if (player.volume <= 0.001) {
+        player.volume = restoreVolume;
+        setVolume(restoreVolume);
+        volumeRef.current = restoreVolume;
+      }
+      player.muted = false;
+      setMuted(false);
+      return;
+    }
+    if (player.volume > 0) lastAudibleVolumeRef.current = player.volume;
+    player.muted = true;
+    setMuted(true);
+  }, [player]);
   const changeVolume = useCallback((delta: number) => {
     const next = Math.max(0, Math.min(1, Number((volumeRef.current + delta).toFixed(2))));
     setVolume(next);
+    volumeRef.current = next;
     player.volume = next;
-    if (next > 0 && player.muted) player.muted = false;
+    if (next > 0) {
+      lastAudibleVolumeRef.current = next;
+      if (player.muted) {
+        player.muted = false;
+        setMuted(false);
+      }
+    }
   }, [player]);
   const toggleLock = useCallback(() => {
     if (lockedRef.current) {
@@ -657,6 +731,7 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
 
   const exitFullscreen = useCallback(async () => {
     clearHideTimer();
+    setPickerOpen(null);
     setFullscreen(false);
     setFitMenuOpen(false);
     setControlsVisible(true);
@@ -727,7 +802,19 @@ function Player({ source, title, onEnded, episodes, servers, episodeIndex, serve
       serverIndex={serverIndex}
       onSelectEpisode={onSelectEpisode}
       onSelectServer={onSelectServer}
+      pickerOpen={pickerOpen}
+      onPickerToggle={picker => { setPickerOpen(current => current === picker ? null : picker); }}
     /> : locked && large && lockVisible ? <Pressable accessibilityLabel="Mở khóa điều khiển" onPress={toggleLock} style={playerStyles.lockBadge}><Ionicons name="lock-closed" size={17} color={C.text} /></Pressable> : null}
+    {large && fullscreen && pickerOpen && <EpisodePicker
+      kind={pickerOpen}
+      episodes={episodes}
+      servers={servers}
+      episodeIndex={episodeIndex}
+      serverIndex={serverIndex}
+      onSelectEpisode={onSelectEpisode}
+      onSelectServer={onSelectServer}
+      onClose={() => setPickerOpen(null)}
+    />}
   </View>;
 
   return <View style={playerStyles.shell}>
@@ -763,11 +850,11 @@ const playerStyles = StyleSheet.create({
   controls: { ...StyleSheet.absoluteFillObject, zIndex: 3, justifyContent: "space-between", paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, backgroundColor: "rgba(3,5,8,0.12)" },
   fullscreenControls: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 20, backgroundColor: "rgba(0,0,0,0.06)" },
   topControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  topActions: { flexDirection: "row", alignItems: "center", gap: 7 },
+  topActions: { flexDirection: "row", alignItems: "center", gap: 7, flexShrink: 0 },
   sourceBadge: { flexDirection: "row", alignItems: "center", gap: 7, maxWidth: "70%", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9, backgroundColor: "rgba(20,25,37,0.62)", borderWidth: 1, borderColor: "rgba(225,232,255,0.18)" },
-  fullscreenSourceBadge: { position: "absolute", left: "50%", transform: [{ translateX: -70 }], maxWidth: "42%", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: "rgba(10,13,18,0.7)" },
+  fullscreenSourceBadge: { flex: 1, minWidth: 0, maxWidth: "100%", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: "rgba(10,13,18,0.76)" },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.accent },
-  sourceText: { color: C.text, fontSize: 11, fontWeight: "700" },
+  sourceText: { flex: 1, minWidth: 0, color: C.text, fontSize: 11, fontWeight: "700" },
   iconButton: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(20,25,37,0.7)", borderWidth: 1, borderColor: "rgba(225,232,255,0.2)" },
   fullscreenSpacer: { width: 38, height: 38 },
   fitMenuWrap: { position: "relative", zIndex: 10 },
@@ -790,10 +877,30 @@ const playerStyles = StyleSheet.create({
   volumePopover: { minWidth: 156, flexDirection: "row", alignItems: "center", gap: 9, marginBottom: 8, paddingHorizontal: 11, height: 42, borderRadius: 13, backgroundColor: "rgba(10,13,18,0.88)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   volumePercent: { color: C.text, fontSize: 10, fontWeight: "800", minWidth: 31, textAlign: "center" },
   volumeSliderTouch: { flex: 1, height: 28, justifyContent: "center" }, volumeTrack: { height: 4, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.26)", position: "relative" }, volumeFill: { height: 4, borderRadius: 3, backgroundColor: C.accent }, volumeThumb: { width: 12, height: 12, borderRadius: 6, backgroundColor: C.accent, position: "absolute", top: -4, marginLeft: -6 },
-  pickerBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 30, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, backgroundColor: "rgba(0,0,0,0.58)" },
-  pickerPanel: { width: "100%", maxHeight: 230, padding: 18, borderRadius: 26, backgroundColor: "rgba(24,30,44,0.96)", borderWidth: 1, borderColor: "rgba(235,240,255,0.22)", shadowColor: "#000", shadowOpacity: 0.48, shadowRadius: 28, shadowOffset: { width: 0, height: 10 }, elevation: 18 },
-  pickerGrabber: { width: 36, height: 4, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.32)", alignSelf: "center", marginBottom: 13 },
-  pickerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }, pickerKicker: { color: C.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.8, marginBottom: 4 }, pickerTitle: { color: C.text, fontSize: 21, fontWeight: "900", letterSpacing: -0.3 }, pickerClose: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" }, pickerRow: { gap: 10, paddingRight: 4 }, pickerItem: { minWidth: 76, minHeight: 46, maxWidth: 170, paddingHorizontal: 15, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.05)" }, pickerItemActive: { backgroundColor: C.accent, borderColor: C.accent }, pickerItemText: { color: C.text, fontSize: 12, fontWeight: "800" }, pickerItemTextActive: { color: "#11150a" },
+  pickerLayer: { ...StyleSheet.absoluteFillObject, zIndex: 40, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingVertical: 14 },
+  pickerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.66)" },
+  pickerPanel: { width: "100%", maxWidth: 980, maxHeight: "90%", flexShrink: 1, paddingHorizontal: 22, paddingTop: 13, paddingBottom: 14, borderRadius: 26, backgroundColor: "rgba(20,27,42,0.985)", borderWidth: 1, borderColor: "rgba(225,232,255,0.3)", shadowColor: "#000", shadowOpacity: 0.55, shadowRadius: 30, shadowOffset: { width: 0, height: 12 }, elevation: 22 },
+  pickerGrabber: { width: 42, height: 4, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.4)", alignSelf: "center", marginBottom: 13 },
+  pickerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 18, marginBottom: 14 },
+  pickerHeadingCopy: { flex: 1, minWidth: 0 },
+  pickerKicker: { color: C.accent, fontSize: 9, fontWeight: "900", letterSpacing: 1.8, marginBottom: 4 },
+  pickerTitle: { color: C.text, fontSize: 23, fontWeight: "900", letterSpacing: -0.3 },
+  pickerSubtitle: { color: "#c8cede", fontSize: 11, fontWeight: "600", marginTop: 5 },
+  pickerClose: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.09)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  pickerScroll: { flexShrink: 1, minHeight: 62, maxHeight: 330 },
+  pickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9, paddingBottom: 3 },
+  pickerItem: { flexGrow: 1, flexBasis: 150, minWidth: 118, maxWidth: 260, minHeight: 54, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.075)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  pickerItemActive: { backgroundColor: "#c5d2ff", borderColor: "#e2e8ff" },
+  pickerItemIndex: { color: "#c6ccdc", fontSize: 12, fontWeight: "900", fontVariant: ["tabular-nums"], minWidth: 24 },
+  pickerItemIndexActive: { color: "#1b2130" },
+  pickerItemText: { flex: 1, minWidth: 0, color: "#f4f5f7", fontSize: 13, lineHeight: 18, fontWeight: "800" },
+  pickerItemTextActive: { color: "#111827" },
+  pickerItemCopy: { flex: 1, minWidth: 0, gap: 3 },
+  pickerItemHint: { color: "#aeb7ca", fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  pickerItemHintActive: { color: "#323b52" },
+  serverSourceIcon: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(197,210,255,0.12)" },
+  serverSourceIconActive: { backgroundColor: "rgba(17,24,39,0.12)" },
+  pickerFootnote: { color: "#9fa9bd", fontSize: 9, fontWeight: "600", marginTop: 10 },
   bottomControls: { width: "100%", flexDirection: "row", alignItems: "center", gap: 7 },
   timeText: { color: "rgba(244,245,247,0.82)", fontSize: 9, fontVariant: ["tabular-nums"], minWidth: 38, textAlign: "center" },
   fullscreenTime: { fontSize: 11, minWidth: 44 },

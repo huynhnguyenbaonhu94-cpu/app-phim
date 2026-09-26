@@ -154,3 +154,14 @@ Trên Codemagic, chỉ cần commit toàn bộ repository và chọn workflow `c
 - Không gọi `player.replace()` ngay sau khi `useVideoPlayer` đã khởi tạo nguồn mới theo URI. Mỗi player mới có watchdog 18 giây, dọn subscriptions/timer khi unmount; thao tác thử lại gọi `replaceAsync` và chuyển sang lỗi/retry nếu nguồn không sẵn sàng.
 - Đồng bộ màu splash với nền theme mới.
 - Xác minh lại trên source: `npm run typecheck` thành công; `npx expo export --platform ios` tạo bundle iOS thành công; `npx expo-doctor` báo 18/18 checks passed. Kiểm thử thao tác trên thiết bị và tạo IPA vẫn cần Codemagic/iPhone thật.
+
+## Patch v5 — picker dễ đọc, không tự đóng
+
+- Thay carousel cuộn ngang khó đọc bằng sheet tương phản cao, bố cục lưới tự xuống dòng, hiện rõ tập/nguồn đang chọn và có scroll dọc khi danh sách dài.
+- Picker state được đưa lên `Player` và sheet render độc lập với toolbar; chuyển tập làm toolbar tạm unmount/hiện loading không còn làm đóng picker.
+- Chọn tập/nguồn cập nhật playback và lựa chọn hiện tại nhưng sheet tiếp tục mở; chỉ nút đóng hoặc chạm backdrop mới đóng.
+
+## Patch v6 — fullscreen title và mute một chạm
+
+- Nhãn phim trong fullscreen nằm trong hàng điều khiển, dùng phần không gian co giãn ở giữa title và các nút; tên dài tự cắt bằng dấu ba chấm thay vì phủ icon.
+- Icon loa giờ đổi trạng thái tiếng ngay ở lần chạm đầu tiên. Bật tiếng phục hồi mức âm lượng gần nhất; kéo thanh về 0 rồi chạm icon cũng khôi phục mức đó. Thanh chỉnh âm lượng vẫn mở tạm thời khi chạm icon.
