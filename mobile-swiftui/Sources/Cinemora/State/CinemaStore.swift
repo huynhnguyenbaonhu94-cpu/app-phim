@@ -66,21 +66,33 @@ final class CinemaStore: ObservableObject {
         defer { homeLoading = false }
 
         let config = homeSectionConfig
-        let results = await withTaskGroup(of: (Int, [Movie], String?).self, returning: [(Int, [Movie], String?)].self) { group in
-            for (index, section) in config.enumerated() {
-                group.addTask {
-                    do {
-                        let page = try await self.api.list(kind: section.kind, refresh: refresh)
-                        return (index, page.items, nil)
-                    } catch {
-                        return (index, [], error.localizedDescription)
+        var results: [(Int, [Movie], String?)] = []
+        for batchStart in stride(from: 0, to: config.count, by: 4) {
+            let batchEnd = min(batchStart + 4, config.count)
+            let batch = await withTaskGroup(of: (Int, [Movie], String?).self, returning: [(Int, [Movie], String?)].self) { group in
+                for index in batchStart..<batchEnd {
+                    let section = config[index]
+                    group.addTask {
+                        do {
+                            let page: MoviePage
+                            if refresh && section.kind == "latest" {
+                                page = (try? await self.api.dailyUpdates()) ?? (try await self.api.list(kind: "latest"))
+                            } else {
+                                page = try await self.api.list(kind: section.kind)
+                            }
+                            return (index, page.items, nil)
+                        } catch {
+                            return (index, [], error.localizedDescription)
+                        }
                     }
                 }
+                var collected: [(Int, [Movie], String?)] = []
+                for await result in group { collected.append(result) }
+                return collected
             }
-            var collected: [(Int, [Movie], String?)] = []
-            for await result in group { collected.append(result) }
-            return collected.sorted { $0.0 < $1.0 }
+            results.append(contentsOf: batch)
         }
+        results.sort { $0.0 < $1.0 }
 
         homeSections = results.enumerated().compactMap { index, result in
             guard !result.1.isEmpty else { return nil }

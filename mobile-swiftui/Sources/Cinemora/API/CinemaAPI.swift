@@ -16,13 +16,20 @@ struct CinemaAPI {
         try await query("cinema.home", input: ["page": page])
     }
 
-    func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil, refresh: Bool = false) async throws -> MoviePage {
-        var input: [String: Any] = ["page": page, "kind": kind]
+    func dailyUpdates(page: Int = 1) async throws -> MoviePage {
+        try await query("cinema.dailyUpdates", input: ["page": page])
+    }
+
+    func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil) async throws -> MoviePage {
+        let serverKind = kind == "ongoing" || kind == "completed" ? "series" : kind
+        var input: [String: Any] = ["page": page, "kind": serverKind]
         if let category, !category.isEmpty { input["category"] = category }
         if let country, !country.isEmpty { input["country"] = country }
         if let year { input["year"] = year }
-        if refresh { input["refresh"] = true }
-        return try await query("cinema.list", input: input)
+        let pageResult: MoviePage = try await query("cinema.list", input: input)
+        guard kind == "ongoing" || kind == "completed" else { return pageResult }
+        let items = kind == "completed" ? pageResult.items.filter(isCompletedSeries) : pageResult.items.filter { !isCompletedSeries($0) }
+        return MoviePage(items: items, pagination: pageResult.pagination)
     }
 
     func search(_ keyword: String) async throws -> MoviePage {
@@ -65,6 +72,20 @@ struct CinemaAPI {
         let decodedData = try JSONSerialization.data(withJSONObject: payload)
         do { return try JSONDecoder().decode(T.self, from: decodedData) }
         catch { throw APIError.decoding(error.localizedDescription) }
+    }
+
+    private func isCompletedSeries(_ movie: Movie) -> Bool {
+        let marker = "\(movie.status ?? "") \(movie.episodeCurrent ?? "")"
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
+        if marker.contains("hoan tat") || marker.contains("hoan thanh") || marker.contains("full") || marker.contains("completed") || marker.contains("complete") || marker.contains("end") {
+            return true
+        }
+        if let total = movie.episodeTotal, let current = movie.episodeCurrent,
+           let last = current.split(whereSeparator: { !$0.isNumber }).compactMap({ Int($0) }).last {
+            return last >= total
+        }
+        return false
     }
 }
 

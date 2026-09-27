@@ -13,7 +13,20 @@ struct LibraryScreen: View {
     @State private var country = ""
     @State private var year: Int?
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
-    private let kinds = [LibraryFilterOption(title: "Mới nhất", value: "latest"), LibraryFilterOption(title: "Phim lẻ", value: "single"), LibraryFilterOption(title: "Phim bộ", value: "series")]
+    private let kinds = [
+        LibraryFilterOption(title: "Phim Mới", value: "latest"),
+        LibraryFilterOption(title: "Phim Bộ", value: "series"),
+        LibraryFilterOption(title: "Phim Lẻ", value: "single"),
+        LibraryFilterOption(title: "Shows", value: "shows"),
+        LibraryFilterOption(title: "Hoạt Hình", value: "animation"),
+        LibraryFilterOption(title: "Phim Vietsub", value: "vietsub"),
+        LibraryFilterOption(title: "Phim Thuyết Minh", value: "thuyetminh"),
+        LibraryFilterOption(title: "Phim Lồng Tiếng", value: "longtieng"),
+        LibraryFilterOption(title: "Phim Bộ Đang Chiếu", value: "ongoing"),
+        LibraryFilterOption(title: "Phim Bộ Đã Hoàn Thành", value: "completed"),
+        LibraryFilterOption(title: "Subteam", value: "subteam"),
+        LibraryFilterOption(title: "Phim Chiếu Rạp", value: "theatrical"),
+    ]
 
     var body: some View {
         ZStack {
