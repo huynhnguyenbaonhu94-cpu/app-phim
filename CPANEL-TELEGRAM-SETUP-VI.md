@@ -16,9 +16,12 @@ Không dùng `server/_core/index.ts` làm startup file vì cPanel cần file Jav
 
 ## 2. Cài đặt và build trên Terminal cPanel
 
+Bản source mới đã bỏ plugin debug không tương thích với Vite 7, vì vậy dùng `npm install` bình thường:
+
 ```bash
 source /home/vfviehep/nodevenv/cinemora2/22/bin/activate
 cd /home/vfviehep/cinemora2
+rm -rf node_modules package-lock.json
 npm install
 npm run build
 ```
@@ -29,6 +32,13 @@ Nếu hosting không có lệnh `npm run build` vì thiếu dependency, chạy:
 
 ```bash
 npm install --include=dev
+npm run build
+```
+
+Nếu cPanel vẫn đang dùng source ZIP cũ hoặc npm hiển thị lại lỗi peer dependency, hãy dùng đúng ZIP mới. Phương án tạm thời cho source cũ là:
+
+```bash
+npm install --legacy-peer-deps
 npm run build
 ```
 
