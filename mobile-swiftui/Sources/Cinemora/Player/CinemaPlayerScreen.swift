@@ -535,7 +535,10 @@ struct CinemaPlayerScreen: View {
                         }
                     }
                 }
-                .frame(maxHeight: 142)
+                // `maxHeight` alone lets SwiftUI collapse this ScrollView to zero
+                // height inside the settings VStack. Keep one row visible and
+                // cap long episode lists so they remain scrollable.
+                .frame(minHeight: 37, maxHeight: 142)
                 .scrollClipDisabled()
             }
         }
