@@ -27,8 +27,13 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var catalogError: String?
     @Published private(set) var catalogHasMore = false
     @Published private(set) var catalogPage = 1
+    @Published private(set) var localFavorites: [LocalMovieRecord] = []
+    @Published private(set) var localHistory: [LocalWatchRecord] = []
 
     private let api = CinemaAPI.shared
+    private let localDefaults = UserDefaults.standard
+    private let favoritesKey = "cinemora.local.favorites.v1"
+    private let historyKey = "cinemora.local.history.v1"
     private var homePage = 1
     private var detailTask: Task<Void, Never>?
     private var catalogTask: Task<Void, Never>?
@@ -49,6 +54,64 @@ final class CinemaStore: ObservableObject {
         ("subteam", "Subteam"),
         ("theatrical", "Phim Chiếu Rạp"),
     ]
+
+    init() {
+        let decoder = JSONDecoder()
+        if let data = localDefaults.data(forKey: favoritesKey), let records = try? decoder.decode([LocalMovieRecord].self, from: data) {
+            localFavorites = records
+        }
+        if let data = localDefaults.data(forKey: historyKey), let records = try? decoder.decode([LocalWatchRecord].self, from: data) {
+            localHistory = records
+        }
+    }
+
+    func isFavorite(_ movie: Movie) -> Bool {
+        localFavorites.contains { $0.slug == movie.slug }
+    }
+
+    func toggleFavorite(_ movie: Movie) {
+        if let index = localFavorites.firstIndex(where: { $0.slug == movie.slug }) {
+            localFavorites.remove(at: index)
+        } else {
+            localFavorites.insert(LocalMovieRecord(movie: movie), at: 0)
+            localFavorites = Array(localFavorites.prefix(100))
+        }
+        persistLocalLibrary()
+    }
+
+    func removeFavorite(_ record: LocalMovieRecord) {
+        localFavorites.removeAll { $0.slug == record.slug }
+        persistLocalLibrary()
+    }
+
+    func recordLocalHistory(movie: Movie, episode: MovieEpisode?, serverName: String? = nil, watchedSeconds: Double = 0, durationSeconds: Double = 0) {
+        let record = LocalWatchRecord(movie: LocalMovieRecord(movie: movie), episodeName: episode?.name, episodeSlug: episode?.slug, serverName: serverName, watchedSeconds: watchedSeconds, durationSeconds: durationSeconds, watchedAt: Date())
+        localHistory.removeAll { $0.movie.slug == movie.slug }
+        localHistory.insert(record, at: 0)
+        localHistory = Array(localHistory.prefix(100))
+        persistLocalLibrary()
+    }
+
+    func removeHistory(_ record: LocalWatchRecord) {
+        localHistory.removeAll { $0.id == record.id }
+        persistLocalLibrary()
+    }
+
+    func clearFavorites() {
+        localFavorites.removeAll()
+        persistLocalLibrary()
+    }
+
+    func clearHistory() {
+        localHistory.removeAll()
+        persistLocalLibrary()
+    }
+
+    private func persistLocalLibrary() {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(localFavorites) { localDefaults.set(data, forKey: favoritesKey) }
+        if let data = try? encoder.encode(localHistory) { localDefaults.set(data, forKey: historyKey) }
+    }
 
     func loadHome() async {
         guard homeSections.isEmpty, !homeLoading else { return }

@@ -84,7 +84,7 @@ struct MovieDetailScreen: View {
                     if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
                     if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
                 }
-                Button { showPlayer = true } label: {
+                Button { store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name); showPlayer = true } label: {
                     Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
                         .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
                         .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
@@ -96,6 +96,18 @@ struct MovieDetailScreen: View {
         .frame(width: width, height: 430, alignment: .bottomLeading)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
+        .overlay(alignment: .topTrailing) {
+            Button { store.toggleFavorite(movie) } label: {
+                Image(systemName: store.isFavorite(movie) ? "heart.fill" : "heart")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(store.isFavorite(movie) ? Color.cinemaAccent : .white)
+                    .frame(width: 46, height: 46)
+                    .background(.black.opacity(0.48), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+            .accessibilityLabel(store.isFavorite(movie) ? "Bỏ yêu thích" : "Thêm vào yêu thích")
+        }
 
         if let description = movie.description, !description.isEmpty {
             VStack(alignment: .leading, spacing: 9) {
@@ -148,7 +160,7 @@ struct MovieDetailScreen: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 9) {
                     ForEach(episodes.indices, id: \.self) { index in
                         let item = episodes[index]
-                        Button { selectedEpisode = index; showPlayer = true } label: {
+                        Button { selectedEpisode = index; store.recordLocalHistory(movie: movie, episode: item, serverName: server?.name); showPlayer = true } label: {
                             HStack(spacing: 10) {
                                 Text(String(format: "%02d", index + 1)).font(.system(size: 11, weight: .black, design: .rounded)).foregroundStyle(selectedEpisode == index ? Color.cinemaInk : Color.cinemaAccent)
                                 Text(item.name).font(.system(size: 11, weight: .bold)).lineLimit(2).multilineTextAlignment(.leading)

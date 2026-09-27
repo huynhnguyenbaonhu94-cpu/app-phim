@@ -92,6 +92,11 @@ final class PlaybackController: ObservableObject {
         else { player.play(); isPlaying = true }
     }
 
+    func pause() {
+        player.pause()
+        isPlaying = false
+    }
+
     func toggleMute() {
         player.isMuted.toggle()
         isMuted = player.isMuted
@@ -119,6 +124,7 @@ struct CinemaPlayerScreen: View {
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
+    @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playback = PlaybackController()
     @State private var serverIndex = 0
@@ -130,14 +136,38 @@ struct CinemaPlayerScreen: View {
     @State private var volumePopoverOpen = false
     @State private var controlsLocked = false
     @State private var lockIndicatorVisible = true
+    @State private var settingsOpen = false
+    @State private var stopTimer: StopTimer = .off
+    @State private var stopAtEpisodeEnabled = false
+    @State private var stopAtEpisodeIndex = 0
+    @State private var autoAdvanceEpisodes = true
+    @State private var didHandleEpisodeEnd = false
     @State private var videoFit: VideoFit = .fit
     @State private var isScrubbing = false
     @State private var scrubValue = 0.0
     @State private var hideTask: Task<Void, Never>?
     @State private var lockHideTask: Task<Void, Never>?
+    @State private var stopTimerTask: Task<Void, Never>?
+    @State private var lastHistorySaveAt = Date.distantPast
 
     private enum PickerKind { case episodes, sources }
     private enum QuickMenu: Equatable { case videoFit, playbackRate }
+    private enum StopTimer: String, CaseIterable, Identifiable {
+        case off = "Tắt"
+        case fifteen = "15 phút"
+        case thirty = "30 phút"
+        case sixty = "60 phút"
+        case endOfEpisode = "Hết tập hiện tại"
+        var id: String { rawValue }
+        var seconds: Double? {
+            switch self {
+            case .off, .endOfEpisode: return nil
+            case .fifteen: return 15 * 60
+            case .thirty: return 30 * 60
+            case .sixty: return 60 * 60
+            }
+        }
+    }
     fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
@@ -221,13 +251,17 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
+            .onChange(of: playback.currentTime) { _, _ in handlePlaybackProgress() }
+            .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
+            .onChange(of: stopAtEpisodeEnabled) { _, _ in scheduleStopTimer() }
+            .onChange(of: stopAtEpisodeIndex) { _, _ in scheduleStopTimer() }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear { hideTask?.cancel(); lockHideTask?.cancel(); playback.shutdown(); forcePortrait() }
+            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); playback.shutdown(); forcePortrait() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -251,13 +285,41 @@ struct CinemaPlayerScreen: View {
             }
             quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
             quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    settingsOpen.toggle()
+                    quickMenu = nil
+                    volumePopoverOpen = false
+                }
+                if settingsOpen { hideTask?.cancel() } else { scheduleHide() }
+            } label: {
+                Image(systemName: "gearshape.fill").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .foregroundStyle(settingsOpen ? Color.cinemaInk : .white).buttonStyle(.plain)
+            .background(settingsOpen ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
+            .overlay(Circle().strokeBorder(.white.opacity(settingsOpen ? 0.35 : 0.14), lineWidth: 0.8))
+            .accessibilityLabel("Cài đặt phát video")
             Button { lockControls() } label: {
                 Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
             }
             .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
+            cinemoraLogo
             }
             if let quickMenu { quickMenuPanel(quickMenu) }
+            if settingsOpen { settingsPanel }
         }
+    }
+
+    private var cinemoraLogo: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles.tv.fill").font(.system(size: 13, weight: .black))
+            Text("CINEMORA").font(.system(size: 10, weight: .black, design: .rounded)).tracking(1.1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12).frame(height: 42)
+        .background(.black.opacity(0.36), in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+        .accessibilityLabel("Cinemora")
     }
 
     private var playbackRateLabel: String {
@@ -339,6 +401,63 @@ struct CinemaPlayerScreen: View {
             .padding(.horizontal, 10).frame(minHeight: 39)
             .background(selected ? Color.cinemaAccent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }.buttonStyle(.plain)
+    }
+
+    private var settingsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("CÀI ĐẶT PHÁT VIDEO").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
+                    Text("Xem gọn hơn").font(.system(size: 16, weight: .black, design: .rounded)).foregroundStyle(.white)
+                }
+                Spacer()
+                Button { withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }; scheduleHide() } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 25, height: 25)
+                }.buttonStyle(.plain).accessibilityLabel("Đóng cài đặt")
+            }
+            settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") {
+                Picker("Tự dừng phát", selection: $stopTimer) {
+                    ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) }
+                }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent)
+            }
+            Toggle(isOn: $stopAtEpisodeEnabled) {
+                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Dừng khi xem xong tập mục tiêu")
+            }.tint(Color.cinemaAccent)
+            if stopAtEpisodeEnabled && !episodes.isEmpty {
+                Picker("Tập dừng", selection: $stopAtEpisodeIndex) {
+                    ForEach(episodes.indices, id: \.self) { index in Text(episodes[index].name).tag(index) }
+                }.pickerStyle(.menu).tint(Color.cinemaAccent).padding(.leading, 32)
+            }
+            Toggle(isOn: $autoAdvanceEpisodes) {
+                settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
+            }.tint(Color.cinemaAccent)
+            Text("iOS không cho ứng dụng tự tắt nguồn thiết bị. Các lựa chọn trên sẽ tự dừng phát video an toàn.")
+                .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.48)).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 315)
+        .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
+        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+    }
+
+    private func settingsRow<Content: View>(icon: String, title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 8) {
+            settingsLabel(icon: icon, title: title, detail: detail)
+            Spacer(minLength: 4)
+            content()
+        }
+    }
+
+    private func settingsLabel(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.cinemaAccent).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                Text(detail).font(.system(size: 8, weight: .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
+            }
+        }
     }
 
     private var centerControls: some View {
@@ -468,7 +587,43 @@ struct CinemaPlayerScreen: View {
 
     private func loadCurrentEpisode() {
         guard let episode else { return }
+        didHandleEpisodeEnd = false
         playback.load(episode)
+        saveLocalWatchProgress()
+        scheduleStopTimer()
+    }
+
+    private func saveLocalWatchProgress() {
+        guard let episode else { return }
+        store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
+        lastHistorySaveAt = Date()
+    }
+
+    private func scheduleStopTimer() {
+        stopTimerTask?.cancel()
+        guard let seconds = stopTimer.seconds else { return }
+        stopTimerTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            playback.pause()
+            withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true; settingsOpen = false }
+        }
+    }
+
+    private func handlePlaybackProgress() {
+        if playback.currentTime > 0, Date().timeIntervalSince(lastHistorySaveAt) >= 10 {
+            saveLocalWatchProgress()
+        }
+        guard playback.duration > 0, playback.currentTime >= playback.duration - 0.75, !didHandleEpisodeEnd else { return }
+        didHandleEpisodeEnd = true
+        let isTargetEpisode = stopAtEpisodeEnabled && episodeIndex == stopAtEpisodeIndex
+        if stopTimer == .endOfEpisode || isTargetEpisode || !autoAdvanceEpisodes || episodeIndex + 1 >= episodes.count {
+            playback.pause()
+            withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true; settingsOpen = false }
+            return
+        }
+        episodeIndex += 1
+        controlsVisible = true
     }
 
     private func toggleControls() {
@@ -511,7 +666,7 @@ struct CinemaPlayerScreen: View {
 
     private func scheduleHide() {
         hideTask?.cancel()
-        guard picker == nil, !volumePopoverOpen else { return }
+        guard picker == nil, !volumePopoverOpen, !settingsOpen else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
