@@ -84,7 +84,7 @@ struct MovieDetailScreen: View {
                     if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
                     if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
                 }
-                Button { store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name); showPlayer = true } label: {
+                Button { store.recordLocalHistory(movie: movie, episode: episode, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil); showPlayer = true } label: {
                     Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
                         .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
                         .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
@@ -160,7 +160,7 @@ struct MovieDetailScreen: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 9) {
                     ForEach(episodes.indices, id: \.self) { index in
                         let item = episodes[index]
-                        Button { selectedEpisode = index; store.recordLocalHistory(movie: movie, episode: item, serverName: server?.name); showPlayer = true } label: {
+                        Button { selectedEpisode = index; store.recordLocalHistory(movie: movie, episode: item, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil); showPlayer = true } label: {
                             HStack(spacing: 10) {
                                 Text(String(format: "%02d", index + 1)).font(.system(size: 11, weight: .black, design: .rounded)).foregroundStyle(selectedEpisode == index ? Color.cinemaInk : Color.cinemaAccent)
                                 Text(item.name).font(.system(size: 11, weight: .bold)).lineLimit(2).multilineTextAlignment(.leading)
