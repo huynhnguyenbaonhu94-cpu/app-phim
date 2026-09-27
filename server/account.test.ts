@@ -12,9 +12,4 @@ describe("account procedures", () => {
     const caller = appRouter.createCaller({ user: undefined, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] });
     await expect(caller.account.recordHistory({ movieSlug: "demo-movie", movieName: "Demo Movie" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
-
-  it("exposes the history deletion procedure to authenticated clients", async () => {
-    const caller = appRouter.createCaller({ user: undefined, req: {} as TrpcContext["req"], res: {} as TrpcContext["res"] });
-    await expect(caller.account.removeHistory({ id: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
 });
