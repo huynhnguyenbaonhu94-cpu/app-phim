@@ -261,7 +261,11 @@ struct CinemaPlayerScreen: View {
     }
 
     private var playbackRateLabel: String {
-        playback.playbackRate == 1 ? "1x" : "\(playback.playbackRate, specifier: "%g")x"
+        playback.playbackRate == 1 ? "1x" : "\(formatRate(playback.playbackRate))x"
+    }
+
+    private func formatRate(_ rate: Float) -> String {
+        String(format: "%g", rate)
     }
 
     private func quickControl(icon: String, title: String, value: String, menu: QuickMenu) -> some View {
@@ -303,7 +307,7 @@ struct CinemaPlayerScreen: View {
                 }
             } else {
                 ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    quickOption(title: rate == 1 ? "Bình thường" : "\(rate, specifier: "%g")x", detail: rate == 1 ? "Tốc độ mặc định" : "Điều chỉnh tốc độ phát", selected: playback.playbackRate == Float(rate)) {
+                    quickOption(title: rate == 1 ? "Bình thường" : "\(formatRate(Float(rate)))x", detail: rate == 1 ? "Tốc độ mặc định" : "Điều chỉnh tốc độ phát", selected: playback.playbackRate == Float(rate)) {
                         playback.setPlaybackRate(Float(rate))
                     }
                 }
@@ -531,7 +535,11 @@ struct CinemaPlayerScreen: View {
             let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         }
-        UIViewController.attemptRotationToDeviceOrientation()
+        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+           #available(iOS 16.0, *),
+           let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController {
+            rootViewController.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
     }
 
     private func formatTime(_ value: Double) -> String {
