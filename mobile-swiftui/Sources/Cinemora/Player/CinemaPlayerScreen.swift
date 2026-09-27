@@ -12,6 +12,7 @@ final class PlaybackController: ObservableObject {
     @Published var isPlaying = false
     @Published var isMuted = false
     @Published var isLoading = false
+    @Published var isSeeking = false
     @Published var playbackRate: Float = 1
     @Published var errorMessage: String?
     @Published var activeURL: URL?
@@ -19,16 +20,20 @@ final class PlaybackController: ObservableObject {
     private var itemObservation: NSKeyValueObservation?
     private var loadTask: Task<Void, Never>?
     private var activeRequestID = UUID()
+    private var seekRequestID = UUID()
+    private var suppressLoadingUntil = Date.distantPast
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else { return }
             Task { @MainActor in
-                if time.seconds.isFinite { self.currentTime = time.seconds }
+                if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
-                self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                if !self.isSeeking, Date() >= self.suppressLoadingUntil {
+                    self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                }
             }
         }
     }
@@ -70,7 +75,7 @@ final class PlaybackController: ObservableObject {
                     if let startAt, startAt > 0, startAt.isFinite {
                         let duration = item.duration.seconds
                         let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
-                        self.player.seek(to: CMTime(seconds: safeStart, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                        self.seek(to: safeStart)
                     }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
@@ -119,7 +124,25 @@ final class PlaybackController: ObservableObject {
 
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
-        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let target = max(0, seconds)
+        seekRequestID = UUID()
+        let requestID = seekRequestID
+        isSeeking = true
+        isLoading = false
+        suppressLoadingUntil = Date().addingTimeInterval(1.2)
+        currentTime = target
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.seekRequestID == requestID else { return }
+                if finished {
+                    let actual = self.player.currentTime().seconds
+                    if actual.isFinite { self.currentTime = actual }
+                }
+                self.isSeeking = false
+                self.isLoading = false
+            }
+        }
     }
 }
 
@@ -235,7 +258,7 @@ struct CinemaPlayerScreen: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
+                        if playback.isLoading && !playback.isSeeking { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
                         if let error = playback.errorMessage {
                             errorCard(error)
                         } else if episode?.streamURL == nil && episode?.embedURL == nil {
@@ -586,7 +609,17 @@ struct CinemaPlayerScreen: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Text(formatTime(isScrubbing ? scrubValue : playback.currentTime)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .leading)
-                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in if !editing { playback.seek(to: scrubValue); isScrubbing = false; scheduleHide() } })
+                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in
+                    if editing {
+                        scrubValue = playback.currentTime
+                        isScrubbing = true
+                    } else {
+                        let target = scrubValue
+                        isScrubbing = false
+                        playback.seek(to: target)
+                        scheduleHide()
+                    }
+                })
                     .tint(Color.cinemaAccent)
                 Text(formatTime(playback.duration)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .trailing)
                 Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
