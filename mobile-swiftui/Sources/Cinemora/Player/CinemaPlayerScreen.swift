@@ -26,10 +26,9 @@ final class PlaybackController: ObservableObject {
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self else { return }
-            let requestID = self.activeRequestID
-            Task { @MainActor in
-                guard self.activeRequestID == requestID else { return }
+            let requestID = MainActor.assumeIsolated { self?.activeRequestID }
+            Task { @MainActor [weak self] in
+                guard let self, let requestID, self.activeRequestID == requestID else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing

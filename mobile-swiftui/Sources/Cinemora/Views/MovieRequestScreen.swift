@@ -80,9 +80,9 @@ struct MovieRequestScreen: View {
                                 }
                             }
                         }
-                        if let imagePreview {
+                        if let preview = imagePreview {
                             VStack(alignment: .leading, spacing: 8) {
-                                Image(uiImage: imagePreview)
+                                Image(uiImage: preview)
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxHeight: 190)

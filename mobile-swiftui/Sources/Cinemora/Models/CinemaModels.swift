@@ -29,7 +29,7 @@ struct Movie: Decodable, Identifiable, Hashable {
     let updatedAt: String?
     let servers: [MovieServer]?
     // Some API responses expose the same groups as `episodes` instead of `servers`.
-    let episodeGroups: [MovieServer]? = nil
+    var episodeGroups: [MovieServer]?
 
     var id: String { apiID ?? slug }
     var posterURL: URL? { CinemaAPI.absoluteURL(poster ?? backdrop) }

@@ -12,7 +12,7 @@ struct LocalMovieRecord: Codable, Identifiable, Hashable {
     var id: String { slug }
 
     var movie: Movie {
-        Movie(apiID: nil, slug: slug, name: name, originName: originName, poster: poster, backdrop: poster, year: year, quality: quality, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil)
+        Movie(apiID: nil, slug: slug, name: name, originName: originName, poster: poster, backdrop: poster, year: year, quality: quality, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil, episodeGroups: nil)
     }
 
     init(movie: Movie, savedAt: Date = Date()) {
