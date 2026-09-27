@@ -338,7 +338,7 @@ export async function getMovieDetail(rawSlug: string): Promise<MovieDetail> {
     const embed = embedUrl(episode?.link_embed);
     const stream = streamUrl(episode?.link_m3u8) || streamUrlFromEmbed(episode?.link_embed);
     return { name: cleanText(episode?.name, "Tập phim"), slug: cleanText(episode?.slug), filename: cleanText(episode?.filename), embedUrl: embed, streamUrl: stream };
-  }).filter((episode: any) => episode.slug && (episode.embedUrl || episode.streamUrl)) : [] })).filter((server: any) => server.episodes.length > 0) : [];
+  }).filter((episode: any) => episode.slug) : [] })).filter((server: any) => server.episodes.length > 0) : [];
   const actorProfiles = await getMoviePeople(slug);
   return { ...movie, actorProfiles, servers };
 }

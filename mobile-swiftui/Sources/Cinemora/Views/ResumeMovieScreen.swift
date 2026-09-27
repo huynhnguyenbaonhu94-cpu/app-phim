@@ -9,6 +9,7 @@ struct ResumeMovieScreen: View {
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var resumeStarted = false
+    @State private var resumeError: String?
 
     var body: some View {
         ZStack {
@@ -17,8 +18,9 @@ struct ResumeMovieScreen: View {
                 ProgressView("Đang tải lại nguồn phát…")
                     .tint(.cinemaAccent)
                     .foregroundStyle(.white)
-            } else if let error = store.detailError {
+            } else if let error = resumeError ?? store.detailError {
                 StateMessage(icon: "wifi.exclamationmark", title: "Không thể tải nguồn phát", detail: error, actionTitle: "Thử lại") {
+                    resumeError = nil
                     resumeStarted = false
                     store.loadDetail(slug: record.movie.slug)
                 }
@@ -44,8 +46,10 @@ struct ResumeMovieScreen: View {
 
     private func startResumeIfReady() {
         guard !resumeStarted, let movie = store.detailMovie, movie.slug == record.movie.slug else { return }
-        guard let servers = movie.servers, !servers.isEmpty else { return }
-        loadedMovie = movie
+        guard let servers = movie.servers, !servers.isEmpty else {
+            resumeError = "Phim chưa có nguồn phát khả dụng. Hãy mở lại trang chi tiết để thử nguồn khác."
+            return
+        }
         var resolvedServer = record.serverName.flatMap { savedName in
             servers.firstIndex(where: { $0.name == savedName })
         } ?? 0
@@ -62,6 +66,15 @@ struct ResumeMovieScreen: View {
                   let serverWithEpisode = servers.firstIndex(where: { $0.episodes.contains(where: { $0.name == savedName }) }) {
             resolvedServer = serverWithEpisode
         }
+        let hasSavedEpisode: (MovieEpisode) -> Bool = { item in
+            if let savedSlug = record.episodeSlug, item.slug == savedSlug { return true }
+            if let savedName = record.episodeName, item.name == savedName { return true }
+            return false
+        }
+        if !servers[resolvedServer].episodes.contains(where: hasSavedEpisode),
+           let serverWithSavedEpisode = servers.firstIndex(where: { $0.episodes.contains(where: hasSavedEpisode) }) {
+            resolvedServer = serverWithSavedEpisode
+        }
         selectedServer = resolvedServer
         let episodes = servers[resolvedServer].episodes
         if let savedSlug = record.episodeSlug, let index = episodes.firstIndex(where: { $0.slug == savedSlug }) {
@@ -69,6 +82,12 @@ struct ResumeMovieScreen: View {
         } else if let savedName = record.episodeName, let index = episodes.firstIndex(where: { $0.name == savedName }) {
             selectedEpisode = index
         }
+        guard episodes.indices.contains(selectedEpisode),
+              episodes[selectedEpisode].streamURL != nil || episodes[selectedEpisode].embedURL != nil else {
+            resumeError = "Nguồn phát của tập này không còn khả dụng. Hãy mở trang chi tiết và chọn nguồn khác."
+            return
+        }
+        loadedMovie = movie
         resumeStarted = true
         showPlayer = true
     }
