@@ -76,7 +76,11 @@ final class CinemaStore: ObservableObject {
                         do {
                             let page: MoviePage
                             if refresh && section.kind == "latest" {
-                                page = (try? await self.api.dailyUpdates()) ?? (try await self.api.list(kind: "latest"))
+                                if let freshPage = try? await self.api.dailyUpdates() {
+                                    page = freshPage
+                                } else {
+                                    page = try await self.api.list(kind: "latest")
+                                }
                             } else {
                                 page = try await self.api.list(kind: section.kind)
                             }
