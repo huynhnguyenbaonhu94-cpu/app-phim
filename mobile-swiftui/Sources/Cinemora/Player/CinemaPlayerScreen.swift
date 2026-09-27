@@ -44,7 +44,7 @@ final class PlaybackController: ObservableObject {
         itemObservation = nil
     }
 
-    func load(_ episode: MovieEpisode) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil) {
         loadTask?.cancel()
         activeRequestID = UUID()
         let requestID = activeRequestID
@@ -67,6 +67,9 @@ final class PlaybackController: ObservableObject {
                 switch item.status {
                 case .readyToPlay:
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
+                    if let startAt, startAt > 0, startAt.isFinite {
+                        self.player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                    }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false
                     self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
@@ -124,6 +127,7 @@ struct CinemaPlayerScreen: View {
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
+    let resumeTime: Double?
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playback = PlaybackController()
@@ -149,6 +153,7 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
     @State private var stopTimerTask: Task<Void, Never>?
     @State private var lastHistorySaveAt = Date.distantPast
+    @State private var hasAppliedResumeTime = false
 
     private enum PickerKind { case episodes, sources }
     private enum QuickMenu: Equatable { case videoFit, playbackRate }
@@ -173,11 +178,12 @@ struct CinemaPlayerScreen: View {
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
+        self.resumeTime = resumeTime
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
         _serverIndex = State(initialValue: server)
@@ -195,6 +201,19 @@ struct CinemaPlayerScreen: View {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
+                }
+
+                if playback.activeURL != nil || episode?.embedURL != nil {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            cinemoraWatermark
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, max(18, proxy.safeAreaInsets.top + 8))
+                    .padding(.trailing, max(18, proxy.safeAreaInsets.trailing + 8))
+                    .allowsHitTesting(false)
                 }
 
                 if controlsVisible && !controlsLocked {
@@ -303,7 +322,6 @@ struct CinemaPlayerScreen: View {
                 Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
             }
             .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
-            cinemoraLogo
             }
             if let quickMenu { quickMenuPanel(quickMenu) }
             if settingsOpen { settingsPanel }
@@ -322,6 +340,18 @@ struct CinemaPlayerScreen: View {
         .accessibilityLabel("Cinemora")
     }
 
+    private var cinemoraWatermark: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "sparkles.tv.fill").font(.system(size: 12, weight: .black))
+            Text("CINEMORA").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1)
+        }
+        .foregroundStyle(.white.opacity(0.82))
+        .padding(.horizontal, 10).frame(height: 32)
+        .background(.black.opacity(0.28), in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.7))
+        .shadow(color: .black.opacity(0.28), radius: 5)
+    }
+
     private var playbackRateLabel: String {
         playback.playbackRate == 1 ? "1x" : "\(formatRate(playback.playbackRate))x"
     }
@@ -332,7 +362,11 @@ struct CinemaPlayerScreen: View {
 
     private func quickControl(icon: String, title: String, value: String, menu: QuickMenu) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.18)) { quickMenu = quickMenu == menu ? nil : menu }
+            withAnimation(.easeOut(duration: 0.18)) {
+                quickMenu = quickMenu == menu ? nil : menu
+                settingsOpen = false
+                volumePopoverOpen = false
+            }
             controlsVisible = true
             hideTask?.cancel()
         } label: {
@@ -424,9 +458,7 @@ struct CinemaPlayerScreen: View {
                 settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Dừng khi xem xong tập mục tiêu")
             }.tint(Color.cinemaAccent)
             if stopAtEpisodeEnabled && !episodes.isEmpty {
-                Picker("Tập dừng", selection: $stopAtEpisodeIndex) {
-                    ForEach(episodes.indices, id: \.self) { index in Text(episodes[index].name).tag(index) }
-                }.pickerStyle(.menu).tint(Color.cinemaAccent).padding(.leading, 32)
+                episodeStopSelector
             }
             Toggle(isOn: $autoAdvanceEpisodes) {
                 settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
@@ -440,6 +472,35 @@ struct CinemaPlayerScreen: View {
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+    }
+
+    private var episodeStopSelector: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("CHỌN TẬP DỪNG").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.48)).padding(.leading, 4)
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 5) {
+                    ForEach(episodes.indices, id: \.self) { index in
+                        Button {
+                            stopAtEpisodeIndex = index
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: stopAtEpisodeIndex == index ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(stopAtEpisodeIndex == index ? Color.cinemaAccent : .white.opacity(0.42))
+                                Text(episodes[index].name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 9).frame(minHeight: 32)
+                            .background(stopAtEpisodeIndex == index ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 142)
+            .scrollClipDisabled()
+        }
+        .padding(.leading, 32)
     }
 
     private func settingsRow<Content: View>(icon: String, title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
@@ -588,7 +649,9 @@ struct CinemaPlayerScreen: View {
     private func loadCurrentEpisode() {
         guard let episode else { return }
         didHandleEpisodeEnd = false
-        playback.load(episode)
+        let startAt = hasAppliedResumeTime ? nil : resumeTime
+        playback.load(episode, startAt: startAt)
+        if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
         scheduleStopTimer()
     }

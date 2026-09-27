@@ -154,9 +154,7 @@ struct LibraryScreen: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(store.localHistory) { record in
-                        localMovieCard(movie: record.movie.movie, subtitle: [record.episodeName, record.serverName].compactMap { $0 }.joined(separator: " · "), progress: record.durationSeconds > 0 ? record.watchedSeconds / record.durationSeconds : nil, progressLabel: record.durationSeconds > 0 ? "\(formatTime(record.watchedSeconds)) / \(formatTime(record.durationSeconds))" : nil) {
-                            store.removeHistory(record)
-                        }
+                        historyMovieCard(record)
                     }
                 }
             }
@@ -180,6 +178,34 @@ struct LibraryScreen: View {
                     }
                 }
             }
+        }
+    }
+
+    private func historyMovieCard(_ record: LocalWatchRecord) -> some View {
+        ZStack(alignment: .topTrailing) {
+            NavigationLink(destination: ResumeMovieScreen(record: record)) {
+                VStack(alignment: .leading, spacing: 7) {
+                    PosterArt(url: record.movie.movie.posterURL)
+                        .frame(width: 142, height: 205)
+                        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
+                    Text(record.movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
+                    Text([record.episodeName, record.serverName].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                    if record.durationSeconds > 0 {
+                        ProgressView(value: min(1, record.watchedSeconds / record.durationSeconds)).tint(Color.cinemaAccent).frame(width: 142)
+                        Text("\(formatTime(record.watchedSeconds)) / \(formatTime(record.durationSeconds))")
+                            .font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .frame(width: 142, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            Button { store.removeHistory(record) } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .black)).foregroundStyle(.white)
+                    .frame(width: 28, height: 28).background(.black.opacity(0.72), in: Circle())
+            }
+            .buttonStyle(.plain).padding(7).accessibilityLabel("Xóa khỏi lịch sử")
         }
     }
 

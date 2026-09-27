@@ -31,6 +31,8 @@ struct LocalWatchRecord: Codable, Identifiable, Hashable {
     let episodeName: String?
     let episodeSlug: String?
     let serverName: String?
+    let streamURL: String?
+    let embedURL: String?
     let watchedSeconds: Double
     let durationSeconds: Double
     let watchedAt: Date
