@@ -76,9 +76,10 @@ final class CinemaStore: ObservableObject {
                         do {
                             let page: MoviePage
                             if refresh && section.kind == "latest" {
-                                if let freshPage = try? await self.api.dailyUpdates() {
-                                    page = freshPage
-                                } else {
+                                do {
+                                    page = try await self.api.dailyUpdates()
+                                } catch {
+                                    if self.isCancellation(error) { return (index, [], nil) }
                                     page = try await self.api.list(kind: "latest")
                                 }
                             } else {
@@ -86,6 +87,7 @@ final class CinemaStore: ObservableObject {
                             }
                             return (index, page.items, nil)
                         } catch {
+                            if self.isCancellation(error) { return (index, [], nil) }
                             return (index, [], error.localizedDescription)
                         }
                     }
@@ -95,6 +97,7 @@ final class CinemaStore: ObservableObject {
                 return collected
             }
             results.append(contentsOf: batch)
+            if Task.isCancelled { return }
         }
         results.sort { $0.0 < $1.0 }
 
@@ -106,8 +109,14 @@ final class CinemaStore: ObservableObject {
         homePage = 1
         homeHasMore = homeMovies.count >= 12
         if homeMovies.isEmpty {
-            homeError = results.compactMap(\.2).first ?? "Chưa tải được danh sách phim mới."
+            homeError = results.compactMap(\.2).first
         }
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
     func loadMoreHome() async {
