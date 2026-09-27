@@ -242,6 +242,7 @@ struct CinemaPlayerScreen: View {
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
             .task {
+                forceLandscape()
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
@@ -479,13 +480,18 @@ struct CinemaPlayerScreen: View {
     }
 
     private func forceOrientation(_ orientation: UIInterfaceOrientation) {
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
-           #available(iOS 16.0, *) {
-            let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+        CinemoraAppDelegate.orientationMask = mask
+
+        guard #available(iOS 16.0, *) else {
+            UIViewController.attemptRotationToDeviceOrientation()
+            return
         }
+
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        activeScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         UIViewController.attemptRotationToDeviceOrientation()
     }
 
