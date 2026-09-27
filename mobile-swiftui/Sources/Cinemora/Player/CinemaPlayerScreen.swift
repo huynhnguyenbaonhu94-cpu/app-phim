@@ -68,10 +68,12 @@ final class PlaybackController: ObservableObject {
                 case .readyToPlay:
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                     if let startAt, startAt > 0, startAt.isFinite {
-                        self.player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                        let duration = item.duration.seconds
+                        let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
+                        self.player.seek(to: CMTime(seconds: safeStart, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                     }
                 case .failed:
-                    self.loadTask?.cancel(); self.isLoading = false
+                    self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
                     self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
                 default: break
                 }
@@ -143,7 +145,7 @@ struct CinemaPlayerScreen: View {
     @State private var settingsOpen = false
     @State private var stopTimer: StopTimer = .off
     @State private var stopAtEpisodeEnabled = false
-    @State private var stopAtEpisodeIndex = 0
+    @State private var stopAtEpisodeID: String?
     @State private var autoAdvanceEpisodes = true
     @State private var didHandleEpisodeEnd = false
     @State private var videoFit: VideoFit = .fit
@@ -178,6 +180,13 @@ struct CinemaPlayerScreen: View {
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
+    private var selectableStopEpisodes: [MovieEpisode] {
+        var seen = Set<String>()
+        return servers.flatMap(\.episodes).filter { episode in
+            let key = episode.id.isEmpty ? episode.name : episode.id
+            return seen.insert(key).inserted
+        }
+    }
 
     init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil) {
         self.movie = movie
@@ -273,8 +282,13 @@ struct CinemaPlayerScreen: View {
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onChange(of: playback.currentTime) { _, _ in handlePlaybackProgress() }
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
-            .onChange(of: stopAtEpisodeEnabled) { _, _ in scheduleStopTimer() }
-            .onChange(of: stopAtEpisodeIndex) { _, _ in scheduleStopTimer() }
+            .onChange(of: stopAtEpisodeEnabled) { _, enabled in
+                if enabled, stopAtEpisodeID == nil {
+                    stopAtEpisodeID = episode?.id ?? selectableStopEpisodes.first?.id
+                }
+                scheduleStopTimer()
+            }
+            .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
@@ -490,25 +504,25 @@ struct CinemaPlayerScreen: View {
     private var episodeStopSelector: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("CHỌN TẬP DỪNG").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.48)).padding(.leading, 4)
-            if episodes.isEmpty {
-                Text("Nguồn hiện tại chưa có danh sách tập. Hãy chọn nguồn phát khác.")
+            if selectableStopEpisodes.isEmpty {
+                Text("API chưa trả về danh sách tập cho phim này. Hãy đóng trình phát và mở lại phim để tải dữ liệu mới.")
                     .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 5) {
-                        ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
+                        ForEach(selectableStopEpisodes, id: \.id) { item in
                             Button {
-                                stopAtEpisodeIndex = index
+                                stopAtEpisodeID = item.id
                             } label: {
                                 HStack(spacing: 8) {
-                                    Image(systemName: stopAtEpisodeIndex == index ? "checkmark.circle.fill" : "circle")
+                                    Image(systemName: stopAtEpisodeID == item.id ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(stopAtEpisodeIndex == index ? Color.cinemaAccent : .white.opacity(0.42))
+                                        .foregroundStyle(stopAtEpisodeID == item.id ? Color.cinemaAccent : .white.opacity(0.42))
                                     Text(item.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
                                 .padding(.horizontal, 9).frame(minHeight: 32)
-                                .background(stopAtEpisodeIndex == index ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .background(stopAtEpisodeID == item.id ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -704,7 +718,7 @@ struct CinemaPlayerScreen: View {
         }
         guard playback.duration > 0, playback.currentTime >= playback.duration - 0.75, !didHandleEpisodeEnd else { return }
         didHandleEpisodeEnd = true
-        let isTargetEpisode = stopAtEpisodeEnabled && episodeIndex == stopAtEpisodeIndex
+        let isTargetEpisode = stopAtEpisodeEnabled && stopAtEpisodeID == episode?.id
         if stopTimer == .endOfEpisode || isTargetEpisode || !autoAdvanceEpisodes || episodeIndex + 1 >= episodes.count {
             playback.pause()
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true; settingsOpen = false }

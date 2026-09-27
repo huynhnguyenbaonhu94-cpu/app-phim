@@ -31,7 +31,7 @@ struct ResumeMovieScreen: View {
         .task(id: record.movie.slug) {
             store.loadDetail(slug: record.movie.slug)
         }
-        .onChange(of: store.detailMovie?.id) { _, _ in startResumeIfReady() }
+        .onChange(of: store.detailMovie?.slug) { _, _ in startResumeIfReady() }
         .onAppear { startResumeIfReady() }
         .fullScreenCover(isPresented: $showPlayer, onDismiss: { dismiss() }) {
             if let loadedMovie, let servers = loadedMovie.servers, !servers.isEmpty {
@@ -46,10 +46,24 @@ struct ResumeMovieScreen: View {
         guard !resumeStarted, let movie = store.detailMovie, movie.slug == record.movie.slug else { return }
         guard let servers = movie.servers, !servers.isEmpty else { return }
         loadedMovie = movie
-        if let savedServer = record.serverName, let index = servers.firstIndex(where: { $0.name == savedServer }) {
-            selectedServer = index
+        var resolvedServer = record.serverName.flatMap { savedName in
+            servers.firstIndex(where: { $0.name == savedName })
+        } ?? 0
+        if servers[resolvedServer].episodes.isEmpty,
+           let playableServer = servers.firstIndex(where: { !$0.episodes.isEmpty }) {
+            resolvedServer = playableServer
         }
-        let episodes = servers[selectedServer].episodes
+        if let savedSlug = record.episodeSlug,
+           !servers[resolvedServer].episodes.contains(where: { $0.slug == savedSlug }),
+           let serverWithEpisode = servers.firstIndex(where: { $0.episodes.contains(where: { $0.slug == savedSlug }) }) {
+            resolvedServer = serverWithEpisode
+        } else if let savedName = record.episodeName,
+                  !servers[resolvedServer].episodes.contains(where: { $0.name == savedName }),
+                  let serverWithEpisode = servers.firstIndex(where: { $0.episodes.contains(where: { $0.name == savedName }) }) {
+            resolvedServer = serverWithEpisode
+        }
+        selectedServer = resolvedServer
+        let episodes = servers[resolvedServer].episodes
         if let savedSlug = record.episodeSlug, let index = episodes.firstIndex(where: { $0.slug == savedSlug }) {
             selectedEpisode = index
         } else if let savedName = record.episodeName, let index = episodes.firstIndex(where: { $0.name == savedName }) {
