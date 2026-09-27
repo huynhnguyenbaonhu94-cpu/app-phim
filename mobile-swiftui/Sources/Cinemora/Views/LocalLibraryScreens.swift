@@ -100,9 +100,9 @@ struct FavoritesScreen: View {
                         StateMessage(icon: "heart", title: "Chưa có phim yêu thích", detail: "Nhấn biểu tượng trái tim trong trang chi tiết để lưu phim.")
                     } else {
                         LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(store.localFavorites, id: \.slug) { record in
+                            ForEach(Array(store.localFavorites), id: \.slug) { record in
                                 ZStack(alignment: .topTrailing) {
-                                    NavigationLink(value: record.movie.movie) {
+                                    NavigationLink(destination: MovieDetailScreen(slug: record.slug)) {
                                         VStack(alignment: .leading, spacing: 8) {
                                             PosterArt(url: record.movie.movie.posterURL)
                                                 .aspectRatio(0.69, contentMode: .fit)
