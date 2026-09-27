@@ -36,33 +36,6 @@ struct CinemaAPI {
         try await query("cinema.meta", input: nil)
     }
 
-    func me() async throws -> AccountUser? { try await query("auth.me", input: nil) }
-    func register(name: String, email: String, password: String) async throws -> AccountUser { (try await mutate("auth.register", input: ["name": name, "email": email, "password": password]) as AuthResponse).user }
-    func login(email: String, password: String) async throws -> AccountUser { (try await mutate("auth.login", input: ["email": email, "password": password]) as AuthResponse).user }
-    func logout() async throws { _ = try await mutate("auth.logout", input: [String: String]()) as EmptyPayload }
-    func favorites() async throws -> [FavoriteMovie] { try await query("account.favorites", input: nil) }
-    func history() async throws -> [WatchHistoryItem] { try await query("account.history", input: nil) }
-    func isFavorite(slug: String) async throws -> Bool { try await query("account.isFavorite", input: ["movieSlug": slug]) }
-    func addFavorite(movie: Movie) async throws { _ = try await mutate("account.addFavorite", input: movieSnapshot(movie)) as Bool }
-    func removeFavorite(slug: String) async throws { _ = try await mutate("account.removeFavorite", input: ["movieSlug": slug]) as Bool }
-    func removeHistory(id: Int) async throws { _ = try await mutate("account.removeHistory", input: ["id": id]) as Bool }
-    func recordHistory(movie: Movie, episode: MovieEpisode?, sourceName: String?, watchedSeconds: Int, durationSeconds: Int) async throws {
-        var payload = movieSnapshot(movie)
-        if let episode { payload["episodeSlug"] = episode.slug; payload["episodeName"] = episode.name }
-        if let sourceName { payload["sourceName"] = sourceName }
-        payload["watchedSeconds"] = watchedSeconds
-        payload["durationSeconds"] = durationSeconds
-        _ = try await mutate("account.recordHistory", input: payload) as Bool
-    }
-
-    private func movieSnapshot(_ movie: Movie) -> [String: Any] {
-        var payload: [String: Any] = ["movieSlug": movie.slug, "movieName": movie.name]
-        if let originName = movie.originName { payload["originName"] = originName }
-        if let poster = movie.poster { payload["posterUrl"] = poster }
-        if let year = movie.year { payload["year"] = year }
-        return payload
-    }
-
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
@@ -87,73 +60,11 @@ struct CinemaAPI {
         let result = envelope["result"] as? [String: Any]
         let resultData = result?["data"] as? [String: Any]
         let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
-        guard JSONSerialization.isValidJSONObject(payload) || payload is Bool || payload is NSNumber || payload is String else { throw APIError.invalidResponse }
-        let decodedData = try JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed])
+        guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
+        let decodedData = try JSONSerialization.data(withJSONObject: payload)
         do { return try JSONDecoder().decode(T.self, from: decodedData) }
         catch { throw APIError.decoding(error.localizedDescription) }
     }
-
-    private func mutate<T: Decodable>(_ procedure: String, input: Any) async throws -> T {
-        var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
-        components.path = "/api/trpc/\(procedure)"
-        guard let url = components.url else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input])
-        request.timeoutInterval = 25
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.http(-1) }
-        guard (200..<300).contains(http.statusCode) else {
-            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = root["error"] as? [String: Any],
-               let json = error["json"] as? [String: Any],
-               let message = json["message"] as? String { throw APIError.server(message) }
-            throw APIError.http(http.statusCode)
-        }
-        let root = try JSONSerialization.jsonObject(with: data)
-        guard let envelope = root as? [String: Any] else { throw APIError.invalidResponse }
-        if let error = envelope["error"] as? [String: Any], let message = (error["json"] as? [String: Any])?["message"] as? String { throw APIError.server(message) }
-        let result = envelope["result"] as? [String: Any]
-        let resultData = result?["data"] as? [String: Any]
-        let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
-        guard JSONSerialization.isValidJSONObject(payload) || payload is Bool || payload is NSNumber || payload is String else { throw APIError.invalidResponse }
-        return try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: payload, options: [.fragmentsAllowed]))
-    }
-}
-
-struct EmptyPayload: Decodable {}
-
-struct AccountUser: Decodable, Identifiable {
-    let id: Int
-    let name: String?
-    let email: String?
-}
-
-struct AuthResponse: Decodable {
-    let user: AccountUser
-}
-
-struct FavoriteMovie: Decodable, Identifiable {
-    let id: Int
-    let movieSlug: String
-    let movieName: String
-    let posterUrl: String?
-    let year: Int?
-}
-
-struct WatchHistoryItem: Decodable, Identifiable {
-    let id: Int
-    let movieSlug: String
-    let movieName: String
-    let posterUrl: String?
-    let episodeName: String?
-    let episodeSlug: String?
-    let sourceName: String?
-    let watchedSeconds: Int
-    let durationSeconds: Int
-    let lastWatchedAt: String
 }
 
 enum APIError: LocalizedError {

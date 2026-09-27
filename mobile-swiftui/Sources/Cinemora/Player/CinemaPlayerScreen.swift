@@ -15,28 +15,20 @@ final class PlaybackController: ObservableObject {
     @Published var playbackRate: Float = 1
     @Published var errorMessage: String?
     @Published var activeURL: URL?
-    @Published private(set) var isSeeking = false
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
     private var loadTask: Task<Void, Never>?
     private var activeRequestID = UUID()
-    private var activeSeekID = UUID()
-    private var ignoreTimeSamplesBefore = 0.0
-    private var previewSeekTask: Task<Void, Never>?
-    private var previewTaskID = UUID()
-    private var pendingPreviewTime: Double?
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else { return }
-            let sampleUptime = ProcessInfo.processInfo.systemUptime
             Task { @MainActor in
-                guard !self.isSeeking, sampleUptime >= self.ignoreTimeSamplesBefore else { return }
                 if time.seconds.isFinite { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
-                self.isLoading = !self.isSeeking && self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             }
         }
     }
@@ -44,12 +36,6 @@ final class PlaybackController: ObservableObject {
     func shutdown() {
         loadTask?.cancel()
         loadTask = nil
-        activeSeekID = UUID()
-        isSeeking = false
-        previewTaskID = UUID()
-        previewSeekTask?.cancel()
-        previewSeekTask = nil
-        pendingPreviewTime = nil
         player.pause()
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -58,14 +44,8 @@ final class PlaybackController: ObservableObject {
         itemObservation = nil
     }
 
-    func load(_ episode: MovieEpisode, startAt: Double = 0) {
+    func load(_ episode: MovieEpisode) {
         loadTask?.cancel()
-        activeSeekID = UUID()
-        isSeeking = false
-        previewTaskID = UUID()
-        previewSeekTask?.cancel()
-        previewSeekTask = nil
-        pendingPreviewTime = nil
         activeRequestID = UUID()
         let requestID = activeRequestID
         errorMessage = nil; currentTime = 0; duration = 0
@@ -87,7 +67,6 @@ final class PlaybackController: ObservableObject {
                 switch item.status {
                 case .readyToPlay:
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
-                    if startAt > 0 { self.player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false
                     self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
@@ -128,101 +107,9 @@ final class PlaybackController: ObservableObject {
         if player.timeControlStatus == .playing { player.rate = value }
     }
 
-    func previewSeek(to seconds: Double) {
-        guard let target = normalizedSeekTime(seconds) else { return }
-        if isSeeking { player.currentItem?.cancelPendingSeeks() }
-        pendingPreviewTime = target
-        currentTime = target
-        guard previewSeekTask == nil else { return }
-
-        let taskID = UUID()
-        previewTaskID = taskID
-        previewSeekTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled, self.previewTaskID == taskID {
-                guard let nextTarget = self.pendingPreviewTime else { break }
-                self.pendingPreviewTime = nil
-                await self.performPreviewSeek(to: nextTarget)
-                if self.pendingPreviewTime == nil {
-                    try? await Task.sleep(for: .milliseconds(180))
-                }
-            }
-            guard self.previewTaskID == taskID else { return }
-            self.previewSeekTask = nil
-        }
-    }
-
     func seek(to seconds: Double) {
-        guard let target = normalizedSeekTime(seconds) else { return }
-        previewTaskID = UUID()
-        previewSeekTask?.cancel()
-        previewSeekTask = nil
-        pendingPreviewTime = nil
-        currentTime = target
-        performSeek(to: target, tolerance: .zero)
-    }
-
-    private func normalizedSeekTime(_ seconds: Double) -> Double? {
-        guard seconds.isFinite, let item = player.currentItem else { return nil }
-        let itemDuration = item.duration.seconds
-        let knownDuration = duration > 0 ? duration : (itemDuration.isFinite ? itemDuration : 0)
-        return max(0, min(seconds, knownDuration > 0 ? knownDuration : seconds))
-    }
-
-    private func performPreviewSeek(to seconds: Double) async {
-        guard let item = player.currentItem else { return }
-        let seekID = UUID()
-        activeSeekID = seekID
-        item.cancelPendingSeeks()
-        isSeeking = true
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let tolerance = CMTime(seconds: 0.6, preferredTimescale: 600)
-            player.seek(
-                to: CMTime(seconds: seconds, preferredTimescale: 600),
-                toleranceBefore: tolerance,
-                toleranceAfter: tolerance
-            ) { [weak self] finished in
-                guard let self else {
-                    continuation.resume()
-                    return
-                }
-                Task { @MainActor in
-                    if self.activeSeekID == seekID {
-                        self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.25
-                        self.isSeeking = false
-                        let actual = self.player.currentTime().seconds
-                        if finished, actual.isFinite, self.pendingPreviewTime == nil {
-                            self.currentTime = actual
-                        }
-                    }
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func performSeek(to seconds: Double, tolerance: CMTime) {
-        guard let item = player.currentItem else { return }
-        let seekID = UUID()
-        activeSeekID = seekID
-        item.cancelPendingSeeks()
-        isSeeking = true
-        player.seek(
-            to: CMTime(seconds: seconds, preferredTimescale: 600),
-            toleranceBefore: tolerance,
-            toleranceAfter: tolerance
-        ) { [weak self] finished in
-            guard let self else { return }
-            Task { @MainActor in
-                guard self.activeSeekID == seekID else { return }
-                self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.25
-                self.isSeeking = false
-                let actual = self.player.currentTime().seconds
-                if finished, actual.isFinite, self.pendingPreviewTime == nil {
-                    self.currentTime = actual
-                }
-            }
-        }
+        guard seconds.isFinite else { return }
+        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 }
 
@@ -249,9 +136,7 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
 
     private enum PickerKind { case episodes, sources }
-    fileprivate enum VideoFit: String, CaseIterable {
-        case fit = "Tỷ lệ gốc · đủ khung hình"
-    }
+    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
@@ -272,15 +157,7 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
-                    PosterArt(url: movie.backdropURL).ignoresSafeArea()
-                        .overlay(Color.black.opacity(playback.isLoading && !playback.isSeeking ? 0.28 : 0.05))
-                    NativeVideoSurface(player: playback.player, fit: videoFit)
-                        .ignoresSafeArea()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
-                        .clipped()
-                        .opacity(playback.isLoading && !playback.isSeeking ? 0.12 : 1)
-                        .accessibilityLabel("Đang phát \(movie.name)")
+                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
@@ -292,15 +169,7 @@ struct CinemaPlayerScreen: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading && !playback.isSeeking {
-                            VStack(spacing: 8) {
-                                ProgressView().tint(.cinemaAccent).scaleEffect(1.15)
-                                Text("Đang tải nguồn phát…")
-                                    .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                                Text("Bạn có thể chờ trong giây lát").font(.system(size: 10)).foregroundStyle(.white.opacity(0.62))
-                            }
-                            .padding(.horizontal, 20).padding(.vertical, 16).cinemaGlass(in: RoundedRectangle(cornerRadius: 18), tint: .black.opacity(0.52))
-                        }
+                        if playback.isLoading { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
                         if let error = playback.errorMessage {
                             errorCard(error)
                         } else if episode?.streamURL == nil && episode?.embedURL == nil {
@@ -352,15 +221,11 @@ struct CinemaPlayerScreen: View {
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
             .task {
-                forceLandscape()
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear {
-                hideTask?.cancel(); lockHideTask?.cancel()
-                playback.shutdown(); forcePortrait()
-            }
+            .onDisappear { hideTask?.cancel(); lockHideTask?.cancel(); playback.shutdown(); forcePortrait() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -428,27 +293,7 @@ struct CinemaPlayerScreen: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Text(formatTime(isScrubbing ? scrubValue : playback.currentTime)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .leading)
-                Slider(
-                    value: Binding(
-                        get: { isScrubbing ? scrubValue : min(max(0, playback.currentTime), max(1, playback.duration)) },
-                        set: {
-                            scrubValue = $0
-                            playback.previewSeek(to: $0)
-                        }
-                    ),
-                    in: 0...max(1, playback.duration),
-                    onEditingChanged: { editing in
-                        if editing {
-                            scrubValue = min(max(0, playback.currentTime), max(1, playback.duration))
-                            isScrubbing = true
-                        } else {
-                            let target = scrubValue
-                            isScrubbing = false
-                            playback.seek(to: target)
-                            scheduleHide()
-                        }
-                    }
-                )
+                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in if !editing { playback.seek(to: scrubValue); isScrubbing = false; scheduleHide() } })
                     .tint(Color.cinemaAccent)
                 Text(formatTime(playback.duration)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .trailing)
                 Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
@@ -610,18 +455,13 @@ struct CinemaPlayerScreen: View {
     }
 
     private func forceOrientation(_ orientation: UIInterfaceOrientation) {
-        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-        CinemoraAppDelegate.orientationMask = mask
-
-        guard #available(iOS 16.0, *) else {
-            UIViewController.attemptRotationToDeviceOrientation()
-            return
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+           #available(iOS 16.0, *) {
+            let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         }
-
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        activeScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         UIViewController.attemptRotationToDeviceOrientation()
     }
 
@@ -673,8 +513,9 @@ private struct NativeVideoSurface: UIViewRepresentable {
 private extension CinemaPlayerScreen.VideoFit {
     var gravity: AVLayerVideoGravity {
         switch self {
-        // Aspect fit shows the complete encoded frame; unlike aspect fill, it does not crop subtitles near the edges.
         case .fit: return .resizeAspect
+        case .fill: return .resize
+        case .cover: return .resizeAspectFill
         }
     }
 }

@@ -24,7 +24,6 @@ final class CinemaStore: ObservableObject {
     private let api = CinemaAPI.shared
     private var homePage = 1
     private var detailTask: Task<Void, Never>?
-    private var detailCache: [String: Movie] = [:]
     private var catalogTask: Task<Void, Never>?
     private var detailRequestID = 0
     private var catalogRequestID = 0
@@ -100,20 +99,12 @@ final class CinemaStore: ObservableObject {
         detailTask?.cancel()
         detailRequestID += 1
         let requestID = detailRequestID
-        if let cached = detailCache[slug] {
-            detailMovie = cached
-            detailLoading = false
-        } else {
-            detailMovie = nil
-            detailLoading = true
-        }
-        detailError = nil
+        detailMovie = nil; detailLoading = true; detailError = nil
         detailTask = Task {
             defer { if requestID == detailRequestID { detailLoading = false } }
             do {
                 let value = try await api.detail(slug: slug)
                 guard !Task.isCancelled, requestID == detailRequestID else { return }
-                detailCache[slug] = value
                 detailMovie = value
             } catch {
                 guard !Task.isCancelled, requestID == detailRequestID else { return }

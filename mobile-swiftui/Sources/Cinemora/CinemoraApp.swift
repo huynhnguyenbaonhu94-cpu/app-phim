@@ -1,16 +1,10 @@
 import SwiftUI
-import UIKit
 
 @main
 @MainActor
 struct CinemoraApp: App {
-    @UIApplicationDelegateAdaptor(CinemoraAppDelegate.self) private var appDelegate
     @StateObject private var store = CinemaStore()
     @StateObject private var connectivity = ConnectivityMonitor()
-
-    init() {
-        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 256 * 1024 * 1024, diskPath: "cinemora-images")
-    }
 
     var body: some Scene {
         WindowGroup {
@@ -19,19 +13,6 @@ struct CinemoraApp: App {
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
         }
-    }
-}
-
-@MainActor
-final class CinemoraAppDelegate: NSObject, UIApplicationDelegate {
-    /// The player changes this mask before asking its active scene to rotate.
-    static var orientationMask: UIInterfaceOrientationMask = .allButUpsideDown
-
-    func application(
-        _ application: UIApplication,
-        supportedInterfaceOrientationsFor window: UIWindow?
-    ) -> UIInterfaceOrientationMask {
-        Self.orientationMask
     }
 }
 
@@ -60,9 +41,7 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
-    @EnvironmentObject private var store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
-    @Environment(\.scenePhase) private var scenePhase
     @State private var showLaunchLoader = true
 
     var body: some View {
@@ -86,7 +65,7 @@ struct CinemoraTabShell: View {
                 tabRoot {
                     AccountScreen()
                 }
-                .tabItem { Label("Ứng Dụng", systemImage: "info.circle") }
+                .tabItem { Label("Tài Khoản", systemImage: "person.crop.circle") }
             }
             .tint(.cinemaAccent)
             .modifier(ScrollMinimizingTabBar())
@@ -103,9 +82,6 @@ struct CinemoraTabShell: View {
         .task {
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await store.refreshHome() } }
         }
     }
 

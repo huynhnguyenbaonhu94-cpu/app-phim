@@ -59,9 +59,8 @@ struct MovieDetailScreen: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: slug) {
-            store.loadDetail(slug: slug)
-        }
+        .task(id: slug) { store.loadDetail(slug: slug) }
+        .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
         .fullScreenCover(isPresented: $showPlayer) {
             if let movie, episode != nil {
@@ -85,15 +84,12 @@ struct MovieDetailScreen: View {
                     if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
                     if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
                 }
-                HStack(spacing: 9) {
-                    Button { showPlayer = true } label: {
-                        Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
-                            .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
-                            .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
-                    }
-                    .buttonStyle(.plain).disabled(episode == nil).opacity(episode == nil ? 0.5 : 1)
+                Button { showPlayer = true } label: {
+                    Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
+                        .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
                 }
-                .padding(.top, 5)
+                .buttonStyle(.plain).disabled(episode == nil).opacity(episode == nil ? 0.5 : 1).padding(.top, 5)
             }
             .padding(22)
         }
@@ -223,7 +219,20 @@ struct MovieDetailScreen: View {
 
     private func actorCard(_ profile: MovieActorProfile) -> some View {
         VStack(spacing: 7) {
-            CinemaRemoteImage(url: profile.imageURL)
+            AsyncImage(url: profile.imageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty, .failure:
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Color.cinemaAccent.opacity(0.72))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.white.opacity(0.08))
+                @unknown default:
+                    EmptyView()
+                }
+            }
             .frame(width: 72, height: 88)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14), lineWidth: 0.7))
