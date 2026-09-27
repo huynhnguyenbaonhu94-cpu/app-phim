@@ -36,7 +36,8 @@ struct ResumeMovieScreen: View {
         .onChange(of: store.detailMovie?.slug) { _, _ in startResumeIfReady() }
         .onAppear { startResumeIfReady() }
         .fullScreenCover(isPresented: $showPlayer, onDismiss: { dismiss() }) {
-            if let loadedMovie, let servers = loadedMovie.servers, !servers.isEmpty {
+            if let loadedMovie, !loadedMovie.availableServers.isEmpty {
+                let servers = loadedMovie.availableServers
                 CinemaPlayerScreen(movie: loadedMovie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode, resumeTime: record.watchedSeconds)
                     .environmentObject(store)
                     .preferredColorScheme(.dark)
@@ -46,7 +47,8 @@ struct ResumeMovieScreen: View {
 
     private func startResumeIfReady() {
         guard !resumeStarted, let movie = store.detailMovie, movie.slug == record.movie.slug else { return }
-        guard let servers = movie.servers, !servers.isEmpty else {
+        let servers = movie.availableServers
+        guard !servers.isEmpty else {
             resumeError = "Phim chưa có nguồn phát khả dụng. Hãy mở lại trang chi tiết để thử nguồn khác."
             return
         }

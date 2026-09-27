@@ -28,17 +28,23 @@ struct Movie: Decodable, Identifiable, Hashable {
     let createdAt: String?
     let updatedAt: String?
     let servers: [MovieServer]?
+    // Some API responses expose the same groups as `episodes` instead of `servers`.
+    let episodeGroups: [MovieServer]? = nil
 
     var id: String { apiID ?? slug }
     var posterURL: URL? { CinemaAPI.absoluteURL(poster ?? backdrop) }
     var backdropURL: URL? { CinemaAPI.absoluteURL(backdrop ?? poster) }
     var displayTitle: String { originName.map { "\(name) · \($0)" } ?? name }
+    var availableServers: [MovieServer] {
+        if let servers, !servers.isEmpty { return servers }
+        return episodeGroups ?? []
+    }
 
     enum CodingKeys: String, CodingKey {
         case apiID = "id", slug, name, originName, poster, backdrop, year, quality
         case episodeCurrent, episodeTotal, time, lang, description, rating, categories
         case countries, actors, actorProfiles, directors, views, alternativeNames, status
-        case tmdbId, imdbId, createdAt, updatedAt, servers
+        case tmdbId, imdbId, createdAt, updatedAt, servers, episodeGroups = "episodes"
     }
 }
 
@@ -61,6 +67,29 @@ struct MovieServer: Decodable, Hashable, Identifiable {
     let isAi: Bool
     let episodes: [MovieEpisode]
     var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, serverName = "server_name"
+        case isAi, isAiSnake = "is_ai"
+        case episodes, serverData = "server_data", serverDataCamel = "serverData"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+            ?? container.decodeIfPresent(String.self, forKey: .serverName)
+            ?? "Nguồn phim"
+        isAi = try container.decodeIfPresent(Bool.self, forKey: .isAi)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isAiSnake)
+            ?? false
+        if let value = try? container.decode([MovieEpisode].self, forKey: .episodes) {
+            episodes = value
+        } else if let value = try? container.decode([MovieEpisode].self, forKey: .serverData) {
+            episodes = value
+        } else {
+            episodes = (try? container.decode([MovieEpisode].self, forKey: .serverDataCamel)) ?? []
+        }
+    }
 }
 
 struct MovieEpisode: Decodable, Hashable, Identifiable {
@@ -72,6 +101,26 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
+
+    enum CodingKeys: String, CodingKey {
+        case name, slug, filename
+        case embedUrl, embedURLSnake = "embed_url", linkEmbed = "link_embed"
+        case streamUrl, streamURLSnake = "stream_url", linkM3U8 = "link_m3u8", link
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Tập phim"
+        slug = try container.decodeIfPresent(String.self, forKey: .slug) ?? ""
+        filename = try container.decodeIfPresent(String.self, forKey: .filename) ?? ""
+        embedUrl = try container.decodeIfPresent(String.self, forKey: .embedUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .embedURLSnake)
+            ?? container.decodeIfPresent(String.self, forKey: .linkEmbed)
+        streamUrl = try container.decodeIfPresent(String.self, forKey: .streamUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .streamURLSnake)
+            ?? container.decodeIfPresent(String.self, forKey: .linkM3U8)
+            ?? container.decodeIfPresent(String.self, forKey: .link)
+    }
 }
 
 struct MoviePage: Decodable {

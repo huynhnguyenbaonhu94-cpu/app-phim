@@ -183,9 +183,16 @@ struct CinemaPlayerScreen: View {
     private var selectableStopEpisodes: [MovieEpisode] {
         var seen = Set<String>()
         return servers.flatMap(\.episodes).filter { episode in
-            let key = episode.id.isEmpty ? episode.name : episode.id
+            let key = stopEpisodeKey(episode)
             return seen.insert(key).inserted
         }
+    }
+
+    private func stopEpisodeKey(_ episode: MovieEpisode) -> String {
+        let value = episode.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value.isEmpty ? episode.name : value)
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
     }
 
     init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil) {
@@ -284,7 +291,7 @@ struct CinemaPlayerScreen: View {
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
             .onChange(of: stopAtEpisodeEnabled) { _, enabled in
                 if enabled, stopAtEpisodeID == nil {
-                    stopAtEpisodeID = episode?.id ?? selectableStopEpisodes.first?.id
+                    stopAtEpisodeID = episode.map { stopEpisodeKey($0) } ?? selectableStopEpisodes.first.map { stopEpisodeKey($0) }
                 }
                 scheduleStopTimer()
             }
@@ -512,17 +519,17 @@ struct CinemaPlayerScreen: View {
                     LazyVStack(spacing: 5) {
                         ForEach(selectableStopEpisodes, id: \.id) { item in
                             Button {
-                                stopAtEpisodeID = item.id
+                                stopAtEpisodeID = stopEpisodeKey(item)
                             } label: {
                                 HStack(spacing: 8) {
-                                    Image(systemName: stopAtEpisodeID == item.id ? "checkmark.circle.fill" : "circle")
+                                    Image(systemName: stopAtEpisodeID == stopEpisodeKey(item) ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(stopAtEpisodeID == item.id ? Color.cinemaAccent : .white.opacity(0.42))
+                                        .foregroundStyle(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent : .white.opacity(0.42))
                                     Text(item.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
                                 .padding(.horizontal, 9).frame(minHeight: 32)
-                                .background(stopAtEpisodeID == item.id ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .background(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -718,7 +725,7 @@ struct CinemaPlayerScreen: View {
         }
         guard playback.duration > 0, playback.currentTime >= playback.duration - 0.75, !didHandleEpisodeEnd else { return }
         didHandleEpisodeEnd = true
-        let isTargetEpisode = stopAtEpisodeEnabled && stopAtEpisodeID == episode?.id
+        let isTargetEpisode = stopAtEpisodeEnabled && episode.map { stopEpisodeKey($0) } == stopAtEpisodeID
         if stopTimer == .endOfEpisode || isTargetEpisode || !autoAdvanceEpisodes || episodeIndex + 1 >= episodes.count {
             playback.pause()
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true; settingsOpen = false }

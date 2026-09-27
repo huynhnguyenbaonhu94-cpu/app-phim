@@ -9,7 +9,7 @@ struct MovieDetailScreen: View {
     @State private var showPlayer = false
 
     private var movie: Movie? { store.detailMovie }
-    private var servers: [MovieServer] { movie?.servers ?? [] }
+    private var servers: [MovieServer] { movie?.availableServers ?? [] }
     private var episodes: [MovieEpisode] { servers.indices.contains(selectedServer) ? servers[selectedServer].episodes : [] }
     private var episode: MovieEpisode? { episodes.indices.contains(selectedEpisode) ? episodes[selectedEpisode] : nil }
 

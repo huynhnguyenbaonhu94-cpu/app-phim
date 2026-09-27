@@ -86,3 +86,10 @@ Backend phải cho phép request từ app native và vẫn phục vụ route `ht
 - Thay tab bar mặc định bằng custom tab bar kính mờ có lớp specular, viền sáng, capsule active và chấm chỉ báo hoạt động.
 - Chuyển động đổi tab dùng spring native-driver cho icon/capsule; khi cuộn nội dung xuống, thanh trượt khỏi cạnh dưới và mờ nhẹ; vuốt lên hoặc về đầu trang thì trượt lại.
 - Không thêm package animation mới; dùng `Animated` của React Native cùng Expo Blur.
+
+## Patch v9 — sửa danh sách tập cho “Dừng ở tập đã chọn”
+- SwiftUI decoder nhận cả schema đã chuẩn hóa (`servers[].episodes`) và schema upstream (`server_name`, `server_data`, `link_m3u8`, `link_embed`).
+- Thêm fallback đọc nhóm nguồn từ trường `episodes` khi response không có `servers`, đồng bộ với logic `getEpisodeGroups` của bản Expo.
+- Detail/resume/player dùng cùng danh sách nguồn đã chuẩn hóa, tránh selector dừng tập bị rỗng dù màn hình chi tiết vẫn có dữ liệu.
+- Khóa tập dừng được chuẩn hóa theo slug/tên tập (trim, bỏ dấu, chữ thường), chống trùng ID giữa nhiều nguồn và bảo đảm so sánh đúng khi tập kết thúc.
+- Môi trường Linux không có Swift/Xcode nên chưa thể build IPA tại chỗ; cần chạy XcodeGen/Xcode build trên Codemagic hoặc macOS.
