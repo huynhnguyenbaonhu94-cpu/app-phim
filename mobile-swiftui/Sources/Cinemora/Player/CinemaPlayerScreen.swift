@@ -22,6 +22,9 @@ final class PlaybackController: ObservableObject {
     private var activeRequestID = UUID()
     private var activeSeekID = UUID()
     private var ignoreTimeSamplesBefore = 0.0
+    private var previewSeekTask: Task<Void, Never>?
+    private var previewTaskID = UUID()
+    private var pendingPreviewTime: Double?
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -33,7 +36,7 @@ final class PlaybackController: ObservableObject {
                 if time.seconds.isFinite { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
-                self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.isLoading = !self.isSeeking && self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             }
         }
     }
@@ -43,6 +46,10 @@ final class PlaybackController: ObservableObject {
         loadTask = nil
         activeSeekID = UUID()
         isSeeking = false
+        previewTaskID = UUID()
+        previewSeekTask?.cancel()
+        previewSeekTask = nil
+        pendingPreviewTime = nil
         player.pause()
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -55,6 +62,10 @@ final class PlaybackController: ObservableObject {
         loadTask?.cancel()
         activeSeekID = UUID()
         isSeeking = false
+        previewTaskID = UUID()
+        previewSeekTask?.cancel()
+        previewSeekTask = nil
+        pendingPreviewTime = nil
         activeRequestID = UUID()
         let requestID = activeRequestID
         errorMessage = nil; currentTime = 0; duration = 0
@@ -117,24 +128,99 @@ final class PlaybackController: ObservableObject {
         if player.timeControlStatus == .playing { player.rate = value }
     }
 
+    func previewSeek(to seconds: Double) {
+        guard let target = normalizedSeekTime(seconds) else { return }
+        if isSeeking { player.currentItem?.cancelPendingSeeks() }
+        pendingPreviewTime = target
+        currentTime = target
+        guard previewSeekTask == nil else { return }
+
+        let taskID = UUID()
+        previewTaskID = taskID
+        previewSeekTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, self.previewTaskID == taskID {
+                guard let nextTarget = self.pendingPreviewTime else { break }
+                self.pendingPreviewTime = nil
+                await self.performPreviewSeek(to: nextTarget)
+                if self.pendingPreviewTime == nil {
+                    try? await Task.sleep(for: .milliseconds(180))
+                }
+            }
+            guard self.previewTaskID == taskID else { return }
+            self.previewSeekTask = nil
+        }
+    }
+
     func seek(to seconds: Double) {
-        guard seconds.isFinite else { return }
-        let target = max(0, min(seconds, duration > 0 ? duration : seconds))
+        guard let target = normalizedSeekTime(seconds) else { return }
+        previewTaskID = UUID()
+        previewSeekTask?.cancel()
+        previewSeekTask = nil
+        pendingPreviewTime = nil
+        currentTime = target
+        performSeek(to: target, tolerance: .zero)
+    }
+
+    private func normalizedSeekTime(_ seconds: Double) -> Double? {
+        guard seconds.isFinite, let item = player.currentItem else { return nil }
+        let itemDuration = item.duration.seconds
+        let knownDuration = duration > 0 ? duration : (itemDuration.isFinite ? itemDuration : 0)
+        return max(0, min(seconds, knownDuration > 0 ? knownDuration : seconds))
+    }
+
+    private func performPreviewSeek(to seconds: Double) async {
+        guard let item = player.currentItem else { return }
         let seekID = UUID()
         activeSeekID = seekID
+        item.cancelPendingSeeks()
         isSeeking = true
-        currentTime = target
-        let time = CMTime(seconds: target, preferredTimescale: 600)
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let tolerance = CMTime(seconds: 0.6, preferredTimescale: 600)
+            player.seek(
+                to: CMTime(seconds: seconds, preferredTimescale: 600),
+                toleranceBefore: tolerance,
+                toleranceAfter: tolerance
+            ) { [weak self] finished in
+                guard let self else {
+                    continuation.resume()
+                    return
+                }
+                Task { @MainActor in
+                    if self.activeSeekID == seekID {
+                        self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.25
+                        self.isSeeking = false
+                        let actual = self.player.currentTime().seconds
+                        if finished, actual.isFinite, self.pendingPreviewTime == nil {
+                            self.currentTime = actual
+                        }
+                    }
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func performSeek(to seconds: Double, tolerance: CMTime) {
+        guard let item = player.currentItem else { return }
+        let seekID = UUID()
+        activeSeekID = seekID
+        item.cancelPendingSeeks()
+        isSeeking = true
+        player.seek(
+            to: CMTime(seconds: seconds, preferredTimescale: 600),
+            toleranceBefore: tolerance,
+            toleranceAfter: tolerance
+        ) { [weak self] finished in
             guard let self else { return }
             Task { @MainActor in
                 guard self.activeSeekID == seekID else { return }
-                self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.55
+                self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.25
                 self.isSeeking = false
-                guard finished else { return }
                 let actual = self.player.currentTime().seconds
-                guard actual.isFinite else { return }
-                self.currentTime = actual
+                if finished, actual.isFinite, self.pendingPreviewTime == nil {
+                    self.currentTime = actual
+                }
             }
         }
     }
@@ -163,7 +249,9 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
 
     private enum PickerKind { case episodes, sources }
-    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa · đủ khung hình", fill = "Đầy", cover = "Phủ" }
+    fileprivate enum VideoFit: String, CaseIterable {
+        case fit = "Tỷ lệ gốc · đủ khung hình"
+    }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
@@ -185,13 +273,13 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea()
-                        .overlay(Color.black.opacity(playback.isLoading ? 0.28 : 0.05))
+                        .overlay(Color.black.opacity(playback.isLoading && !playback.isSeeking ? 0.28 : 0.05))
                     NativeVideoSurface(player: playback.player, fit: videoFit)
+                        .ignoresSafeArea()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black)
                         .clipped()
-                        .ignoresSafeArea()
-                        .opacity(playback.isLoading ? 0.12 : 1)
+                        .opacity(playback.isLoading && !playback.isSeeking ? 0.12 : 1)
                         .accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
@@ -204,7 +292,7 @@ struct CinemaPlayerScreen: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading {
+                        if playback.isLoading && !playback.isSeeking {
                             VStack(spacing: 8) {
                                 ProgressView().tint(.cinemaAccent).scaleEffect(1.15)
                                 Text("Đang tải nguồn phát…")
@@ -263,15 +351,9 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
-            .task {
-                forceLandscape()
-                try? await Task.sleep(for: .milliseconds(250))
-                guard !Task.isCancelled else { return }
-                forceLandscape()
-            }
             .onDisappear {
                 hideTask?.cancel(); lockHideTask?.cancel()
-                playback.shutdown(); forcePortrait()
+                playback.shutdown()
             }
             .statusBarHidden(true)
         }
@@ -343,7 +425,10 @@ struct CinemaPlayerScreen: View {
                 Slider(
                     value: Binding(
                         get: { isScrubbing ? scrubValue : min(max(0, playback.currentTime), max(1, playback.duration)) },
-                        set: { scrubValue = $0 }
+                        set: {
+                            scrubValue = $0
+                            playback.previewSeek(to: $0)
+                        }
                     ),
                     in: 0...max(1, playback.duration),
                     onEditingChanged: { editing in
@@ -510,30 +595,6 @@ struct CinemaPlayerScreen: View {
         }
     }
 
-    private func forceLandscape() {
-        forceOrientation(.landscapeRight)
-    }
-
-    private func forcePortrait() {
-        forceOrientation(.portrait)
-    }
-
-    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
-        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-        CinemoraAppDelegate.orientationMask = mask
-
-        guard #available(iOS 16.0, *) else {
-            UIViewController.attemptRotationToDeviceOrientation()
-            return
-        }
-
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        activeScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
-        UIViewController.attemptRotationToDeviceOrientation()
-    }
-
     private func formatTime(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
@@ -584,8 +645,6 @@ private extension CinemaPlayerScreen.VideoFit {
         switch self {
         // Aspect fit shows the complete encoded frame; unlike aspect fill, it does not crop subtitles near the edges.
         case .fit: return .resizeAspect
-        case .fill: return .resize
-        case .cover: return .resizeAspectFill
         }
     }
 }

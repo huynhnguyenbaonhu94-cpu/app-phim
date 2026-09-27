@@ -1,10 +1,8 @@
 import SwiftUI
-import UIKit
 
 @main
 @MainActor
 struct CinemoraApp: App {
-    @UIApplicationDelegateAdaptor(CinemoraAppDelegate.self) private var appDelegate
     @StateObject private var store = CinemaStore()
     @StateObject private var connectivity = ConnectivityMonitor()
 
@@ -19,19 +17,6 @@ struct CinemoraApp: App {
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
         }
-    }
-}
-
-@MainActor
-final class CinemoraAppDelegate: NSObject, UIApplicationDelegate {
-    /// The player changes this mask before asking its active scene to rotate.
-    static var orientationMask: UIInterfaceOrientationMask = .allButUpsideDown
-
-    func application(
-        _ application: UIApplication,
-        supportedInterfaceOrientationsFor window: UIWindow?
-    ) -> UIInterfaceOrientationMask {
-        Self.orientationMask
     }
 }
 
