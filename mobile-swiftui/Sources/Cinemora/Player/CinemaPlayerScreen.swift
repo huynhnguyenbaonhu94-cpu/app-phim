@@ -351,9 +351,15 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .task {
+                forceLandscape()
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                forceLandscape()
+            }
             .onDisappear {
                 hideTask?.cancel(); lockHideTask?.cancel()
-                playback.shutdown()
+                playback.shutdown(); forcePortrait()
             }
             .statusBarHidden(true)
         }
@@ -593,6 +599,30 @@ struct CinemaPlayerScreen: View {
             guard !Task.isCancelled else { return }
             if (playback.isPlaying || (episode?.streamURL == nil && episode?.embedURL != nil)) && picker == nil { withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false } }
         }
+    }
+
+    private func forceLandscape() {
+        forceOrientation(.landscapeRight)
+    }
+
+    private func forcePortrait() {
+        forceOrientation(.portrait)
+    }
+
+    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
+        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+        CinemoraAppDelegate.orientationMask = mask
+
+        guard #available(iOS 16.0, *) else {
+            UIViewController.attemptRotationToDeviceOrientation()
+            return
+        }
+
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        activeScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        UIViewController.attemptRotationToDeviceOrientation()
     }
 
     private func formatTime(_ value: Double) -> String {
