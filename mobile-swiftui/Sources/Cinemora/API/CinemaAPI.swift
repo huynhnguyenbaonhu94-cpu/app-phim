@@ -16,11 +16,12 @@ struct CinemaAPI {
         try await query("cinema.home", input: ["page": page])
     }
 
-    func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil) async throws -> MoviePage {
+    func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil, refresh: Bool = false) async throws -> MoviePage {
         var input: [String: Any] = ["page": page, "kind": kind]
         if let category, !category.isEmpty { input["category"] = category }
         if let country, !country.isEmpty { input["country"] = country }
         if let year { input["year"] = year }
+        if refresh { input["refresh"] = true }
         return try await query("cinema.list", input: input)
     }
 

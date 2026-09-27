@@ -1,9 +1,16 @@
 import Combine
 import Foundation
 
+struct HomeSection: Identifiable {
+    let id: String
+    let title: String
+    let movies: [Movie]
+}
+
 @MainActor
 final class CinemaStore: ObservableObject {
     @Published private(set) var homeMovies: [Movie] = []
+    @Published private(set) var homeSections: [HomeSection] = []
     @Published private(set) var homeLoading = false
     @Published private(set) var homeLoadingMore = false
     @Published private(set) var homeHasMore = false
@@ -28,27 +35,63 @@ final class CinemaStore: ObservableObject {
     private var detailRequestID = 0
     private var catalogRequestID = 0
     private var searchRequestID = 0
+    private let homeSectionConfig: [(kind: String, title: String)] = [
+        ("latest", "Phim Mới"),
+        ("series", "Phim Bộ"),
+        ("single", "Phim Lẻ"),
+        ("shows", "Shows"),
+        ("animation", "Hoạt Hình"),
+        ("vietsub", "Phim Vietsub"),
+        ("thuyetminh", "Phim Thuyết Minh"),
+        ("longtieng", "Phim Lồng Tiếng"),
+        ("ongoing", "Phim Bộ Đang Chiếu"),
+        ("completed", "Phim Bộ Đã Hoàn Thành"),
+        ("subteam", "Subteam"),
+        ("theatrical", "Phim Chiếu Rạp"),
+    ]
 
     func loadHome() async {
-        guard homeMovies.isEmpty, !homeLoading else { return }
-        homeLoading = true; homeError = nil
-        defer { homeLoading = false }
-        do {
-            let page = try await api.home()
-            homeMovies = page.items
-            homePage = 1
-            homeHasMore = page.pagination?.hasMore(page: 1, received: page.items.count) ?? (page.items.count >= 12)
-        } catch { homeError = error.localizedDescription }
+        guard homeSections.isEmpty, !homeLoading else { return }
+        await loadHomeSections(refresh: false)
     }
 
     func refreshHome() async {
+        await loadHomeSections(refresh: true)
+    }
+
+    private func loadHomeSections(refresh: Bool) async {
+        guard !homeLoading else { return }
+        homeLoading = true
         homeError = nil
-        do {
-            let page = try await api.home()
-            homeMovies = page.items
-            homePage = 1
-            homeHasMore = page.pagination?.hasMore(page: 1, received: page.items.count) ?? (page.items.count >= 12)
-        } catch { homeError = error.localizedDescription }
+        defer { homeLoading = false }
+
+        let config = homeSectionConfig
+        let results = await withTaskGroup(of: (Int, [Movie], String?).self, returning: [(Int, [Movie], String?)].self) { group in
+            for (index, section) in config.enumerated() {
+                group.addTask {
+                    do {
+                        let page = try await self.api.list(kind: section.kind, refresh: refresh)
+                        return (index, page.items, nil)
+                    } catch {
+                        return (index, [], error.localizedDescription)
+                    }
+                }
+            }
+            var collected: [(Int, [Movie], String?)] = []
+            for await result in group { collected.append(result) }
+            return collected.sorted { $0.0 < $1.0 }
+        }
+
+        homeSections = results.enumerated().compactMap { index, result in
+            guard !result.1.isEmpty else { return nil }
+            return HomeSection(id: config[index].kind, title: config[index].title, movies: result.1)
+        }
+        homeMovies = homeSections.first(where: { $0.id == "latest" })?.movies ?? []
+        homePage = 1
+        homeHasMore = homeMovies.count >= 12
+        if homeMovies.isEmpty {
+            homeError = results.compactMap(\.2).first ?? "Chưa tải được danh sách phim mới."
+        }
     }
 
     func loadMoreHome() async {
@@ -57,7 +100,7 @@ final class CinemaStore: ObservableObject {
         defer { homeLoadingMore = false }
         let next = homePage + 1
         do {
-            let page = try await api.home(page: next)
+            let page = try await api.list(page: next, kind: "latest")
             let existing = Set(homeMovies.map(\.slug))
             homeMovies.append(contentsOf: page.items.filter { !existing.contains($0.slug) })
             homePage = next
