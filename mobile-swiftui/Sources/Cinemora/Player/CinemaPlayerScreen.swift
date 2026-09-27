@@ -181,11 +181,9 @@ struct CinemaPlayerScreen: View {
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
     private var selectableStopEpisodes: [MovieEpisode] {
-        var seen = Set<String>()
-        return servers.flatMap(\.episodes).filter { episode in
-            let key = stopEpisodeKey(episode)
-            return seen.insert(key).inserted
-        }
+        // Do not deduplicate by slug here. Some providers reuse/omit slugs
+        // across sources; SwiftUI would then render only one row.
+        return servers.flatMap(\.episodes)
     }
 
     private func stopEpisodeKey(_ episode: MovieEpisode) -> String {
@@ -517,7 +515,8 @@ struct CinemaPlayerScreen: View {
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 5) {
-                        ForEach(selectableStopEpisodes, id: \.id) { item in
+                        ForEach(selectableStopEpisodes.indices, id: \.self) { index in
+                            let item = selectableStopEpisodes[index]
                             Button {
                                 stopAtEpisodeID = stopEpisodeKey(item)
                             } label: {
