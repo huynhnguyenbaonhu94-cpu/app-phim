@@ -171,9 +171,13 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
+                    // Keep artwork as a dark loading backdrop only. The old
+                    // 12% video opacity made the poster's decorative curves
+                    // appear to be the video on tall phones.
                     PosterArt(url: movie.backdropURL).ignoresSafeArea()
-                        .overlay(Color.black.opacity(playback.isLoading ? 0.28 : 0.05))
-                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().opacity(playback.isLoading ? 0.12 : 1).accessibilityLabel("Đang phát \(movie.name)")
+                        .opacity(playback.isLoading ? 0.08 : 0)
+                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea()
+                        .accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()

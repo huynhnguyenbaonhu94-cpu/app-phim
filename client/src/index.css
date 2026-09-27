@@ -162,7 +162,8 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  /* Keep the source ratio instead of cropping a 16:9 video into portrait. */
+  object-fit: contain;
   border: 0;
   background: #000;
 }
