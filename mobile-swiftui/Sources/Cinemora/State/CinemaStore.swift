@@ -79,7 +79,7 @@ final class CinemaStore: ObservableObject {
                                 do {
                                     page = try await self.api.dailyUpdates()
                                 } catch {
-                                    if self.isCancellation(error) { return (index, [], nil) }
+                                    if Self.isCancellation(error) { return (index, [], nil) }
                                     page = try await self.api.list(kind: "latest")
                                 }
                             } else {
@@ -87,7 +87,7 @@ final class CinemaStore: ObservableObject {
                             }
                             return (index, page.items, nil)
                         } catch {
-                            if self.isCancellation(error) { return (index, [], nil) }
+                            if Self.isCancellation(error) { return (index, [], nil) }
                             return (index, [], error.localizedDescription)
                         }
                     }
@@ -113,7 +113,7 @@ final class CinemaStore: ObservableObject {
         }
     }
 
-    private func isCancellation(_ error: Error) -> Bool {
+    private nonisolated static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
