@@ -130,7 +130,6 @@ struct CinemaPlayerScreen: View {
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
-    let resumeSeconds: Int
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playback = PlaybackController()
     @State private var serverIndex = 0
@@ -146,7 +145,6 @@ struct CinemaPlayerScreen: View {
     @State private var scrubValue = 0.0
     @State private var hideTask: Task<Void, Never>?
     @State private var lockHideTask: Task<Void, Never>?
-    private let api = CinemaAPI.shared
 
     private enum PickerKind { case episodes, sources }
     fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
@@ -154,12 +152,11 @@ struct CinemaPlayerScreen: View {
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeSeconds: Int = 0) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
-        self.resumeSeconds = max(0, resumeSeconds)
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
         _serverIndex = State(initialValue: server)
@@ -171,19 +168,9 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
-                    // Keep artwork as a dark loading backdrop only. The old
-                    // 12% video opacity made the poster's decorative curves
-                    // appear to be the video on tall phones.
                     PosterArt(url: movie.backdropURL).ignoresSafeArea()
-                        .opacity(playback.isLoading ? 0.08 : 0)
-                    // Keep a cinema-shaped viewport even if iOS refuses the
-                    // orientation request. Without this constraint a portrait
-                    // window can make the movie appear vertically cropped or
-                    // stretched beneath the controls.
-                    NativeVideoSurface(player: playback.player, fit: videoFit)
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .accessibilityLabel("Đang phát \(movie.name)")
+                        .overlay(Color.black.opacity(playback.isLoading ? 0.28 : 0.05))
+                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().opacity(playback.isLoading ? 0.12 : 1).accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
@@ -198,7 +185,7 @@ struct CinemaPlayerScreen: View {
                         if playback.isLoading {
                             VStack(spacing: 8) {
                                 ProgressView().tint(.cinemaAccent).scaleEffect(1.15)
-                                Text(resumeSeconds > 0 ? "Đang tiếp tục từ \(formatTime(Double(resumeSeconds)))…" : "Đang tải nguồn phát…")
+                                Text("Đang tải nguồn phát…")
                                     .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
                                 Text("Bạn có thể chờ trong giây lát").font(.system(size: 10)).foregroundStyle(.white.opacity(0.62))
                             }
@@ -253,7 +240,7 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onAppear { loadCurrentEpisode(); forceLandscape(); scheduleHide() }
+            .onAppear { loadCurrentEpisode(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
@@ -261,11 +248,6 @@ struct CinemaPlayerScreen: View {
             }
             .onDisappear {
                 hideTask?.cancel(); lockHideTask?.cancel()
-                let watched = Int(playback.currentTime.rounded())
-                let total = Int(playback.duration.rounded())
-                let movieSnapshot = movie
-                let episodeSnapshot = episode
-                Task { try? await api.recordHistory(movie: movieSnapshot, episode: episodeSnapshot, sourceName: server?.name, watchedSeconds: watched, durationSeconds: total) }
                 playback.shutdown(); forcePortrait()
             }
             .statusBarHidden(true)
@@ -438,8 +420,7 @@ struct CinemaPlayerScreen: View {
 
     private func loadCurrentEpisode() {
         guard let episode else { return }
-        let resume = serverIndex == initialServer && episodeIndex == initialEpisode ? Double(resumeSeconds) : 0
-        playback.load(episode, startAt: resume)
+        playback.load(episode)
     }
 
     private func toggleControls() {

@@ -71,7 +71,7 @@ struct CinemoraTabShell: View {
                 tabRoot {
                     AccountScreen()
                 }
-                .tabItem { Label("Tài Khoản", systemImage: "person.crop.circle") }
+                .tabItem { Label("Ứng Dụng", systemImage: "info.circle") }
             }
             .tint(.cinemaAccent)
             .modifier(ScrollMinimizingTabBar())
