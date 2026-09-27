@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @State private var scrollPosition: String?
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
@@ -10,8 +11,10 @@ struct HomeScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     CinemaHeader(eyebrow: "PHIM HAY MỖI NGÀY", title: "CINEMORA")
+                        .id("home-header")
                     if let hero = store.homeSections.first(where: { $0.id == "latest" })?.movies.first {
                         FeaturedMovieCard(movie: hero)
+                            .id("home-hero")
                     }
 
                     if store.homeLoading && store.homeSections.isEmpty {
@@ -35,9 +38,11 @@ struct HomeScreen: View {
                                 LazyVGrid(columns: columns, spacing: 20) {
                                     ForEach(section.movies) { movie in
                                         MoviePosterCard(movie: movie)
+                                            .id("home-movie-\(movie.id)")
                                     }
                                 }
                             }
+                            .id("home-section-\(section.id)")
                         }
                     } else if let error = store.homeError {
                         StateMessage(icon: "wifi.exclamationmark", title: "Chưa thể tải phim", detail: error, actionTitle: "Thử lại") {
@@ -50,7 +55,9 @@ struct HomeScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 36)
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: $scrollPosition)
             .refreshable { await store.refreshHome() }
         }
         .toolbar(.hidden, for: .navigationBar)

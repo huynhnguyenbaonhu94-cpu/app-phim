@@ -7,6 +7,7 @@ struct MovieDetailScreen: View {
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var showPlayer = false
+    @State private var edgeBackProgress: CGFloat = 0
 
     private var movie: Movie? { store.detailMovie }
     private var servers: [MovieServer] { movie?.availableServers ?? [] }
@@ -57,6 +58,23 @@ struct MovieDetailScreen: View {
                 .padding(.top, 8)
                 .accessibilityLabel("Trở lại danh sách phim")
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 18, coordinateSpace: .global)
+                    .onChanged { value in
+                        guard value.startLocation.x <= 36,
+                              value.translation.width > 0,
+                              abs(value.translation.width) > abs(value.translation.height) else { return }
+                        edgeBackProgress = min(1, value.translation.width / 120)
+                    }
+                    .onEnded { value in
+                        let horizontal = value.translation.width
+                        let vertical = abs(value.translation.height)
+                        let shouldDismiss = value.startLocation.x <= 36 && horizontal >= 90 && horizontal > vertical * 1.25
+                        edgeBackProgress = 0
+                        if shouldDismiss { dismiss() }
+                    }
+            )
+            .offset(x: edgeBackProgress * 18)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: slug) { store.loadDetail(slug: slug) }

@@ -27,7 +27,9 @@ final class PlaybackController: ObservableObject {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else { return }
+            let requestID = self.activeRequestID
             Task { @MainActor in
+                guard self.activeRequestID == requestID else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
@@ -53,6 +55,10 @@ final class PlaybackController: ObservableObject {
         loadTask?.cancel()
         activeRequestID = UUID()
         let requestID = activeRequestID
+        seekRequestID = UUID()
+        isSeeking = false
+        suppressLoadingUntil = .distantPast
+        player.pause()
         errorMessage = nil; currentTime = 0; duration = 0
         itemObservation = nil
         guard let url = episode.streamURL else {

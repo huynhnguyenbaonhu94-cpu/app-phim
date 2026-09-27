@@ -19,6 +19,7 @@ struct SearchScreen: View {
     @State private var year = ""
     @State private var sortField: SearchSortField = .updated
     @State private var newestFirst = true
+    @State private var scrollPosition: String?
     @FocusState private var focused: Bool
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -63,6 +64,7 @@ struct SearchScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     CinemaHeader(eyebrow: "TÌM THEO TÊN VIỆT HOẶC TÊN GỐC", title: "TÌM KIẾM")
+                        .id("search-header")
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .semibold)).foregroundStyle(Color.cinemaAccent)
                         TextField("Tên phim bạn muốn xem…", text: $keyword)
@@ -80,12 +82,14 @@ struct SearchScreen: View {
                     }
                     .padding(.leading, 16).padding(.trailing, 8).frame(height: 58)
                     .cinemaGlass(in: RoundedRectangle(cornerRadius: 21), tint: .white.opacity(0.07))
+                    .id("search-box")
 
                     HStack(alignment: .lastTextBaseline) {
                         SectionHeading(eyebrow: "KẾT QUẢ", title: submitted.isEmpty ? "Bạn đang tìm gì?" : "“\(submitted)”")
                         Spacer()
                         if !store.searchResults.isEmpty { Text("\(filteredResults.count)/\(store.searchResults.count) phim").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55)) }
                     }
+                    .id("search-results-header")
                     if store.searchLoading {
                         ProgressView("Đang tìm phim…").tint(.cinemaAccent).foregroundStyle(.white.opacity(0.65)).frame(maxWidth: .infinity).padding(.vertical, 60)
                     } else if let error = store.searchError {
@@ -97,16 +101,22 @@ struct SearchScreen: View {
                         if filteredResults.isEmpty {
                             StateMessage(icon: "line.3.horizontal.decrease.circle", title: "Không có phim phù hợp", detail: "Hãy nới lỏng một hoặc nhiều bộ lọc.")
                         } else {
-                        LazyVGrid(columns: columns, spacing: 20) {
-                                ForEach(filteredResults) { MoviePosterCard(movie: $0) }
+                            LazyVGrid(columns: columns, spacing: 20) {
+                                ForEach(filteredResults) { movie in
+                                    MoviePosterCard(movie: movie)
+                                        .id("search-movie-\(movie.id)")
+                                }
                             }
+                            .id("search-results-\(submitted)")
                         }
                     } else {
                         StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự rồi chạm nút tìm kiếm.")
                     }
                 }
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 40)
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: $scrollPosition)
             .scrollDismissesKeyboard(.interactively)
         }
         .toolbar(.hidden, for: .navigationBar)

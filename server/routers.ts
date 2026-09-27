@@ -7,6 +7,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
+import { sendMovieRequestToTelegram } from "./_core/telegram";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -19,6 +20,7 @@ const movieSnapshot = z.object({
 });
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
+const movieRequestCooldown = new Map<string, number>();
 
 function setSessionCookie(ctx: { req: Parameters<typeof getSessionCookieOptions>[0]; res: { cookie: (name: string, value: string, options: Record<string, unknown>) => void } }, token: string) {
   ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
@@ -61,6 +63,29 @@ export const appRouter = router({
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),
     dailyUpdates: publicProcedure.input(z.object({ page: pageInput }).optional()).query(({ input }) => getDailyUpdates(input?.page)),
     meta: publicProcedure.query(() => getCatalogMeta()),
+    submitRequest: publicProcedure.input(z.object({
+      title: z.string().trim().min(2, "Vui lòng nhập tên phim.").max(255),
+      link: z.string().trim().max(500).url("Link TMDB/IMDB không hợp lệ.").optional(),
+      priority: z.enum(["Thấp", "Bình thường", "Cao", "Khẩn cấp"]),
+      notes: z.string().trim().max(4000).optional(),
+      imageBase64: z.string().max(11_200_000).optional(),
+      imageMimeType: z.enum(["image/jpeg", "image/png", "image/webp"]).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const key = ctx.req.ip || ctx.req.get("user-agent") || "unknown";
+      const now = Date.now();
+      const previous = movieRequestCooldown.get(key) ?? 0;
+      if (now - previous < 30_000) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Vui lòng chờ 30 giây trước khi gửi yêu cầu tiếp theo." });
+      }
+      movieRequestCooldown.set(key, now);
+      try {
+        await sendMovieRequestToTelegram(input);
+        return { success: true } as const;
+      } catch (error) {
+        movieRequestCooldown.delete(key);
+        throw error;
+      }
+    }),
   }),
   account: router({
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),

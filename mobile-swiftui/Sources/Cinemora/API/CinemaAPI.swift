@@ -44,6 +44,17 @@ struct CinemaAPI {
         try await query("cinema.meta", input: nil)
     }
 
+    func submitMovieRequest(title: String, link: String?, priority: String, notes: String?, imageData: Data?, imageMimeType: String?) async throws {
+        var input: [String: Any] = ["title": title, "priority": priority]
+        if let link, !link.isEmpty { input["link"] = link }
+        if let notes, !notes.isEmpty { input["notes"] = notes }
+        if let imageData {
+            input["imageBase64"] = imageData.base64EncodedString()
+            input["imageMimeType"] = imageMimeType ?? "image/jpeg"
+        }
+        let _: MovieRequestResponse = try await query("cinema.submitRequest", input: input)
+    }
+
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
@@ -87,6 +98,10 @@ struct CinemaAPI {
         }
         return false
     }
+}
+
+private struct MovieRequestResponse: Decodable {
+    let success: Bool
 }
 
 enum APIError: LocalizedError {

@@ -139,3 +139,55 @@ struct FavoritesScreen: View {
         }
     }
 }
+
+struct SavedHubScreen: View {
+    var body: some View {
+        ZStack {
+            CinemaBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        SectionEyebrow(text: "LƯU TRÊN THIẾT BỊ")
+                        Text("Lịch sử & Yêu thích")
+                            .font(.system(size: 29, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Quản lý phim đang xem, phim yêu thích và gửi yêu cầu phim mới.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                    }
+                    savedDestination(icon: "clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục những bộ phim bạn đang xem", destination: WatchHistoryScreen())
+                    savedDestination(icon: "heart.fill", title: "Yêu thích", detail: "Danh sách phim đã lưu", destination: FavoritesScreen())
+                    savedDestination(icon: "text.bubble.fill", title: "Yêu cầu phim", detail: "Gửi tên phim muốn Cinemora cập nhật", destination: MovieRequestScreen())
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 45)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private func savedDestination<Destination: View>(icon: String, title: String, detail: String, destination: Destination) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 13) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.cinemaAccent)
+                    .frame(width: 42, height: 42)
+                    .background(Color.cinemaAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 14, weight: .black, design: .rounded)).foregroundStyle(.white)
+                    Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+            .padding(14)
+            .background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(.white.opacity(0.11), lineWidth: 0.7))
+        }
+        .buttonStyle(.plain)
+    }
+}
