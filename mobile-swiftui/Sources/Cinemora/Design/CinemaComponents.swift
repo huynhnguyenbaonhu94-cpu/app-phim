@@ -33,16 +33,19 @@ struct CinemaHeader: View {
 struct PosterArt: View {
     let url: URL?
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image): image.resizable().scaledToFill()
-            case .failure: fallback
-            case .empty: ZStack { fallback; ProgressView().tint(.cinemaAccent) }
-            @unknown default: fallback
+        GeometryReader { proxy in
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image): image.resizable().scaledToFill()
+                case .failure: fallback
+                case .empty: ZStack { fallback; ProgressView().tint(.cinemaAccent) }
+                @unknown default: fallback
+                }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+            .clipped()
         }
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var fallback: some View {
@@ -59,7 +62,8 @@ struct MoviePosterCard: View {
         NavigationLink(value: movie) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack(alignment: .topLeading) {
-                    PosterArt(url: movie.posterURL).aspectRatio(0.69, contentMode: .fit)
+                    PosterArt(url: movie.posterURL)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     LinearGradient(colors: [.clear, .black.opacity(0.2)], startPoint: .center, endPoint: .bottom)
                     if let quality = movie.quality, !quality.isEmpty {
                         Text(quality.uppercased()).font(.system(size: 9, weight: .black, design: .rounded)).tracking(0.8)
@@ -73,6 +77,7 @@ struct MoviePosterCard: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(8)
                     }
                 }
+                .aspectRatio(0.69, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(.white.opacity(0.13), lineWidth: 0.7))
                 .shadow(color: .black.opacity(0.28), radius: 12, y: 8)

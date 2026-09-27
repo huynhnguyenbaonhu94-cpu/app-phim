@@ -125,6 +125,7 @@ struct CinemaPlayerScreen: View {
     @State private var episodeIndex = 0
     @State private var controlsVisible = true
     @State private var picker: PickerKind?
+    @State private var quickMenu: QuickMenu?
     @State private var volume = 1.0
     @State private var volumePopoverOpen = false
     @State private var controlsLocked = false
@@ -136,6 +137,7 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
 
     private enum PickerKind { case episodes, sources }
+    private enum QuickMenu: Equatable { case videoFit, playbackRate }
     fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
@@ -232,7 +234,8 @@ struct CinemaPlayerScreen: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .trailing, spacing: 9) {
+            HStack(spacing: 10) {
             Button { dismiss() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Trở lại")
             VStack(alignment: .leading, spacing: 3) {
@@ -246,27 +249,92 @@ struct CinemaPlayerScreen: View {
                 Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
             }
-            Menu {
-                ForEach(VideoFit.allCases, id: \.self) { fit in
-                    Button { videoFit = fit } label: { Label(fit.rawValue, systemImage: fit == videoFit ? "checkmark" : "rectangle") }
-                }
-            } label: {
-                Image(systemName: "rectangle.on.rectangle").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tỷ lệ khung hình")
-            Menu {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                    Button { playback.setPlaybackRate(Float(rate)) } label: { Label(rate == 1 ? "Bình thường · 1x" : "\(rate, specifier: "%g")x", systemImage: playback.playbackRate == Float(rate) ? "checkmark" : "speedometer") }
-                }
-            } label: {
-                Image(systemName: "speedometer").font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .foregroundStyle(.white).menuStyle(.borderlessButton).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Tốc độ phát")
+            quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
+            quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
             Button { lockControls() } label: {
                 Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
             }
             .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
+            }
+            if let quickMenu { quickMenuPanel(quickMenu) }
         }
+    }
+
+    private var playbackRateLabel: String {
+        playback.playbackRate == 1 ? "1x" : "\(playback.playbackRate, specifier: "%g")x"
+    }
+
+    private func quickControl(icon: String, title: String, value: String, menu: QuickMenu) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) { quickMenu = quickMenu == menu ? nil : menu }
+            controlsVisible = true
+            hideTask?.cancel()
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                Text(value).font(.system(size: 9, weight: .black, design: .rounded)).lineLimit(1)
+            }
+            .foregroundStyle(quickMenu == menu ? Color.cinemaInk : .white)
+            .frame(width: 52, height: 42)
+            .background(quickMenu == menu ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(quickMenu == menu ? 0.35 : 0.14), lineWidth: 0.8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
+    }
+
+    @ViewBuilder
+    private func quickMenuPanel(_ menu: QuickMenu) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(menu == .videoFit ? "TỶ LỆ KHUNG HÌNH" : "TỐC ĐỘ PHÁT")
+                    .font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
+                Spacer(minLength: 20)
+                Button { withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }; scheduleHide() } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 24, height: 24)
+                }.buttonStyle(.plain).accessibilityLabel("Đóng lựa chọn")
+            }
+            if menu == .videoFit {
+                ForEach(VideoFit.allCases, id: \.self) { fit in
+                    quickOption(title: fit.rawValue, detail: fit == .fit ? "Giữ nguyên khung hình" : fit == .fill ? "Lấp đầy màn hình" : "Phóng phủ toàn màn hình", selected: fit == videoFit) {
+                        videoFit = fit
+                    }
+                }
+            } else {
+                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    quickOption(title: rate == 1 ? "Bình thường" : "\(rate, specifier: "%g")x", detail: rate == 1 ? "Tốc độ mặc định" : "Điều chỉnh tốc độ phát", selected: playback.playbackRate == Float(rate)) {
+                        playback.setPlaybackRate(Float(rate))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 260)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+    }
+
+    private func quickOption(title: String, detail: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }
+            scheduleHide()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(selected ? Color.cinemaAccent : .white.opacity(0.45))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Text(detail).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.52))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(minHeight: 39)
+            .background(selected ? Color.cinemaAccent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }.buttonStyle(.plain)
     }
 
     private var centerControls: some View {
@@ -409,6 +477,7 @@ struct CinemaPlayerScreen: View {
         controlsLocked = true
         controlsVisible = false
         volumePopoverOpen = false
+        quickMenu = nil
         hideTask?.cancel()
         withAnimation(.easeOut(duration: 0.2)) { lockIndicatorVisible = true }
         scheduleLockIndicatorHide()
