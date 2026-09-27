@@ -100,25 +100,8 @@ struct FavoritesScreen: View {
                         StateMessage(icon: "heart", title: "Chưa có phim yêu thích", detail: "Nhấn biểu tượng trái tim trong trang chi tiết để lưu phim.")
                     } else {
                         LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(Array(store.localFavorites), id: \.slug) { record in
-                                ZStack(alignment: .topTrailing) {
-                                    NavigationLink(destination: MovieDetailScreen(slug: record.slug)) {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            PosterArt(url: record.movie.movie.posterURL)
-                                                .aspectRatio(0.69, contentMode: .fit)
-                                                .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
-                                            Text(record.name).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
-                                            Text([record.originName, record.year.map(String.init)].compactMap { $0 }.joined(separator: " · "))
-                                                .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.54)).lineLimit(1)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    Button { store.removeFavorite(record) } label: {
-                                        Image(systemName: "heart.slash.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                                            .frame(width: 32, height: 32).background(.black.opacity(0.72), in: Circle())
-                                    }
-                                    .buttonStyle(.plain).padding(8).accessibilityLabel("Bỏ yêu thích")
-                                }
+                            ForEach(store.localFavorites.indices, id: \.self) { index in
+                                favoriteCard(store.localFavorites[index])
                             }
                         }
                     }
@@ -132,6 +115,27 @@ struct FavoritesScreen: View {
             Button("Hủy", role: .cancel) { }
         } message: {
             Text("Danh sách phim yêu thích trên thiết bị sẽ bị xóa.")
+        }
+    }
+
+    private func favoriteCard(_ record: LocalMovieRecord) -> some View {
+        ZStack(alignment: .topTrailing) {
+            NavigationLink(destination: MovieDetailScreen(slug: record.slug)) {
+                VStack(alignment: .leading, spacing: 8) {
+                    PosterArt(url: record.movie.posterURL)
+                        .aspectRatio(0.69, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    Text(record.name).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
+                    Text([record.originName, record.year.map(String.init)].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.54)).lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            Button { store.removeFavorite(record) } label: {
+                Image(systemName: "heart.slash.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 32, height: 32).background(.black.opacity(0.72), in: Circle())
+            }
+            .buttonStyle(.plain).padding(8).accessibilityLabel("Bỏ yêu thích")
         }
     }
 }
