@@ -81,12 +81,25 @@ struct MovieRequestScreen: View {
                             }
                         }
                         if let imagePreview {
-                            Image(uiImage: imagePreview)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 190)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.15), lineWidth: 0.7))
+                            VStack(alignment: .leading, spacing: 8) {
+                                Image(uiImage: imagePreview)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 190)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.15), lineWidth: 0.7))
+                                Button {
+                                    selectedPhoto = nil
+                                    imagePreview = nil
+                                    imageData = nil
+                                } label: {
+                                    Label("Gỡ ảnh đã chọn", systemImage: "trash")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.red.opacity(0.9))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Xóa ảnh đã chọn")
+                            }
                         }
                     }
 

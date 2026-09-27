@@ -52,7 +52,7 @@ struct CinemaAPI {
             input["imageBase64"] = imageData.base64EncodedString()
             input["imageMimeType"] = imageMimeType ?? "image/jpeg"
         }
-        let _: MovieRequestResponse = try await query("cinema.submitRequest", input: input)
+        let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
@@ -66,6 +66,35 @@ struct CinemaAPI {
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 25
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        let root = try JSONSerialization.jsonObject(with: data)
+        guard let envelope = root as? [String: Any] else { throw APIError.invalidResponse }
+        if let error = envelope["error"] as? [String: Any],
+           let message = (error["json"] as? [String: Any])?["message"] as? String {
+            throw APIError.server(message)
+        }
+        let result = envelope["result"] as? [String: Any]
+        let resultData = result?["data"] as? [String: Any]
+        let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
+        guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
+        let decodedData = try JSONSerialization.data(withJSONObject: payload)
+        do { return try JSONDecoder().decode(T.self, from: decodedData) }
+        catch { throw APIError.decoding(error.localizedDescription) }
+    }
+
+    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+        var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/api/trpc/\(procedure)"
+        guard let url = components.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)

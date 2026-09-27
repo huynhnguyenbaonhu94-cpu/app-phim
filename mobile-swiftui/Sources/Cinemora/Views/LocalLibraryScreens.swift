@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WatchHistoryScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.dismiss) private var dismiss
     @State private var showClearAlert = false
 
     var body: some View {
@@ -27,8 +28,23 @@ struct WatchHistoryScreen: View {
                         }
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 38)
+                .padding(.horizontal, 20).padding(.top, 58).padding(.bottom, 38)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            Button { dismiss() } label: {
+                Label("Trở lại", systemImage: "chevron.left")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.7))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 20)
+            .padding(.top, 8)
+            .accessibilityLabel("Trở lại mục Lưu")
         }
         .toolbar(.hidden, for: .navigationBar)
         .alert("Xóa toàn bộ lịch sử xem?", isPresented: $showClearAlert) {
@@ -80,6 +96,7 @@ struct WatchHistoryScreen: View {
 
 struct FavoritesScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.dismiss) private var dismiss
     @State private var showClearAlert = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -106,8 +123,23 @@ struct FavoritesScreen: View {
                         }
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 38)
+                .padding(.horizontal, 20).padding(.top, 58).padding(.bottom, 38)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            Button { dismiss() } label: {
+                Label("Trở lại", systemImage: "chevron.left")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.7))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 20)
+            .padding(.top, 8)
+            .accessibilityLabel("Trở lại mục Lưu")
         }
         .toolbar(.hidden, for: .navigationBar)
         .alert("Xóa toàn bộ yêu thích?", isPresented: $showClearAlert) {
