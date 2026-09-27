@@ -62,6 +62,16 @@ struct CinemoraTabShell: View {
                 }
                 .tabItem { Label("Tìm Kiếm", systemImage: "magnifyingglass") }
 
+                tabRoot {
+                    WatchHistoryScreen()
+                }
+                .tabItem { Label("Lịch Sử", systemImage: "clock.arrow.circlepath") }
+
+                tabRoot {
+                    FavoritesScreen()
+                }
+                .tabItem { Label("Yêu Thích", systemImage: "heart.fill") }
+
             }
             .tint(.cinemaAccent)
             .modifier(ScrollMinimizingTabBar())

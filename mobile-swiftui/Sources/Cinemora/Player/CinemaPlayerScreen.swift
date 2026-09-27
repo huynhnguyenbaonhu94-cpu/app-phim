@@ -152,6 +152,7 @@ struct CinemaPlayerScreen: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var lockHideTask: Task<Void, Never>?
     @State private var stopTimerTask: Task<Void, Never>?
+    @State private var stopTimerRemaining: Int?
     @State private var lastHistorySaveAt = Date.distantPast
     @State private var hasAppliedResumeTime = false
 
@@ -454,10 +455,22 @@ struct CinemaPlayerScreen: View {
                     ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) }
                 }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent)
             }
+            if let stopTimerRemaining {
+                HStack(spacing: 7) {
+                    Image(systemName: "timer").foregroundStyle(Color.cinemaAccent)
+                    Text("Tự dừng sau \(formatCountdown(stopTimerRemaining))")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white)
+                    Spacer()
+                }
+                .padding(.leading, 32)
+            } else if stopTimer == .endOfEpisode {
+                Text("Video sẽ dừng khi hết tập hiện tại.")
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).padding(.leading, 32)
+            }
             Toggle(isOn: $stopAtEpisodeEnabled) {
-                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Dừng khi xem xong tập mục tiêu")
+                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: autoAdvanceEpisodes ? "Tự chuyển đến tập mục tiêu rồi dừng" : "Dừng khi xem xong tập mục tiêu")
             }.tint(Color.cinemaAccent)
-            if stopAtEpisodeEnabled && !episodes.isEmpty {
+            if stopAtEpisodeEnabled {
                 episodeStopSelector
             }
             Toggle(isOn: $autoAdvanceEpisodes) {
@@ -477,28 +490,33 @@ struct CinemaPlayerScreen: View {
     private var episodeStopSelector: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("CHỌN TẬP DỪNG").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.48)).padding(.leading, 4)
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(spacing: 5) {
-                    ForEach(episodes.indices, id: \.self) { index in
-                        Button {
-                            stopAtEpisodeIndex = index
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: stopAtEpisodeIndex == index ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(stopAtEpisodeIndex == index ? Color.cinemaAccent : .white.opacity(0.42))
-                                Text(episodes[index].name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                                Spacer(minLength: 0)
+            if episodes.isEmpty {
+                Text("Nguồn hiện tại chưa có danh sách tập. Hãy chọn nguồn phát khác.")
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(spacing: 5) {
+                        ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
+                            Button {
+                                stopAtEpisodeIndex = index
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: stopAtEpisodeIndex == index ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(stopAtEpisodeIndex == index ? Color.cinemaAccent : .white.opacity(0.42))
+                                    Text(item.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 9).frame(minHeight: 32)
+                                .background(stopAtEpisodeIndex == index ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             }
-                            .padding(.horizontal, 9).frame(minHeight: 32)
-                            .background(stopAtEpisodeIndex == index ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .frame(maxHeight: 142)
+                .scrollClipDisabled()
             }
-            .frame(maxHeight: 142)
-            .scrollClipDisabled()
         }
         .padding(.leading, 32)
     }
@@ -653,7 +671,6 @@ struct CinemaPlayerScreen: View {
         playback.load(episode, startAt: startAt)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
-        scheduleStopTimer()
     }
 
     private func saveLocalWatchProgress() {
@@ -664,10 +681,18 @@ struct CinemaPlayerScreen: View {
 
     private func scheduleStopTimer() {
         stopTimerTask?.cancel()
+        stopTimerRemaining = stopTimer.seconds.map(Int.init)
         guard let seconds = stopTimer.seconds else { return }
         stopTimerTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
+            var remaining = Int(seconds)
+            while remaining > 0 && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                remaining -= 1
+                stopTimerRemaining = remaining
+            }
             guard !Task.isCancelled else { return }
+            stopTimerRemaining = nil
             playback.pause()
             withAnimation(.easeInOut(duration: 0.2)) { controlsVisible = true; settingsOpen = false }
         }
@@ -687,6 +712,13 @@ struct CinemaPlayerScreen: View {
         }
         episodeIndex += 1
         controlsVisible = true
+    }
+
+    private func formatCountdown(_ value: Int) -> String {
+        let hours = value / 3600
+        let minutes = value / 60 % 60
+        let seconds = value % 60
+        return hours > 0 ? String(format: "%02d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func toggleControls() {

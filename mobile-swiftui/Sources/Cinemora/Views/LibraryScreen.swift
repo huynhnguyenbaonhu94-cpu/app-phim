@@ -12,8 +12,6 @@ struct LibraryScreen: View {
     @State private var category = ""
     @State private var country = ""
     @State private var year: Int?
-    @State private var showClearHistoryAlert = false
-    @State private var showClearFavoritesAlert = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
     private let kinds = [
         LibraryFilterOption(title: "Phim Mới", value: "latest"),
@@ -36,12 +34,6 @@ struct LibraryScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     CinemaHeader(eyebrow: "KHÁM PHÁ THEO GU", title: "THƯ VIỆN")
-                    if !store.localHistory.isEmpty {
-                        historyShelf
-                    }
-                    if !store.localFavorites.isEmpty {
-                        favoritesShelf
-                    }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 9) {
                             ForEach(kinds) { option in
@@ -96,18 +88,6 @@ struct LibraryScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadMeta(); load() }
-        .alert("Xóa toàn bộ lịch sử xem?", isPresented: $showClearHistoryAlert) {
-            Button("Xóa tất cả", role: .destructive) { store.clearHistory() }
-            Button("Hủy", role: .cancel) { }
-        } message: {
-            Text("Tất cả lịch sử xem được lưu trên thiết bị sẽ bị xóa.")
-        }
-        .alert("Xóa toàn bộ yêu thích?", isPresented: $showClearFavoritesAlert) {
-            Button("Xóa tất cả", role: .destructive) { store.clearFavorites() }
-            Button("Hủy", role: .cancel) { }
-        } message: {
-            Text("Danh sách phim yêu thích trên thiết bị sẽ bị xóa.")
-        }
     }
 
     private func selectKind(_ value: String) {
@@ -143,104 +123,4 @@ struct LibraryScreen: View {
         .overlay(Capsule().strokeBorder(.white.opacity(selected ? 0.42 : 0.1), lineWidth: 0.7))
     }
 
-    private var historyShelf: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .lastTextBaseline) {
-                SectionHeading(eyebrow: "LƯU TRÊN THIẾT BỊ", title: "Đang xem")
-                Spacer()
-                Button("Xóa tất cả") { showClearHistoryAlert = true }
-                    .font(.system(size: 10, weight: .bold)).foregroundStyle(Color.cinemaAccent)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(store.localHistory) { record in
-                        historyMovieCard(record)
-                    }
-                }
-            }
-        }
-    }
-
-    private var favoritesShelf: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .lastTextBaseline) {
-                SectionHeading(eyebrow: "LƯU TRÊN THIẾT BỊ", title: "Yêu thích")
-                Spacer()
-                Button("Xóa tất cả") { showClearFavoritesAlert = true }
-                    .font(.system(size: 10, weight: .bold)).foregroundStyle(Color.cinemaAccent)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(store.localFavorites) { record in
-                        localMovieCard(movie: record.movie, subtitle: nil, progress: nil, progressLabel: nil) {
-                            store.removeFavorite(record)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func historyMovieCard(_ record: LocalWatchRecord) -> some View {
-        ZStack(alignment: .topTrailing) {
-            NavigationLink(destination: ResumeMovieScreen(record: record)) {
-                VStack(alignment: .leading, spacing: 7) {
-                    PosterArt(url: record.movie.movie.posterURL)
-                        .frame(width: 142, height: 205)
-                        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
-                    Text(record.movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
-                    Text([record.episodeName, record.serverName].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
-                    if record.durationSeconds > 0 {
-                        ProgressView(value: min(1, record.watchedSeconds / record.durationSeconds)).tint(Color.cinemaAccent).frame(width: 142)
-                        Text("\(formatTime(record.watchedSeconds)) / \(formatTime(record.durationSeconds))")
-                            .font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.5))
-                    }
-                }
-                .frame(width: 142, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            Button { store.removeHistory(record) } label: {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .black)).foregroundStyle(.white)
-                    .frame(width: 28, height: 28).background(.black.opacity(0.72), in: Circle())
-            }
-            .buttonStyle(.plain).padding(7).accessibilityLabel("Xóa khỏi lịch sử")
-        }
-    }
-
-    private func localMovieCard(movie: Movie, subtitle: String?, progress: Double?, progressLabel: String?, delete: @escaping () -> Void) -> some View {
-        ZStack(alignment: .topTrailing) {
-            NavigationLink(value: movie) {
-                VStack(alignment: .leading, spacing: 7) {
-                    PosterArt(url: movie.posterURL)
-                        .frame(width: 142, height: 205)
-                        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 17).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
-                    Text(movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
-                    if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
-                    }
-                    if let progress, progress > 0 {
-                        ProgressView(value: min(1, progress)).tint(Color.cinemaAccent).frame(width: 142)
-                        if let progressLabel {
-                            Text(progressLabel).font(.system(size: 8, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.5))
-                        }
-                    }
-                }
-                .frame(width: 142, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            Button(action: delete) {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .black)).foregroundStyle(.white)
-                    .frame(width: 28, height: 28).background(.black.opacity(0.72), in: Circle())
-            }
-            .buttonStyle(.plain).padding(7).accessibilityLabel("Xóa khỏi danh sách")
-        }
-    }
-
-    private func formatTime(_ value: Double) -> String {
-        let total = max(0, Int(value)), minutes = total / 60, seconds = total % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
 }
