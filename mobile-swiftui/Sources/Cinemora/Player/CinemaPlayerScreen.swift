@@ -176,7 +176,13 @@ struct CinemaPlayerScreen: View {
                     // appear to be the video on tall phones.
                     PosterArt(url: movie.backdropURL).ignoresSafeArea()
                         .opacity(playback.isLoading ? 0.08 : 0)
-                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea()
+                    // Keep a cinema-shaped viewport even if iOS refuses the
+                    // orientation request. Without this constraint a portrait
+                    // window can make the movie appear vertically cropped or
+                    // stretched beneath the controls.
+                    NativeVideoSurface(player: playback.player, fit: videoFit)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
@@ -247,7 +253,7 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .onAppear { loadCurrentEpisode(); forceLandscape(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
