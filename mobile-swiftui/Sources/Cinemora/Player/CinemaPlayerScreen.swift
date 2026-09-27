@@ -15,16 +15,21 @@ final class PlaybackController: ObservableObject {
     @Published var playbackRate: Float = 1
     @Published var errorMessage: String?
     @Published var activeURL: URL?
+    @Published private(set) var isSeeking = false
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
     private var loadTask: Task<Void, Never>?
     private var activeRequestID = UUID()
+    private var activeSeekID = UUID()
+    private var ignoreTimeSamplesBefore = 0.0
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else { return }
+            let sampleUptime = ProcessInfo.processInfo.systemUptime
             Task { @MainActor in
+                guard !self.isSeeking, sampleUptime >= self.ignoreTimeSamplesBefore else { return }
                 if time.seconds.isFinite { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
@@ -36,6 +41,8 @@ final class PlaybackController: ObservableObject {
     func shutdown() {
         loadTask?.cancel()
         loadTask = nil
+        activeSeekID = UUID()
+        isSeeking = false
         player.pause()
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -46,6 +53,8 @@ final class PlaybackController: ObservableObject {
 
     func load(_ episode: MovieEpisode, startAt: Double = 0) {
         loadTask?.cancel()
+        activeSeekID = UUID()
+        isSeeking = false
         activeRequestID = UUID()
         let requestID = activeRequestID
         errorMessage = nil; currentTime = 0; duration = 0
@@ -111,11 +120,18 @@ final class PlaybackController: ObservableObject {
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
         let target = max(0, min(seconds, duration > 0 ? duration : seconds))
+        let seekID = UUID()
+        activeSeekID = seekID
+        isSeeking = true
         currentTime = target
         let time = CMTime(seconds: target, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-            guard finished, let self else { return }
+            guard let self else { return }
             Task { @MainActor in
+                guard self.activeSeekID == seekID else { return }
+                self.ignoreTimeSamplesBefore = ProcessInfo.processInfo.systemUptime + 0.55
+                self.isSeeking = false
+                guard finished else { return }
                 let actual = self.player.currentTime().seconds
                 guard actual.isFinite else { return }
                 self.currentTime = actual
@@ -147,7 +163,7 @@ struct CinemaPlayerScreen: View {
     @State private var lockHideTask: Task<Void, Never>?
 
     private enum PickerKind { case episodes, sources }
-    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa", fill = "Đầy", cover = "Phủ" }
+    fileprivate enum VideoFit: String, CaseIterable { case fit = "Vừa · đủ khung hình", fill = "Đầy", cover = "Phủ" }
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
@@ -170,7 +186,13 @@ struct CinemaPlayerScreen: View {
                 if playback.activeURL != nil {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea()
                         .overlay(Color.black.opacity(playback.isLoading ? 0.28 : 0.05))
-                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().opacity(playback.isLoading ? 0.12 : 1).accessibilityLabel("Đang phát \(movie.name)")
+                    NativeVideoSurface(player: playback.player, fit: videoFit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black)
+                        .clipped()
+                        .ignoresSafeArea()
+                        .opacity(playback.isLoading ? 0.12 : 1)
+                        .accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
@@ -318,7 +340,24 @@ struct CinemaPlayerScreen: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 Text(formatTime(isScrubbing ? scrubValue : playback.currentTime)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .leading)
-                Slider(value: Binding(get: { isScrubbing ? scrubValue : min(max(0, playback.currentTime), max(1, playback.duration)) }, set: { value in if !isScrubbing { scrubValue = value }; scrubValue = value }), in: 0...max(1, playback.duration), onEditingChanged: { editing in if editing { scrubValue = min(max(0, playback.currentTime), max(1, playback.duration)); isScrubbing = true } else { playback.seek(to: scrubValue); isScrubbing = false; scheduleHide() } })
+                Slider(
+                    value: Binding(
+                        get: { isScrubbing ? scrubValue : min(max(0, playback.currentTime), max(1, playback.duration)) },
+                        set: { scrubValue = $0 }
+                    ),
+                    in: 0...max(1, playback.duration),
+                    onEditingChanged: { editing in
+                        if editing {
+                            scrubValue = min(max(0, playback.currentTime), max(1, playback.duration))
+                            isScrubbing = true
+                        } else {
+                            let target = scrubValue
+                            isScrubbing = false
+                            playback.seek(to: target)
+                            scheduleHide()
+                        }
+                    }
+                )
                     .tint(Color.cinemaAccent)
                 Text(formatTime(playback.duration)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .trailing)
                 Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
@@ -543,6 +582,7 @@ private struct NativeVideoSurface: UIViewRepresentable {
 private extension CinemaPlayerScreen.VideoFit {
     var gravity: AVLayerVideoGravity {
         switch self {
+        // Aspect fit shows the complete encoded frame; unlike aspect fill, it does not crop subtitles near the edges.
         case .fit: return .resizeAspect
         case .fill: return .resize
         case .cover: return .resizeAspectFill
