@@ -183,12 +183,12 @@ function unwrapItems(payload: any) {
   const data = payload?.data ?? payload;
   return { items: Array.isArray(data?.items) ? data.items : [], pagination: data?.params?.pagination ?? payload?.pagination ?? null, pathImage: payload?.pathImage ?? data?.pathImage };
 }
-async function upstream(path: string, query: Record<string, string | number | undefined> = {}) {
+async function upstream(path: string, query: Record<string, string | number | undefined> = {}, options: { bypassCache?: boolean } = {}) {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
   const url = `${API_BASE}${path}${params.size ? `?${params.toString()}` : ""}`;
   const cached = cache.get(url);
-  if (cached && cached.expires > Date.now()) return cached.value as any;
+  if (!options.bypassCache && cached && cached.expires > Date.now()) return cached.value as any;
   const pending = pendingRequests.get(url);
   if (pending) return pending as Promise<any>;
   const controller = new AbortController();
@@ -277,10 +277,22 @@ const listEndpoints: Record<string, string> = {
   vietsub: "/v1/api/danh-sach/phim-vietsub",
   thuyetminh: "/v1/api/danh-sach/phim-thuyet-minh",
   longtieng: "/v1/api/danh-sach/phim-long-tieng",
+  ongoing: "/v1/api/danh-sach/phim-bo",
+  completed: "/v1/api/danh-sach/phim-bo",
   subteam: "/v1/api/danh-sach/subteam",
   theatrical: "/v1/api/danh-sach/phim-chieu-rap",
 };
-export async function getMovies(input: { kind: keyof typeof listEndpoints; page?: number; category?: string; country?: string; year?: number }) {
+function isCompletedSeries(movie: Movie) {
+  const marker = `${movie.status || ""} ${movie.episodeCurrent || ""}`.toLocaleLowerCase("vi-VN");
+  if (/(hoàn tất|hoan tat|hoàn thành|hoan thanh|full|completed|complete|end)/i.test(marker)) return true;
+  if (movie.episodeTotal && movie.episodeCurrent) {
+    const numbers = movie.episodeCurrent.match(/\d+/g)?.map(Number) || [];
+    const current = numbers[numbers.length - 1];
+    if (current && current >= movie.episodeTotal) return true;
+  }
+  return false;
+}
+export async function getMovies(input: { kind: keyof typeof listEndpoints; page?: number; category?: string; country?: string; year?: number; refresh?: boolean }) {
   const category = input.category?.trim() || undefined;
   const country = input.country?.trim() || undefined;
   const year = input.year;
@@ -298,9 +310,15 @@ export async function getMovies(input: { kind: keyof typeof listEndpoints; page?
     endpoint = `/v1/api/nam/${year}`;
     query = { page: safePage(input.page), limit: 24 };
   }
-  const payload = await upstream(endpoint, query);
+  const payload = await upstream(endpoint, query, { bypassCache: Boolean(input.refresh) });
   const { items, pagination, pathImage } = unwrapItems(payload);
-  return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
+  const normalized: Movie[] = items.map((item: any) => normalizeMovie(item, pathImage));
+  const filtered = input.kind === "ongoing"
+    ? normalized.filter((movie) => !isCompletedSeries(movie))
+    : input.kind === "completed"
+      ? normalized.filter(isCompletedSeries)
+      : normalized;
+  return { items: filtered, pagination };
 }
 export async function searchMovies(input: { keyword: string; page?: number }) {
   const keyword = input.keyword.trim().slice(0, 80);

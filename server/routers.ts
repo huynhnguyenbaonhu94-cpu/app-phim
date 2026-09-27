@@ -50,11 +50,12 @@ export const appRouter = router({
   cinema: router({
     home: publicProcedure.input(z.object({ page: pageInput }).optional()).query(({ input }) => getHome(input?.page)),
     list: publicProcedure.input(z.object({
-      kind: z.enum(["latest", "single", "series", "shows", "animation", "vietsub", "thuyetminh", "longtieng", "subteam", "theatrical"]),
+      kind: z.enum(["latest", "single", "series", "shows", "animation", "vietsub", "thuyetminh", "longtieng", "ongoing", "completed", "subteam", "theatrical"]),
       page: pageInput,
       category: z.string().trim().max(80).optional(),
       country: z.string().trim().max(80).optional(),
       year: z.number().int().min(1900).max(2100).optional(),
+      refresh: z.boolean().optional(),
     })).query(({ input }) => getMovies(input)),
     search: publicProcedure.input(z.object({ keyword: z.string().trim().min(2).max(80), page: pageInput })).query(({ input }) => searchMovies(input)),
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),
