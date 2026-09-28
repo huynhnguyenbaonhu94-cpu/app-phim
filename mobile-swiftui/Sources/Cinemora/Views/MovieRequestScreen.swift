@@ -161,10 +161,14 @@ struct MovieRequestScreen: View {
         let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let renderer = UIGraphicsImageRenderer(size: targetSize)
         var quality: CGFloat = 0.68
-        var data = renderer.jpegData(withCompressionQuality: quality) { image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+        var data = renderer.jpegData(withCompressionQuality: quality) { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
         while data.count > 7 * 1024 * 1024 && quality > 0.28 {
             quality -= 0.08
-            data = renderer.jpegData(withCompressionQuality: quality) { image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+            data = renderer.jpegData(withCompressionQuality: quality) { _ in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
         }
         return data.count <= 7 * 1024 * 1024 ? data : nil
     }
