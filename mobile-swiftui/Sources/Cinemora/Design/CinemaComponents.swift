@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct CinemaHeader: View {
     let eyebrow: String
@@ -30,22 +31,77 @@ struct CinemaHeader: View {
     }
 }
 
+private final class PosterImageCache {
+    static let shared: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 160
+        cache.totalCostLimit = 48 * 1024 * 1024
+        return cache
+    }()
+}
+
 struct PosterArt: View {
     let url: URL?
+    @State private var image: UIImage?
+    @State private var isLoading = false
+
     var body: some View {
         GeometryReader { proxy in
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFill()
-                case .failure: fallback
-                case .empty: ZStack { fallback; ProgressView().tint(.cinemaAccent) }
-                @unknown default: fallback
+            ZStack {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .transition(.opacity)
+                } else {
+                    fallback
+                }
+                if isLoading && image == nil {
+                    ProgressView().tint(.cinemaAccent)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
+            .task(id: url) {
+                await loadImage()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func loadImage() async {
+        guard let url else {
+            image = nil
+            isLoading = false
+            return
+        }
+
+        if let cached = PosterImageCache.shared.object(forKey: url as NSURL) {
+            image = cached
+            isLoading = false
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            var request = URLRequest(url: url)
+            request.cachePolicy = .returnCacheDataElseLoad
+            request.timeoutInterval = 20
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled,
+                  let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let decoded = UIImage(data: data) else { return }
+            PosterImageCache.shared.setObject(decoded, forKey: url as NSURL)
+            withAnimation(.easeOut(duration: 0.18)) {
+                image = decoded
+            }
+        } catch is CancellationError {
+            // A new URL appeared while scrolling; the task is intentionally cancelled.
+        } catch {
+            // Keep the fallback visible for unavailable poster URLs.
+        }
     }
 
     private var fallback: some View {

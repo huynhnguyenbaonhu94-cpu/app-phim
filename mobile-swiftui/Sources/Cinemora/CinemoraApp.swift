@@ -1,8 +1,18 @@
 import SwiftUI
+import UIKit
+
+final class CinemoraAppDelegate: NSObject, UIApplicationDelegate {
+    static var orientationLock: UIInterfaceOrientationMask = .portrait
+
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        Self.orientationLock
+    }
+}
 
 @main
 @MainActor
 struct CinemoraApp: App {
+    @UIApplicationDelegateAdaptor(CinemoraAppDelegate.self) private var appDelegate
     @StateObject private var store = CinemaStore()
     @StateObject private var connectivity = ConnectivityMonitor()
 

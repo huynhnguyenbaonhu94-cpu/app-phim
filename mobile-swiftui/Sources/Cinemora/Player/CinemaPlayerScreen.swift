@@ -839,17 +839,16 @@ struct CinemaPlayerScreen: View {
     }
 
     private func forceOrientation(_ orientation: UIInterfaceOrientation) {
+        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
         UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+        if let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
            #available(iOS 16.0, *) {
-            let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
             let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
-        }
-        if let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
-           #available(iOS 16.0, *),
-           let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController {
-            rootViewController.setNeedsUpdateOfSupportedInterfaceOrientations()
+            windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         }
     }
 
