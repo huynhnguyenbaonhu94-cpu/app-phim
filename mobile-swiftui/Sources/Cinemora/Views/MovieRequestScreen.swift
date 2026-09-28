@@ -73,7 +73,7 @@ struct MovieRequestScreen: View {
                             Task {
                                 guard let data = try? await item.loadTransferable(type: Data.self),
                                       let image = UIImage(data: data),
-                                      let compressed = image.jpegData(compressionQuality: 0.78) else { return }
+                                      let compressed = Self.prepareImageData(image) else { return }
                                 await MainActor.run {
                                     imagePreview = image
                                     imageData = compressed
@@ -153,6 +153,20 @@ struct MovieRequestScreen: View {
                 .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(.white.opacity(0.12), lineWidth: 0.7))
         }
+    }
+
+    private static func prepareImageData(_ image: UIImage) -> Data? {
+        let longestSide = max(image.size.width, image.size.height)
+        let scale = min(1, 1600 / max(longestSide, 1))
+        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        var quality: CGFloat = 0.68
+        var data = renderer.jpegData(withCompressionQuality: quality) { image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+        while data.count > 7 * 1024 * 1024 && quality > 0.28 {
+            quality -= 0.08
+            data = renderer.jpegData(withCompressionQuality: quality) { image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+        }
+        return data.count <= 7 * 1024 * 1024 ? data : nil
     }
 
     private func submit() {

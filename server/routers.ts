@@ -65,7 +65,9 @@ export const appRouter = router({
     meta: publicProcedure.query(() => getCatalogMeta()),
     submitRequest: publicProcedure.input(z.object({
       title: z.string().trim().min(2, "Vui lòng nhập tên phim.").max(255),
-      link: z.string().trim().max(500).url("Link TMDB/IMDB không hợp lệ.").optional(),
+      // Keep this optional field permissive: users may paste an IMDb/TMDB URL,
+      // title ID, or a link copied from the app without a scheme.
+      link: z.string().trim().max(500).optional(),
       priority: z.enum(["Thấp", "Bình thường", "Cao", "Khẩn cấp"]),
       notes: z.string().trim().max(4000).optional(),
       imageBase64: z.string().max(11_200_000).optional(),
