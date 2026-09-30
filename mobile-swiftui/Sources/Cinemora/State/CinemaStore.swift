@@ -15,9 +15,6 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var homeLoadingMore = false
     @Published private(set) var homeHasMore = false
     @Published private(set) var homeError: String?
-    @Published private(set) var topViewedMovies: [Movie] = []
-    @Published private(set) var topViewedLoading = false
-    @Published private(set) var topViewedError: String?
     @Published private(set) var catalogMeta: CatalogMeta?
     @Published private(set) var searchResults: [Movie] = []
     @Published private(set) var searchLoading = false
@@ -45,7 +42,6 @@ final class CinemaStore: ObservableObject {
     private var detailRequestID = 0
     private var catalogRequestID = 0
     private var searchRequestID = 0
-    private var topViewedRequestID = 0
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -136,23 +132,6 @@ final class CinemaStore: ObservableObject {
 
     func refreshHome() async {
         await loadHomeSections(refresh: true)
-    }
-
-    func loadTopViewed(refresh: Bool = false) async {
-        guard !topViewedLoading || refresh else { return }
-        topViewedRequestID += 1
-        let requestID = topViewedRequestID
-        topViewedLoading = true
-        topViewedError = nil
-        defer { if requestID == topViewedRequestID { topViewedLoading = false } }
-        do {
-            let page = try await api.topViewed(refresh: refresh)
-            guard !Task.isCancelled, requestID == topViewedRequestID else { return }
-            topViewedMovies = page.items.filter { ($0.views ?? 0) > 0 }
-        } catch {
-            guard requestID == topViewedRequestID else { return }
-            topViewedError = error.localizedDescription
-        }
     }
 
     private func loadHomeSections(refresh: Bool) async {

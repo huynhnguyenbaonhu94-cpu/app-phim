@@ -9,7 +9,6 @@ Native SwiftUI iOS app, kept alongside `mobile/` Expo app during the migration t
 - AVPlayer for HLS, WKWebView for embed-only episodes
 - Netflix-style player controls: vuốt dọc bắt đầu từ vùng dưới màn hình — bên trái chỉnh độ sáng, bên phải chỉnh âm lượng; HUD dạng thanh dọc chỉ hiện ở góc tương ứng và tự ẩn sau thao tác
 - Cài đặt mặc định trong mục Lưu cho tự chuyển tập, hẹn giờ tắt và Picture-in-Picture (PiP)
-- Trang chủ có section Top lượt xem, hiển thị số lượt xem và tự refresh 60 giây/lần với animation chuyển dữ liệu nhẹ
 - XcodeGen project spec in `project.yml`
 
 ## Generate in Codemagic/macOS

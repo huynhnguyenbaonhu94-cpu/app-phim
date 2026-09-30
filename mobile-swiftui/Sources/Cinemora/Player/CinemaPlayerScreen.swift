@@ -170,10 +170,18 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
 
     @MainActor
     func start() {
-        guard let controller, controller.isPictureInPicturePossible else { return }
+        guard let controller else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
         try? AVAudioSession.sharedInstance().setActive(true)
-        controller.startPictureInPicture()
+        if controller.isPictureInPicturePossible {
+            controller.startPictureInPicture()
+        } else {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(280))
+                guard !Task.isCancelled, let self, let controller = self.controller, controller.isPictureInPicturePossible else { return }
+                controller.startPictureInPicture()
+            }
+        }
     }
 
     @MainActor
@@ -293,9 +301,9 @@ struct CinemaPlayerScreen: View {
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 12)
+                            DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    handleAdjustmentDrag(value, width: proxy.size.width, height: proxy.size.height)
+                                    handleAdjustmentDrag(value, width: proxy.size.width)
                                 }
                                 .onEnded { _ in finishAdjustmentGesture() }
                         )
@@ -725,10 +733,10 @@ struct CinemaPlayerScreen: View {
         }
     }
 
-    private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat, height: CGFloat) {
-        guard !controlsLocked, picker == nil, !settingsOpen, value.startLocation.y > height * 0.58 else { return }
+    private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat) {
+        guard !controlsLocked, picker == nil, !settingsOpen else { return }
         if !isAdjustmentGestureActive {
-            guard abs(value.translation.height) > abs(value.translation.width) * 0.75 else { return }
+            guard abs(value.translation.height) > max(8, abs(value.translation.width) * 0.75) else { return }
             isAdjustmentGestureActive = true
             let isBrightness = value.startLocation.x < width / 2
             adjustmentKind = isBrightness ? .brightness : .volume

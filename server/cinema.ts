@@ -363,16 +363,6 @@ export async function getDailyUpdates(page = 1) {
   return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
 }
 
-export async function getTopViewed(page = 1, refresh = false) {
-  const path = "/v1/api/danh-sach/phim-moi";
-  const query = { page: safePage(page), limit: 12, sort_field: "view", sort_type: "desc" };
-  const payload = await upstream(path, query, { bypassCache: refresh });
-  const { items, pagination, pathImage } = unwrapItems(payload);
-  const normalized: Movie[] = items.map((item: any) => normalizeMovie(item, pathImage));
-  normalized.sort((left, right) => (right.views ?? 0) - (left.views ?? 0));
-  return { items: normalized, pagination };
-}
-
 export async function getCatalogMeta() {
   const [categories, countries, years] = await Promise.all([upstream("/the-loai"), upstream("/quoc-gia"), upstream("/nam-phat-hanh")]);
   const itemsOf = (payload: any) => {
