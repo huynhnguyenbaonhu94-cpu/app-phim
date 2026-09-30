@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#10141d"/><stop offset=".55" stop-color="#263454"/><stop offset="1" stop-color="#e0a64d"/></linearGradient><radialGradient id="r"><stop stop-color="#d6f36b" stop-opacity=".55"/><stop offset="1" stop-color="#d6f36b" stop-opacity="0"/></radialGradient></defs>
+  <rect width="800" height="450" fill="url(#g)"/><circle cx="650" cy="50" r="230" fill="url(#r)"/><path d="M0 365C160 275 240 430 410 335S650 260 800 345V450H0Z" fill="#080b12" opacity=".65"/>
+  <rect x="285" y="120" width="230" height="150" rx="24" fill="#0b0e16" stroke="#d6f36b" stroke-width="7"/><path d="M330 310h140M400 270v40" stroke="#d6f36b" stroke-width="7" stroke-linecap="round"/><circle cx="400" cy="195" r="40" fill="#d6f36b"/><path d="m391 174 34 21-34 21z" fill="#10141d"/><text x="400" y="385" fill="#fff" font-family="Arial, sans-serif" font-size="30" font-weight="700" text-anchor="middle" letter-spacing="6">CINEMORA TV</text>
+</svg>

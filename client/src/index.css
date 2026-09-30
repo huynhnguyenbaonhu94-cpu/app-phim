@@ -2518,3 +2518,31 @@ body {
 }
 
 @media (max-width:680px){.detail-api-metadata{margin-top:20px;padding:15px}.detail-api-heading{align-items:flex-start;flex-direction:column;gap:6px}.detail-api-grid{grid-template-columns:1fr;gap:11px}}
+
+/* TV stream administration */
+.admin-tv-page { padding-bottom: 80px; }
+.admin-tv-form { max-width: 760px; display: grid; gap: 16px; padding: 24px; margin: 24px 0 44px; border: 1px solid rgba(255,255,255,.1); border-radius: 22px; background: rgba(255,255,255,.045); }
+.admin-tv-form label { display: grid; gap: 7px; color: rgba(255,255,255,.72); font-size: 12px; font-weight: 700; }
+.admin-tv-form input, .admin-tv-form textarea { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; background: rgba(0,0,0,.22); color: #fff; padding: 11px 12px; font: inherit; font-weight: 500; outline: none; }
+.admin-tv-form input:focus, .admin-tv-form textarea:focus { border-color: rgba(241,180,75,.75); }
+.admin-tv-form-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-tv-form-heading strong { display: block; color: #fff; font-size: 18px; }
+.admin-tv-form-heading span { display: block; margin-top: 4px; color: rgba(255,255,255,.55); font-size: 12px; }
+.admin-tv-grid { display: grid; grid-template-columns: 1fr 150px; gap: 14px; }
+.admin-tv-check { display: flex !important; align-items: center; gap: 9px !important; }
+.admin-tv-check input { width: auto; }
+.admin-tv-success { color: #79e2a4; font-size: 13px; margin: 0; }
+.admin-tv-error { color: #ff8f8f; font-size: 13px; margin: 0; }
+.admin-tv-list { display: grid; gap: 12px; }
+.admin-tv-item { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 17px 18px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: rgba(255,255,255,.035); }
+.admin-tv-item strong, .admin-tv-item span, .admin-tv-item small { display: block; }
+.admin-tv-item strong { color: #fff; font-size: 15px; }
+.admin-tv-item span { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.55); font-size: 12px; margin-top: 4px; }
+.admin-tv-item small { color: rgba(255,255,255,.4); font-size: 11px; margin-top: 5px; }
+.admin-tv-actions { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 640px) { .admin-tv-grid { grid-template-columns: 1fr; } .admin-tv-item { align-items: flex-start; flex-direction: column; } .admin-tv-actions { width: 100%; } }
+
+.admin-tv-health { display: block; margin-top: 6px; font-size: 11px; font-style: normal; }
+.admin-tv-health-online { color: #79e2a4; }
+.admin-tv-health-offline { color: #ff9b9b; }
+.admin-tv-health-unknown { color: #f0c674; }

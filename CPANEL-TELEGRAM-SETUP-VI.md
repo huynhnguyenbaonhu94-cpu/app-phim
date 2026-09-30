@@ -112,3 +112,67 @@ Lưu → Yêu cầu phim
 ```
 
 Gửi thử một yêu cầu. Bot Telegram phải nhận được tên phim, link, mức ưu tiên, ghi chú và ảnh nếu đã chọn.
+
+## 7. Quản lý Truyền hình và cập nhật realtime
+
+### Tạo bảng dữ liệu mới
+
+Bản cập nhật thêm bảng `tv_streams`. Sau khi upload source mới vào `/home/vfviehep/cinemora2`, chạy:
+
+```bash
+source /home/vfviehep/nodevenv/cinemora2/22/bin/activate
+cd /home/vfviehep/cinemora2
+npm install --include=dev
+npm run db:push
+npm run build
+```
+
+Nếu cPanel đã quản lý migration bằng Drizzle, file migration mới trong thư mục `drizzle/` (hiện là `drizzle/0003_chemical_dormammu.sql`) cũng có thể được chạy một lần trong đúng database của Cinemora. Không chạy lặp lại nếu bảng đã tồn tại. Khi dùng `npm run db:push`, hãy để Drizzle quản lý migration từ journal; không chạy thêm các file migration thủ công bên ngoài journal.
+
+### Thêm stream bằng web
+
+1. Đăng nhập tài khoản có `role=admin` trên website.
+2. Mở `https://cungcapicloud.id.vn/admin/tv`.
+3. Nhập tên kênh và URL HLS (`.m3u8`) hoặc URL stream trực tiếp, sau đó bấm **Thêm kênh**.
+4. Có thể thêm logo, mô tả, thứ tự hiển thị; bỏ chọn **Hiển thị trên app** để ẩn kênh mà không cần xóa.
+
+API admin là các procedure `tv.adminList`, `tv.create`, `tv.update`, `tv.remove`. Tất cả thao tác này yêu cầu session của user có role `admin`. URL stream được kiểm tra ở server; không đưa token Telegram hay thông tin database xuống app.
+
+### Realtime
+
+- App SwiftUI tải danh sách kênh qua `tv.list`.
+- App mở kết nối Server-Sent Events tại `/api/tv/events`.
+- Sau khi admin thêm/sửa/xóa/ẩn kênh, backend phát snapshot mới ngay trên kết nối SSE; app cập nhật danh sách mà không cần tắt/mở lại.
+- Nếu mạng hoặc tiến trình Node bị ngắt, app tự kết nối lại sau 3 giây và lấy snapshot mới.
+
+SSE cần được proxy qua HTTPS và không được bật cache. Nếu dùng Cloudflare hoặc proxy cPanel, giữ nguyên `Connection: keep-alive`, `Cache-Control: no-cache, no-transform` và tắt buffering cho `/api/tv/events`.
+
+### Tạo admin local nếu cần
+
+Tài khoản đăng ký mới mặc định là `user`. Nếu cần cấp quyền quản trị cho tài khoản local, chạy một lần trong MySQL (thay email bằng email thật):
+
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'admin@example.com';
+```
+
+Sau đó đăng xuất/đăng nhập lại để session nhận role mới.
+
+## 8. Poster, kiểm tra nguồn và trình phát TV
+
+Khi thêm hoặc sửa kênh, backend sẽ tự kiểm tra URL bằng request GET có timeout 8 giây và lưu:
+
+- `online`: nguồn trả về HTTP thành công.
+- `offline`: lỗi HTTP, không kết nối được hoặc timeout.
+- `unknown`: chưa kiểm tra hoặc đang chuẩn bị kiểm tra.
+
+Kết quả hiển thị ngay trong trang `/admin/tv`. Các URL `.m3u8`, MP4 hoặc định dạng stream HTTP/HTTPS khác đều được chấp nhận nếu thiết bị phát hỗ trợ định dạng đó.
+
+Mỗi kênh có thể nhập **Poster truyền hình**. Nếu bỏ trống poster, app dùng poster mặc định Cinemora TV có sẵn trong asset app. Trường `logoUrl` chỉ là logo nhỏ tùy chọn và được dùng làm fallback poster cho dữ liệu cũ.
+
+Trong app SwiftUI, màn hình phát TV có:
+
+- Play/Pause.
+- Tắt/mở tiếng và thanh tăng/giảm âm lượng.
+- Mở toàn màn hình.
+- Picture-in-Picture nếu thiết bị/iOS hỗ trợ.
+- Hiển thị trạng thái online/offline của nguồn.

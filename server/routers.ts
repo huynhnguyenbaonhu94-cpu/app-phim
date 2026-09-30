@@ -3,11 +3,12 @@ import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { addFavorite, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
+import { createTvStream, deleteTvStream, listTvStreams, updateTvStream } from "./tvStreams";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -88,6 +89,30 @@ export const appRouter = router({
         throw error;
       }
     }),
+  }),
+  tv: router({
+    list: publicProcedure.query(() => listTvStreams(false)),
+    adminList: adminProcedure.query(() => listTvStreams(true)),
+    create: adminProcedure.input(z.object({
+      name: z.string().trim().min(1).max(120),
+      streamUrl: z.string().trim().url().max(2000),
+      logoUrl: z.string().trim().url().max(1000).nullable().optional(),
+      posterUrl: z.string().trim().url().max(1000).nullable().optional(),
+      description: z.string().trim().max(500).nullable().optional(),
+      sortOrder: z.number().int().min(0).max(100000).optional(),
+      isActive: z.boolean().optional(),
+    })).mutation(({ input }) => createTvStream(input)),
+    update: adminProcedure.input(z.object({
+      id: z.number().int().positive(),
+      name: z.string().trim().min(1).max(120),
+      streamUrl: z.string().trim().url().max(2000),
+      logoUrl: z.string().trim().url().max(1000).nullable().optional(),
+      posterUrl: z.string().trim().url().max(1000).nullable().optional(),
+      description: z.string().trim().max(500).nullable().optional(),
+      sortOrder: z.number().int().min(0).max(100000).optional(),
+      isActive: z.boolean().optional(),
+    })).mutation(({ input: { id, ...input } }) => updateTvStream(id, input)),
+    remove: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvStream(input.id)),
   }),
   account: router({
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),

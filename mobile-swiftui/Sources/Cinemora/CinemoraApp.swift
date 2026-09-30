@@ -63,6 +63,11 @@ struct CinemoraTabShell: View {
                 .tabItem { Label("Trang Chủ", systemImage: "sparkles.tv") }
 
                 tabRoot {
+                    TVScreen()
+                }
+                .tabItem { Label("Truyền Hình", systemImage: "tv.fill") }
+
+                tabRoot {
                     LibraryScreen()
                 }
                 .tabItem { Label("Thư Viện", systemImage: "square.grid.2x2") }

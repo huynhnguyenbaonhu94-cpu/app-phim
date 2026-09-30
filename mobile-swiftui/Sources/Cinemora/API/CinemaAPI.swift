@@ -44,6 +44,24 @@ struct CinemaAPI {
         try await query("cinema.meta", input: nil)
     }
 
+    func tvStreams() async throws -> [TvStream] {
+        try await query("tv.list", input: nil)
+    }
+
+    func tvEventBytes() async throws -> URLSession.AsyncBytes {
+        var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/api/tv/events"
+        guard let url = components.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 0
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        return bytes
+    }
+
     func submitMovieRequest(title: String, link: String?, priority: String, notes: String?, imageData: Data?, imageMimeType: String?) async throws {
         var input: [String: Any] = ["title": title, "priority": priority]
         if let link, !link.isEmpty { input["link"] = link }

@@ -1,5 +1,29 @@
 import Foundation
 
+struct TvStream: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let streamUrl: String
+    let logoUrl: String?
+    let posterUrl: String?
+    let description: String?
+    let sortOrder: Int
+    let isActive: Bool
+    let healthStatus: String?
+    let healthMessage: String?
+    let lastCheckedAt: String?
+
+    var streamURL: URL? { URL(string: streamUrl) }
+    var posterURL: URL? { CinemaAPI.absoluteURL(posterUrl ?? logoUrl) }
+    var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
+    var isOnline: Bool { healthStatus == "online" }
+}
+
+struct TvStreamSnapshot: Decodable {
+    let version: Int
+    let streams: [TvStream]
+}
+
 struct Movie: Decodable, Identifiable, Hashable {
     let apiID: String?
     let slug: String

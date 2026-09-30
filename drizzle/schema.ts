@@ -1,4 +1,4 @@
-import { int, index, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, index, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -47,7 +47,27 @@ export const movieWatchHistory = mysqlTable("movie_watch_history", {
   userWatchedIndex: index("movie_history_user_watched_idx").on(table.userId, table.lastWatchedAt),
 }));
 
+export const tvStreams = mysqlTable("tv_streams", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  streamUrl: text("streamUrl").notNull(),
+  logoUrl: text("logoUrl"),
+  posterUrl: text("posterUrl"),
+  description: varchar("description", { length: 500 }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  healthStatus: mysqlEnum("healthStatus", ["unknown", "online", "offline"]).default("unknown").notNull(),
+  healthMessage: varchar("healthMessage", { length: 255 }),
+  lastCheckedAt: timestamp("lastCheckedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  activeOrderIndex: index("tv_streams_active_order_idx").on(table.isActive, table.sortOrder),
+}));
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
+export type TvStream = typeof tvStreams.$inferSelect;
+export type InsertTvStream = typeof tvStreams.$inferInsert;

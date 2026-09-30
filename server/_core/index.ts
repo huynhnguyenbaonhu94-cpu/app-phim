@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource } from "../cinema";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { currentTvStreamsVersion, listTvStreams, subscribeTvStreams } from "../tvStreams";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -91,6 +92,23 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.get("/api/tv/events", async (req, res) => {
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    const sendSnapshot = async () => {
+      if (res.writableEnded) return;
+      const streams = await listTvStreams(false);
+      res.write(`event: snapshot\ndata: ${JSON.stringify({ version: currentTvStreamsVersion(), streams })}\n\n`);
+    };
+    await sendSnapshot();
+    const unsubscribe = subscribeTvStreams(() => { void sendSnapshot(); });
+    const heartbeat = setInterval(() => res.write(`: heartbeat ${Date.now()}\n\n`), 25_000);
+    req.on("close", () => { clearInterval(heartbeat); unsubscribe(); });
+  });
   // HTML phải luôn được kiểm tra phiên bản mới; các bundle Vite đã có hash
   // trong tên file nên có thể cache dài hạn an toàn.
   app.use((req, res, next) => {

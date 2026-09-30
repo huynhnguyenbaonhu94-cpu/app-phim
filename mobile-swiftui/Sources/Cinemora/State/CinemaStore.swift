@@ -30,6 +30,9 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var localFavorites: [LocalMovieRecord] = []
     @Published private(set) var localHistory: [LocalWatchRecord] = []
     @Published var playbackDefaults = PlaybackDefaults()
+    @Published private(set) var tvStreams: [TvStream] = []
+    @Published private(set) var tvLoading = false
+    @Published private(set) var tvError: String?
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
@@ -42,6 +45,7 @@ final class CinemaStore: ObservableObject {
     private var detailRequestID = 0
     private var catalogRequestID = 0
     private var searchRequestID = 0
+    private var tvEventsTask: Task<Void, Never>?
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -68,6 +72,53 @@ final class CinemaStore: ObservableObject {
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
         }
+    }
+
+    deinit { tvEventsTask?.cancel() }
+
+    func startTvLiveUpdates() async {
+        guard tvEventsTask == nil else { return }
+        tvLoading = tvStreams.isEmpty
+        do {
+            tvStreams = try await api.tvStreams()
+            tvError = nil
+        } catch {
+            tvError = error.localizedDescription
+        }
+        tvLoading = false
+        tvEventsTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    let bytes = try await self.api.tvEventBytes()
+                    var eventData = ""
+                    for try await line in bytes.lines {
+                        if Task.isCancelled { return }
+                        if line.hasPrefix("data:") {
+                            eventData = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        } else if line.isEmpty && !eventData.isEmpty {
+                            self.applyTvEvent(eventData)
+                            eventData = ""
+                        }
+                    }
+                } catch {
+                    if Task.isCancelled { return }
+                    try? await Task.sleep(for: .seconds(3))
+                }
+            }
+        }
+    }
+
+    func stopTvLiveUpdates() {
+        tvEventsTask?.cancel()
+        tvEventsTask = nil
+    }
+
+    private func applyTvEvent(_ payload: String) {
+        guard let data = payload.data(using: .utf8),
+              let snapshot = try? JSONDecoder().decode(TvStreamSnapshot.self, from: data) else { return }
+        tvStreams = snapshot.streams
+        tvError = nil
     }
 
     func isFavorite(_ movie: Movie) -> Bool {
