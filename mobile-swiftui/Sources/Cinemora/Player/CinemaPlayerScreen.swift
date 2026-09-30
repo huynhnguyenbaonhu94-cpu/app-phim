@@ -231,6 +231,8 @@ struct CinemaPlayerScreen: View {
     @State private var stopAtEpisodeID: String?
     @State private var autoAdvanceEpisodes = true
     @State private var pictureInPictureEnabled = true
+    @State private var relatedRecommendationsVisible = false
+    @State private var selectedRelatedMovie: Movie?
     @State private var hasAppliedPlaybackDefaults = false
     @State private var didHandleEpisodeEnd = false
     @State private var videoFit: VideoFit = .fit
@@ -266,6 +268,12 @@ struct CinemaPlayerScreen: View {
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
+    private var relatedMovies: [Movie] {
+        var seen = Set<String>()
+        return (store.homeMovies + store.homeSections.flatMap(\.movies)).filter { candidate in
+            candidate.id != movie.id && seen.insert(candidate.id).inserted
+        }.prefix(18).map { $0 }
+    }
     private var selectableStopEpisodes: [MovieEpisode] {
         // Do not deduplicate by slug here. Some providers reuse/omit slugs
         // across sources; SwiftUI would then render only one row.
@@ -300,13 +308,6 @@ struct CinemaPlayerScreen: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    handleAdjustmentDrag(value, width: proxy.size.width)
-                                }
-                                .onEnded { _ in finishAdjustmentGesture() }
-                        )
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
@@ -376,7 +377,17 @@ struct CinemaPlayerScreen: View {
                     .padding(.top, max(18, proxy.safeAreaInsets.top + 8))
                     .padding(.trailing, max(18, proxy.safeAreaInsets.trailing + 8))
                 }
+                if relatedRecommendationsVisible {
+                    relatedRecommendationsOverlay
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .zIndex(12)
+                }
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in handleAdjustmentDrag(value, width: proxy.size.width) }
+                    .onEnded { _ in finishAdjustmentGesture() }
+            )
             .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
             .animation(.easeInOut(duration: 0.2), value: controlsVisible)
             .onChange(of: episodeIndex) { _, _ in loadCurrentEpisode() }
@@ -396,6 +407,7 @@ struct CinemaPlayerScreen: View {
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
             .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
             .task {
+                await store.loadHome()
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
@@ -404,6 +416,13 @@ struct CinemaPlayerScreen: View {
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
+        .sheet(item: $selectedRelatedMovie) { related in
+            NavigationStack {
+                MovieDetailScreen(slug: related.slug)
+            }
+            .environmentObject(store)
+            .preferredColorScheme(.dark)
+        }
     }
 
     private var topBar: some View {
@@ -432,6 +451,16 @@ struct CinemaPlayerScreen: View {
                 .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
                 .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
             }
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = true }
+                hideTask?.cancel()
+            } label: {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .buttonStyle(.plain).foregroundStyle(.white)
+            .cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
+            .accessibilityLabel("Video liên quan")
             quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
             quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
             Button {
@@ -718,10 +747,9 @@ struct CinemaPlayerScreen: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.32), lineWidth: 0.8))
-        .shadow(color: Color.cinemaAccent.opacity(0.18), radius: 22, y: 8)
+        .background(Color.clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.7))
+        .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
         .frame(width: 66, height: 174)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kind == .brightness ? .bottomLeading : .bottomTrailing)
         .padding(.horizontal, 34)
@@ -734,7 +762,7 @@ struct CinemaPlayerScreen: View {
     }
 
     private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat) {
-        guard !controlsLocked, picker == nil, !settingsOpen else { return }
+        guard !controlsLocked, picker == nil, !settingsOpen, !relatedRecommendationsVisible else { return }
         if !isAdjustmentGestureActive {
             guard abs(value.translation.height) > max(8, abs(value.translation.width) * 0.75) else { return }
             isAdjustmentGestureActive = true
@@ -827,6 +855,73 @@ struct CinemaPlayerScreen: View {
             Button("Trở lại") { dismiss() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
         }
         .padding(18).frame(maxWidth: 340).cinemaGlass(in: RoundedRectangle(cornerRadius: 24), tint: .black.opacity(0.54))
+    }
+
+    private var relatedRecommendationsOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.92).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        SectionEyebrow(text: "CINEMORA · FULLSCREEN BROWSING")
+                        Text("Video liên quan")
+                            .font(.system(size: 25, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Khám phá thêm phim tương tự mà không cần rời trình phát")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    Spacer()
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = false }
+                        scheduleHide()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(.white.opacity(0.1), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Đóng video liên quan")
+                }
+
+                if relatedMovies.isEmpty {
+                    StateMessage(icon: "sparkles.tv", title: "Chưa có gợi ý", detail: "Hãy quay lại trang chủ để cập nhật danh sách phim.")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 16)], spacing: 18) {
+                            ForEach(relatedMovies) { related in
+                                Button {
+                                    withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = false }
+                                    selectedRelatedMovie = related
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        PosterArt(url: related.posterURL)
+                                            .frame(height: 175)
+                                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
+                                        Text(related.name)
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.white)
+                                            .lineLimit(2)
+                                        Text(related.originName ?? "Phim đề xuất")
+                                            .font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(.white.opacity(0.5))
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 22)
+            .frame(maxWidth: 980, maxHeight: .infinity, alignment: .topLeading)
+        }
     }
 
     private func pickerOverlay(_ kind: PickerKind) -> some View {
