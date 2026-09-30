@@ -168,6 +168,12 @@ struct CinemaPlayerScreen: View {
     @State private var quickMenu: QuickMenu?
     @State private var volume = 1.0
     @State private var volumePopoverOpen = false
+    @State private var adjustmentKind: AdjustmentKind?
+    @State private var adjustmentValue = 0.0
+    @State private var gestureStartValue = 0.0
+    @State private var isAdjustmentGestureActive = false
+    @State private var adjustmentHideTask: Task<Void, Never>?
+    @State private var adjustmentPulse = false
     @State private var controlsLocked = false
     @State private var lockIndicatorVisible = true
     @State private var settingsOpen = false
@@ -187,6 +193,7 @@ struct CinemaPlayerScreen: View {
     @State private var hasAppliedResumeTime = false
 
     private enum PickerKind { case episodes, sources }
+    private enum AdjustmentKind: Equatable { case brightness, volume }
     private enum QuickMenu: Equatable { case videoFit, playbackRate }
     private enum StopTimer: String, CaseIterable, Identifiable {
         case off = "Tắt"
@@ -239,7 +246,14 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    Color.clear.contentShape(Rectangle()).onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 10)
+                                .onChanged { value in handleAdjustmentDrag(value, width: proxy.size.width) }
+                                .onEnded { _ in finishAdjustmentGesture() }
+                        )
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
@@ -282,6 +296,11 @@ struct CinemaPlayerScreen: View {
                 }
 
                 if let picker { pickerOverlay(picker).transition(.opacity.combined(with: .scale(scale: 0.97))) }
+                if let adjustmentKind {
+                    adjustmentHUD(for: adjustmentKind)
+                        .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                        .zIndex(9)
+                }
                 if controlsLocked {
                     Color.clear
                         .contentShape(Rectangle())
@@ -328,7 +347,7 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); playback.shutdown(); forcePortrait() }
+            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel(); playback.shutdown(); forcePortrait() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -608,6 +627,79 @@ struct CinemaPlayerScreen: View {
     private func skipControl(_ symbol: String) -> some View {
         Image(systemName: symbol).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
             .frame(width: 52, height: 52).background(.black.opacity(0.35), in: Circle()).cinemaGlass(in: Circle(), tint: .white.opacity(0.06))
+    }
+
+    private func adjustmentHUD(for kind: AdjustmentKind) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: kind == .brightness ? "sun.max.fill" : (playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"))
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(Color.cinemaAccent)
+                .frame(width: 34, height: 34)
+                .background(Color.cinemaAccent.opacity(0.14), in: Circle())
+                .scaleEffect(adjustmentPulse ? 1.12 : 1)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(kind == .brightness ? "ĐỘ SÁNG" : "ÂM LƯỢNG")
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(1.3)
+                    .foregroundStyle(.white.opacity(0.66))
+                ProgressView(value: adjustmentValue)
+                    .tint(Color.cinemaAccent)
+                    .frame(width: 132)
+                Text("\(Int(adjustmentValue * 100))%")
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(.horizontal, 15)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.32), lineWidth: 0.8))
+        .shadow(color: Color.cinemaAccent.opacity(0.18), radius: 22, y: 8)
+        .frame(maxWidth: .infinity, alignment: kind == .brightness ? .leading : .trailing)
+        .padding(.horizontal, 42)
+        .allowsHitTesting(false)
+        .onAppear {
+            adjustmentPulse = false
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { adjustmentPulse = true }
+        }
+    }
+
+    private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat) {
+        guard !controlsLocked, picker == nil, !settingsOpen else { return }
+        if !isAdjustmentGestureActive {
+            guard abs(value.translation.height) > abs(value.translation.width) * 0.75 else { return }
+            isAdjustmentGestureActive = true
+            let isBrightness = value.startLocation.x < width / 2
+            adjustmentKind = isBrightness ? .brightness : .volume
+            gestureStartValue = isBrightness ? Double(UIScreen.main.brightness) : volume
+        }
+
+        let nextValue = min(1, max(0, gestureStartValue - Double(value.translation.height / 220)))
+        adjustmentValue = nextValue
+        if adjustmentKind == .brightness {
+            UIScreen.main.brightness = CGFloat(nextValue)
+        } else {
+            volume = nextValue
+            playback.setVolume(nextValue)
+        }
+        withAnimation(.easeOut(duration: 0.14)) { adjustmentPulse.toggle() }
+        scheduleAdjustmentHUDHide()
+    }
+
+    private func finishAdjustmentGesture() {
+        guard isAdjustmentGestureActive else { return }
+        isAdjustmentGestureActive = false
+        scheduleAdjustmentHUDHide()
+    }
+
+    private func scheduleAdjustmentHUDHide() {
+        adjustmentHideTask?.cancel()
+        adjustmentHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { adjustmentKind = nil }
+        }
     }
 
     private var bottomControls: some View {
