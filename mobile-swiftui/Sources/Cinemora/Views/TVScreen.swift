@@ -1,18 +1,75 @@
 import AVKit
+import Combine
 import SwiftUI
+import UIKit
+
+@MainActor
+private final class TVPlaybackController: ObservableObject {
+    let player = AVPlayer()
+    @Published private(set) var isPlaying = false
+    @Published private(set) var isLoading = false
+    private var timeObserver: Any?
+    private var itemObservation: NSKeyValueObservation?
+
+    init() {
+        player.automaticallyWaitsToMinimizeStalling = true
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.isPlaying = self.player.timeControlStatus == .playing
+                self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            }
+        }
+    }
+
+    func load(_ url: URL) {
+        itemObservation = nil
+        player.pause()
+        isPlaying = false
+        isLoading = true
+        let item = AVPlayerItem(url: url)
+        itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if item.status == .readyToPlay { self.isLoading = false }
+                if item.status == .failed { self.isLoading = false }
+            }
+        }
+        player.replaceCurrentItem(with: item)
+        player.play()
+        isPlaying = true
+    }
+
+    func togglePlayback() {
+        if player.timeControlStatus == .playing { player.pause(); isPlaying = false }
+        else { player.play(); isPlaying = true }
+    }
+
+    func shutdown() {
+        itemObservation = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        isPlaying = false
+        if let timeObserver { player.removeTimeObserver(timeObserver); self.timeObserver = nil }
+    }
+
+    deinit {
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
+    }
+}
 
 struct TVScreen: View {
     @EnvironmentObject private var store: CinemaStore
-    @State private var selectedStreamID: Int?
-    @State private var player = AVPlayer()
+    @StateObject private var playback = TVPlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
-    @State private var isPlaying = false
+    @State private var selectedStreamID: Int?
     @State private var isMuted = false
-    @State private var volume: Double = 1
-    @State private var isFullscreen = false
+    @State private var volume = 1.0
+    @State private var isPlayerPresented = false
 
     private var selectedStream: TvStream? {
-        store.tvStreams.first { $0.id == selectedStreamID } ?? store.tvStreams.first
+        guard let selectedStreamID else { return nil }
+        return store.tvStreams.first { $0.id == selectedStreamID }
     }
 
     var body: some View {
@@ -21,38 +78,18 @@ struct TVScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     CinemaHeader(eyebrow: "CINEMORA LIVE", title: "TRUYỀN HÌNH")
-                    if let selectedStream {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TVPlayerSurface(player: player, pipCoordinator: pipCoordinator, isPlaying: $isPlaying, isMuted: $isMuted, volume: $volume, isFullscreen: $isFullscreen)
-                                .aspectRatio(16 / 9, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            HStack(spacing: 8) {
-                                Circle().fill(selectedStream.isOnline ? .green : .orange).frame(width: 7, height: 7)
-                                Text(selectedStream.isOnline ? "Đang phát trực tuyến" : (selectedStream.healthMessage ?? "Đang kiểm tra nguồn"))
-                                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.58))
-                                Spacer()
-                                if pipCoordinator.isSupported {
-                                    Button { pipCoordinator.start() } label: { Label("PiP", systemImage: "pip") }
-                                        .buttonStyle(.bordered).tint(.cinemaAccent)
-                                }
-                            }
-                            Text(selectedStream.name).font(.system(size: 20, weight: .black, design: .rounded)).foregroundStyle(.white)
-                            if let description = selectedStream.description, !description.isEmpty {
-                                Text(description).font(.system(size: 13)).foregroundStyle(.white.opacity(0.62))
-                            }
-                        }
-                    }
                     if store.tvLoading && store.tvStreams.isEmpty {
                         ProgressView().tint(.cinemaAccent).frame(maxWidth: .infinity).padding(.top, 70)
                     } else if store.tvStreams.isEmpty {
                         StateMessage(icon: "tv", title: "Chưa có kênh truyền hình", detail: store.tvError ?? "Admin chưa thêm stream nào.")
                     } else {
-                        SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Chọn kênh")
+                        SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Chọn kênh để xem")
                         LazyVStack(spacing: 10) {
                             ForEach(store.tvStreams) { stream in
                                 TVStreamRow(stream: stream, isSelected: stream.id == selectedStream?.id) {
                                     selectedStreamID = stream.id
                                     play(stream)
+                                    isPlayerPresented = true
                                 }
                             }
                         }
@@ -63,32 +100,159 @@ struct TVScreen: View {
             .refreshable { await store.startTvLiveUpdates() }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.startTvLiveUpdates(); if let stream = selectedStream { play(stream) } }
-        .onChange(of: selectedStreamID) { _, _ in if let stream = selectedStream { play(stream) } }
+        .task { await store.startTvLiveUpdates() }
         .onChange(of: store.tvStreams) { _, streams in
             if selectedStreamID == nil { selectedStreamID = streams.first?.id }
             else if !streams.contains(where: { $0.id == selectedStreamID }) { selectedStreamID = streams.first?.id }
         }
-        .onDisappear { player.pause(); store.stopTvLiveUpdates() }
-        .fullScreenCover(isPresented: $isFullscreen) {
-            if let selectedStream { TVFullscreenPlayer(stream: selectedStream, player: player, pipCoordinator: pipCoordinator, isPlaying: $isPlaying, isMuted: $isMuted, volume: $volume, isFullscreen: $isFullscreen) }
+        .onDisappear { playback.shutdown(); store.stopTvLiveUpdates() }
+        .fullScreenCover(isPresented: $isPlayerPresented) {
+            if let selectedStream {
+                TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
+            }
         }
     }
 
     private func play(_ stream: TvStream) {
         guard let url = stream.streamURL else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        player.volume = Float(volume)
-        player.isMuted = isMuted
-        player.play(); isPlaying = true
+        playback.load(url)
+        playback.player.volume = Float(volume)
+        playback.player.isMuted = isMuted
+    }
+}
+
+private struct TVPlayerView: View {
+    let stream: TvStream
+    @ObservedObject var playback: TVPlaybackController
+    let pipCoordinator: PictureInPictureCoordinator
+    @Binding var isMuted: Bool
+    @Binding var volume: Double
+    @Binding var isFullscreen: Bool
+    @State private var controlsVisible = true
+    @State private var volumePopoverOpen = false
+    @State private var hideTask: Task<Void, Never>?
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                TVNativeVideoSurface(player: playback.player, pipCoordinator: pipCoordinator)
+                    .accessibilityLabel("Đang phát \(stream.name)")
+                Color.clear.contentShape(Rectangle()).onTapGesture { toggleControls() }
+                if controlsVisible {
+                    VStack(spacing: 0) {
+                        topBar
+                        Spacer()
+                        if playback.isLoading { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
+                        Spacer()
+                        centerControls
+                        Spacer()
+                        bottomControls
+                    }
+                    .padding(.horizontal, max(18, proxy.safeAreaInsets.leading + 16))
+                    .padding(.top, max(14, proxy.safeAreaInsets.top + 7))
+                    .padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 7))
+                    .background(LinearGradient(colors: [.black.opacity(0.58), .clear, .clear, .black.opacity(0.62)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+            .onAppear { scheduleHide() }
+            .onDisappear { hideTask?.cancel() }
+        }
+        .onChange(of: volume) { _, value in playback.player.volume = Float(value) }
+        .onChange(of: isMuted) { _, value in playback.player.isMuted = value }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "tv.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stream.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+                    Text("TRUYỀN HÌNH TRỰC TIẾP").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.58))
+                }
+            }
+            .padding(.horizontal, 12).frame(height: 42)
+            .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+            Spacer()
+            pipButton
+            Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
+        }
+    }
+
+    private var pipButton: some View {
+        Group {
+            if pipCoordinator.isSupported {
+                Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start(); scheduleHide() } label: {
+                    Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
+                        .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(pipCoordinator.isActive ? Color.cinemaInk : .white)
+                .background(pipCoordinator.isActive ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+                .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
+            }
+        }
+    }
+
+    private var centerControls: some View {
+        HStack(spacing: 38) {
+            Button { playback.togglePlayback(); scheduleHide() } label: {
+                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 25, weight: .black)).foregroundStyle(Color.cinemaInk)
+                    .frame(width: 70, height: 70).background(Color.cinemaAccent, in: Circle())
+                    .shadow(color: Color.cinemaAccent.opacity(0.24), radius: 22, y: 8)
+            }
+            .buttonStyle(.plain).accessibilityLabel(playback.isPlaying ? "Tạm dừng" : "Phát")
+        }
+    }
+
+    private var bottomControls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Text("LIVE").font(.system(size: 10, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 8).frame(height: 28).background(Color.cinemaAccent.opacity(0.14), in: Capsule())
+                Capsule().fill(Color.cinemaAccent).frame(height: 3)
+                Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white).frame(width: 43, height: 43)
+                }
+                .buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.4)).accessibilityLabel("Điều chỉnh âm lượng")
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if volumePopoverOpen {
+                    HStack(spacing: 10) {
+                        Button { isMuted.toggle() } label: { Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 34, height: 34) }.buttonStyle(.plain)
+                        Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } }).tint(Color.cinemaAccent).frame(width: 142)
+                    }
+                    .padding(.horizontal, 11).padding(.vertical, 7).background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.7)).offset(y: -49)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottomTrailing)))
+                }
+            }
+            HStack { Text("CINEMORA LIVE").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.56)); Spacer(); Text(stream.name).font(.system(size: 9, weight: .bold)).foregroundStyle(Color.cinemaAccent).lineLimit(1) }
+        }
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeOut(duration: 0.2)) { controlsVisible.toggle(); if !controlsVisible { volumePopoverOpen = false } }
+        if controlsVisible { scheduleHide() } else { hideTask?.cancel() }
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { controlsVisible = false; volumePopoverOpen = false }
+        }
     }
 }
 
 private struct TVFullscreenPlayer: View {
     let stream: TvStream
-    let player: AVPlayer
+    @ObservedObject var playback: TVPlaybackController
     let pipCoordinator: PictureInPictureCoordinator
-    @Binding var isPlaying: Bool
     @Binding var isMuted: Bool
     @Binding var volume: Double
     @Binding var isFullscreen: Bool
@@ -96,41 +260,17 @@ private struct TVFullscreenPlayer: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            TVPlayerSurface(player: player, pipCoordinator: pipCoordinator, isPlaying: $isPlaying, isMuted: $isMuted, volume: $volume, isFullscreen: $isFullscreen)
-                .ignoresSafeArea()
-            VStack { HStack { Text(stream.name).font(.headline).foregroundStyle(.white); Spacer(); Button { isFullscreen = false } label: { Image(systemName: "xmark").font(.headline).foregroundStyle(.white).padding(12).background(.black.opacity(0.55), in: Circle()) } }.padding(); Spacer() }
+            TVPlayerView(stream: stream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isFullscreen).ignoresSafeArea()
         }
         .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
+        .onAppear { forceLandscape() }
+        .onDisappear { forcePortrait() }
     }
-}
 
-private struct TVPlayerSurface: View {
-    let player: AVPlayer
-    let pipCoordinator: PictureInPictureCoordinator
-    @Binding var isPlaying: Bool
-    @Binding var isMuted: Bool
-    @Binding var volume: Double
-    @Binding var isFullscreen: Bool
-
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            TVNativeVideoSurface(player: player, pipCoordinator: pipCoordinator)
-            HStack(spacing: 14) {
-                Button { if isPlaying { player.pause() } else { player.play() }; isPlaying.toggle() } label: { Image(systemName: isPlaying ? "pause.fill" : "play.fill") }
-                Button { player.isMuted.toggle(); isMuted = player.isMuted } label: { Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") }
-                Slider(value: $volume, in: 0...1) { _ in player.volume = Float(volume); if volume > 0 { player.isMuted = false; isMuted = false } }
-                    .tint(.white).frame(maxWidth: 130)
-                Spacer()
-                if pipCoordinator.isSupported { Button { pipCoordinator.start() } label: { Image(systemName: "pip") } }
-                Button { isFullscreen = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-            }
-            .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-            .padding(.horizontal, 15).padding(.vertical, 12)
-            .background(.black.opacity(0.72))
-        }
-        .background(.black)
-        .onChange(of: volume) { _, value in player.volume = Float(value) }
-    }
+    private func forceLandscape() { UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation") }
+    private func forcePortrait() { UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation") }
 }
 
 private struct TVStreamRow: View {

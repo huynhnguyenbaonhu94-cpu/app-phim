@@ -1,6 +1,9 @@
 import { asc, eq } from "drizzle-orm";
-import { getDb } from "./db";
+import { ensureTvStreamsCompatibility, getDb } from "./db";
 import { tvStreams } from "../drizzle/schema";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export type TvStreamPayload = {
   name: string;
@@ -45,6 +48,7 @@ export function validateStreamUrl(value: string) {
 
 export function validateOptionalUrl(value: string | null | undefined) {
   if (!value?.trim()) return null;
+  if (value.trim().startsWith("/uploads/tv-posters/")) return value.trim().slice(0, 1000);
   try {
     const url = new URL(value.trim());
     if (!["https:", "http:"].includes(url.protocol)) throw new Error();
@@ -52,6 +56,18 @@ export function validateOptionalUrl(value: string | null | undefined) {
   } catch {
     throw new Error("URL poster/logo không hợp lệ.");
   }
+}
+
+export async function saveTvPoster(input: { base64: string; mimeType: "image/jpeg" | "image/png" | "image/webp" }) {
+  const raw = input.base64.includes(",") ? input.base64.split(",", 2)[1] : input.base64;
+  const bytes = Buffer.from(raw, "base64");
+  if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error("Ảnh poster phải nhỏ hơn 8MB.");
+  const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
+  const directory = path.resolve(process.cwd(), "uploads", "tv-posters");
+  await mkdir(directory, { recursive: true });
+  const filename = `${randomUUID()}.${extension}`;
+  await writeFile(path.join(directory, filename), bytes, { flag: "wx" });
+  return `/uploads/tv-posters/${filename}`;
 }
 
 export async function checkStreamHealth(streamUrl: string) {
@@ -77,6 +93,7 @@ export async function checkStreamHealth(streamUrl: string) {
 export async function listTvStreams(includeInactive = false) {
   const db = await getDb();
   if (!db) return [];
+  await ensureTvStreamsCompatibility(db);
   const query = db.select().from(tvStreams);
   const rows = includeInactive
     ? await query.orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id))
@@ -108,8 +125,9 @@ async function refreshHealth(id: number, streamUrl: string) {
 export async function createTvStream(input: TvStreamPayload) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
+  await ensureTvStreamsCompatibility(db);
   const values = normalizedValues(input);
-  await db.insert(tvStreams).values(values);
+  await db.insert(tvStreams).values({ ...values, healthStatus: "unknown", healthMessage: "Đang kiểm tra…", lastCheckedAt: new Date() });
   const rows = await db.select().from(tvStreams).where(eq(tvStreams.name, values.name)).orderBy(asc(tvStreams.id)).limit(1);
   const created = rows[0];
   if (!created) throw new Error("Không thể đọc stream vừa tạo.");
@@ -122,8 +140,9 @@ export async function createTvStream(input: TvStreamPayload) {
 export async function updateTvStream(id: number, input: TvStreamPayload) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
+  await ensureTvStreamsCompatibility(db);
   const values = normalizedValues(input);
-  await db.update(tvStreams).set({ ...values, healthStatus: "unknown", healthMessage: "Đang kiểm tra…", lastCheckedAt: null }).where(eq(tvStreams.id, id));
+  await db.update(tvStreams).set({ ...values, healthStatus: "unknown", healthMessage: "Đang kiểm tra…", lastCheckedAt: new Date() }).where(eq(tvStreams.id, id));
   await refreshHealth(id, values.streamUrl);
   publishTvStreamsChanged();
   const rows = await db.select().from(tvStreams).where(eq(tvStreams.id, id)).limit(1);
@@ -133,6 +152,7 @@ export async function updateTvStream(id: number, input: TvStreamPayload) {
 export async function deleteTvStream(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
+  await ensureTvStreamsCompatibility(db);
   await db.delete(tvStreams).where(eq(tvStreams.id, id));
   publishTvStreamsChanged();
   return true;

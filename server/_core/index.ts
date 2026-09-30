@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "node:path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -10,6 +11,7 @@ import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource }
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { currentTvStreamsVersion, listTvStreams, subscribeTvStreams } from "../tvStreams";
+import { initializeDatabase } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -59,6 +61,12 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  try {
+    await initializeDatabase();
+    console.log("[Database] Migration and default admin check completed.");
+  } catch (error) {
+    console.error("[Database] Startup initialization failed:", error instanceof Error ? error.message : error);
+  }
   const app = express();
   const server = createServer(app);
   const mobileAppOrigins = new Set(
@@ -92,6 +100,7 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads"), { maxAge: "7d", fallthrough: true }));
   app.get("/api/tv/events", async (req, res) => {
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");

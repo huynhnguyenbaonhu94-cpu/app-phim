@@ -8,7 +8,7 @@ import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, ge
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
-import { createTvStream, deleteTvStream, listTvStreams, updateTvStream } from "./tvStreams";
+import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, updateTvStream } from "./tvStreams";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -93,6 +93,10 @@ export const appRouter = router({
   tv: router({
     list: publicProcedure.query(() => listTvStreams(false)),
     adminList: adminProcedure.query(() => listTvStreams(true)),
+    uploadPoster: adminProcedure.input(z.object({
+      base64: z.string().min(1).max(11_200_000),
+      mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+    })).mutation(({ input }) => saveTvPoster(input)),
     create: adminProcedure.input(z.object({
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),

@@ -176,3 +176,36 @@ Trong app SwiftUI, màn hình phát TV có:
 - Mở toàn màn hình.
 - Picture-in-Picture nếu thiết bị/iOS hỗ trợ.
 - Hiển thị trạng thái online/offline của nguồn.
+
+## 9. Tài khoản admin mặc định và tự khởi tạo database
+
+Từ bản cập nhật này, khi Node.js khởi động với `DATABASE_URL` hợp lệ, backend sẽ tự chạy các migration trong thư mục `drizzle/` và tự tạo tài khoản admin nếu email đó chưa tồn tại. Không cần đăng ký tài khoản trước và không cần tự chạy SQL trong phpMyAdmin.
+
+Thông tin mặc định:
+
+```text
+Email: admin@cungcapicloud.id.vn
+Mật khẩu: Cinemora@2026!
+```
+
+Nên đổi thông tin mặc định bằng Environment Variables trong cPanel Node.js Selector trước khi restart:
+
+```text
+ADMIN_EMAIL=dia-chi-email-admin-cua-ban@example.com
+ADMIN_PASSWORD=MatKhauManhMoiCuaBan
+ADMIN_NAME=Cinemora Admin
+```
+
+Nếu đã có user cùng `ADMIN_EMAIL`, backend không ghi đè mật khẩu hoặc quyền của user đó. Nếu chưa có, backend tạo user với role `admin`. Khi đăng nhập xong, mở:
+
+```text
+https://cungcapicloud.id.vn/admin/tv
+```
+
+Lỗi `Failed query: select ... from users` thường có nghĩa là bảng chưa được tạo hoặc `DATABASE_URL` chưa kết nối đúng. Sau khi thêm `DATABASE_URL`, hãy bấm **Restart** Node.js app; log khởi động cần có dòng `Migration and default admin check completed.`. Không đặt chuỗi `>` trong giá trị Environment Variable.
+
+## 10. Sửa database cũ và upload poster
+
+Nếu log báo lỗi dạng `update tv_streams set healthStatus ...`, database đang có bảng `tv_streams` của bản cũ nhưng thiếu cột health. Bản source mới có compatibility repair: khi Node.js restart, backend kiểm tra `INFORMATION_SCHEMA` và tự thêm các cột còn thiếu (`posterUrl`, `healthStatus`, `healthMessage`, `lastCheckedAt`). Không cần xóa bảng cũ và không cần nhập SQL thủ công.
+
+Trang `/admin/tv` hiện có ô **Upload poster**. Chọn JPG, PNG hoặc WebP tối đa 8MB; backend lưu vào `uploads/tv-posters/` và tự điền URL vào stream. Có thể dùng URL poster như phương án thay thế. Sau khi upload source mới, cần chạy `npm run build` và bấm Restart để route `/uploads` được kích hoạt.

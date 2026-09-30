@@ -2546,3 +2546,6 @@ body {
 .admin-tv-health-online { color: #79e2a4; }
 .admin-tv-health-offline { color: #ff9b9b; }
 .admin-tv-health-unknown { color: #f0c674; }
+
+.admin-tv-form input[type="file"] { padding: 8px; color: rgba(255,255,255,.72); }
+.admin-tv-form label small { color: #f0c674; font-size: 11px; font-weight: 500; }
