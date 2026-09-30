@@ -167,6 +167,7 @@ struct CinemaPlayerScreen: View {
     @State private var picker: PickerKind?
     @State private var quickMenu: QuickMenu?
     @State private var volume = 1.0
+    @State private var brightnessValue = 0.5
     @State private var volumePopoverOpen = false
     @State private var adjustmentKind: AdjustmentKind?
     @State private var adjustmentValue = 0.0
@@ -249,11 +250,6 @@ struct CinemaPlayerScreen: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 10)
-                                .onChanged { value in handleAdjustmentDrag(value, width: proxy.size.width) }
-                                .onEnded { _ in finishAdjustmentGesture() }
-                        )
                 } else if let embed = episode?.embedURL {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
@@ -271,6 +267,19 @@ struct CinemaPlayerScreen: View {
                     .padding(.top, max(18, proxy.safeAreaInsets.top + 8))
                     .padding(.trailing, max(18, proxy.safeAreaInsets.trailing + 8))
                     .allowsHitTesting(false)
+                }
+
+                if controlsVisible && !controlsLocked && playback.activeURL != nil {
+                    HStack {
+                        verticalAdjustmentControl(kind: .brightness, value: $brightnessValue)
+                        Spacer()
+                        verticalAdjustmentControl(kind: .volume, value: $volume)
+                    }
+                    .padding(.horizontal, max(20, proxy.safeAreaInsets.leading + 12))
+                    .padding(.top, max(80, proxy.safeAreaInsets.top + 58))
+                    .padding(.bottom, max(72, proxy.safeAreaInsets.bottom + 52))
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(4)
                 }
 
                 if controlsVisible && !controlsLocked {
@@ -341,7 +350,7 @@ struct CinemaPlayerScreen: View {
                 scheduleStopTimer()
             }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
-            .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .onAppear { brightnessValue = Double(UIScreen.main.brightness); loadCurrentEpisode(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
@@ -627,6 +636,64 @@ struct CinemaPlayerScreen: View {
     private func skipControl(_ symbol: String) -> some View {
         Image(systemName: symbol).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
             .frame(width: 52, height: 52).background(.black.opacity(0.35), in: Circle()).cinemaGlass(in: Circle(), tint: .white.opacity(0.06))
+    }
+
+    private func verticalAdjustmentControl(kind: AdjustmentKind, value: Binding<Double>) -> some View {
+        GeometryReader { proxy in
+            let height = max(1, proxy.size.height - 68)
+            let clampedValue = CGFloat(min(1, max(0, value.wrappedValue)))
+            let thumbY = 34 + (1 - clampedValue) * height
+            VStack(spacing: 8) {
+                Image(systemName: kind == .brightness ? "sun.max.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.cinemaAccent)
+                ZStack(alignment: .top) {
+                    Capsule()
+                        .fill(.white.opacity(0.16))
+                        .frame(width: 8, height: height)
+                    Capsule()
+                        .fill(Color.cinemaAccent)
+                        .frame(width: 8, height: max(8, (1 - clampedValue) * height), alignment: .top)
+                    Circle()
+                        .fill(Color.cinemaAccent)
+                        .frame(width: 25, height: 25)
+                        .overlay(Circle().stroke(.white.opacity(0.75), lineWidth: 1.2))
+                        .shadow(color: Color.cinemaAccent.opacity(0.55), radius: 10)
+                        .offset(y: thumbY - 34)
+                }
+                .frame(height: height)
+                Text("\(Int(clampedValue * 100))")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.2), lineWidth: 0.8))
+            .frame(width: 58)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        let y = min(max(0, gesture.location.y - 34), height)
+                        let newValue = 1 - Double(y / height)
+                        value.wrappedValue = newValue
+                        adjustmentKind = kind
+                        adjustmentValue = newValue
+                        if kind == .brightness { UIScreen.main.brightness = CGFloat(newValue) }
+                        else { playback.setVolume(newValue) }
+                        withAnimation(.easeOut(duration: 0.12)) { adjustmentPulse.toggle() }
+                        scheduleAdjustmentHUDHide()
+                    }
+                    .onEnded { _ in scheduleAdjustmentHUDHide() }
+            )
+        }
+        .frame(width: 58, height: 245)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(kind == .brightness ? "Độ sáng" : "Âm lượng")
+        .accessibilityValue("\(Int(value.wrappedValue * 100)) phần trăm")
     }
 
     private func adjustmentHUD(for kind: AdjustmentKind) -> some View {
