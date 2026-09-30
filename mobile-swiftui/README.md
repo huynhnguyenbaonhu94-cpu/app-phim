@@ -7,7 +7,7 @@ Native SwiftUI iOS app, kept alongside `mobile/` Expo app during the migration t
 - SwiftUI, Swift concurrency, native `TabView` and `NavigationStack`
 - iOS 26 Liquid Glass through `glassEffect` with an iOS 17+ material fallback
 - AVPlayer for HLS, WKWebView for embed-only episodes
-- Netflix-style player controls: hai thanh trượt dọc luôn hiện khi control player mở — thanh trái chỉnh độ sáng, thanh phải chỉnh âm lượng; HUD glass animated tự ẩn sau thao tác
+- Netflix-style player controls: vuốt dọc bắt đầu từ vùng dưới màn hình — bên trái chỉnh độ sáng, bên phải chỉnh âm lượng; HUD glass chỉ hiện ở góc tương ứng và tự ẩn sau thao tác
 - XcodeGen project spec in `project.yml`
 
 ## Generate in Codemagic/macOS
