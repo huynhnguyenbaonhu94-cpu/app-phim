@@ -38,6 +38,16 @@ private final class PosterImageCache {
         cache.totalCostLimit = 48 * 1024 * 1024
         return cache
     }()
+
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, diskPath: "cinemora-posters")
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 45
+        return URLSession(configuration: configuration)
+    }()
 }
 
 struct PosterArt: View {
@@ -82,25 +92,29 @@ struct PosterArt: View {
             return
         }
 
+        image = nil
         isLoading = true
         defer { isLoading = false }
-        do {
-            var request = URLRequest(url: url)
-            request.cachePolicy = .returnCacheDataElseLoad
-            request.timeoutInterval = 20
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled,
-                  let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode),
-                  let decoded = UIImage(data: data) else { return }
-            PosterImageCache.shared.setObject(decoded, forKey: url as NSURL)
-            withAnimation(.easeOut(duration: 0.18)) {
-                image = decoded
+        let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(700), .seconds(1.5)]
+        for attempt in 0..<retryDelays.count {
+            do {
+                var request = URLRequest(url: url)
+                request.cachePolicy = .returnCacheDataElseLoad
+                request.timeoutInterval = 20
+                let (data, response) = try await PosterImageCache.session.data(for: request)
+                guard !Task.isCancelled,
+                      let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      let decoded = UIImage(data: data) else { continue }
+                PosterImageCache.shared.setObject(decoded, forKey: url as NSURL, cost: data.count)
+                withAnimation(.easeOut(duration: 0.18)) { image = decoded }
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                guard attempt < retryDelays.count - 1, !Task.isCancelled else { return }
+                try? await Task.sleep(for: retryDelays[attempt])
             }
-        } catch is CancellationError {
-            // A new URL appeared while scrolling; the task is intentionally cancelled.
-        } catch {
-            // Keep the fallback visible for unavailable poster URLs.
         }
     }
 

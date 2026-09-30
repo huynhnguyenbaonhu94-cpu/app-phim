@@ -10,6 +10,7 @@ private final class TVPlaybackController: ObservableObject {
     @Published private(set) var isLoading = false
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
+    private var currentURL: URL?
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -23,6 +24,7 @@ private final class TVPlaybackController: ObservableObject {
     }
 
     func load(_ url: URL) {
+        currentURL = url
         itemObservation = nil
         player.pause()
         isPlaying = false
@@ -38,6 +40,12 @@ private final class TVPlaybackController: ObservableObject {
         player.replaceCurrentItem(with: item)
         player.play()
         isPlaying = true
+    }
+
+    /// Reload the HLS playlist so AVPlayer returns to the provider's live edge.
+    func refreshLiveStream() {
+        guard let currentURL else { return }
+        load(currentURL)
     }
 
     func togglePlayback() {
@@ -104,6 +112,12 @@ struct TVScreen: View {
         .onChange(of: store.tvStreams) { _, streams in
             if selectedStreamID == nil { selectedStreamID = streams.first?.id }
             else if !streams.contains(where: { $0.id == selectedStreamID }) { selectedStreamID = streams.first?.id }
+        }
+        .onChange(of: isPlayerPresented) { _, presented in
+            if !presented {
+                if pipCoordinator.isActive { pipCoordinator.stop() }
+                playback.shutdown()
+            }
         }
         .onDisappear { playback.shutdown(); store.stopTvLiveUpdates() }
         .fullScreenCover(isPresented: $isPlayerPresented) {
@@ -176,6 +190,13 @@ private struct TVPlayerView: View {
             .padding(.horizontal, 12).frame(height: 42)
             .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
             Spacer()
+            Button { playback.refreshLiveStream(); scheduleHide() } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .buttonStyle(.plain).foregroundStyle(.white)
+            .cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
+            .accessibilityLabel("Cập nhật thời gian phát trực tiếp")
             pipButton
             Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
@@ -266,11 +287,29 @@ private struct TVFullscreenPlayer: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { forceLandscape() }
-        .onDisappear { forcePortrait() }
+        .onDisappear {
+            if pipCoordinator.isActive { pipCoordinator.stop() }
+            playback.shutdown()
+            forcePortrait()
+        }
     }
 
-    private func forceLandscape() { UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation") }
-    private func forcePortrait() { UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation") }
+    private func forceLandscape() { forceOrientation(.landscapeRight) }
+    private func forcePortrait() { forceOrientation(.portrait) }
+
+    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
+        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        if let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+           #available(iOS 16.0, *) {
+            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
+            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+            windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+    }
 }
 
 private struct TVStreamRow: View {
@@ -281,11 +320,8 @@ private struct TVStreamRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 13) {
-                AsyncImage(url: stream.posterURL) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
-                    else { Image("TVPosterDefault").resizable().scaledToFill() }
-                }
-                .frame(width: 76, height: 48).clipped().clipShape(RoundedRectangle(cornerRadius: 9))
+                PosterArt(url: stream.posterURL)
+                    .frame(width: 76, height: 48).clipped().clipShape(RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(stream.name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                     HStack(spacing: 5) { Circle().fill(stream.isOnline ? .green : .orange).frame(width: 6, height: 6); Text(stream.isOnline ? "Trực tiếp" : "Nguồn chưa ổn định") }
