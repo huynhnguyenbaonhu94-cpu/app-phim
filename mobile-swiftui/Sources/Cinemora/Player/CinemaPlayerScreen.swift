@@ -151,16 +151,16 @@ final class PlaybackController: ObservableObject {
     }
 }
 
-@MainActor
 final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
     @Published private(set) var isSupported = false
     @Published private(set) var isActive = false
     private var controller: AVPictureInPictureController?
 
+    @MainActor
     func attach(to layer: AVPlayerLayer) {
         guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
         if controller?.playerLayer !== layer {
-            let next = AVPictureInPictureController(playerLayer: layer)
+            guard let next = AVPictureInPictureController(playerLayer: layer) else { return }
             next.delegate = self
             next.canStartPictureInPictureAutomaticallyFromInline = true
             controller = next
@@ -168,6 +168,7 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
         isSupported = controller != nil
     }
 
+    @MainActor
     func start() {
         guard let controller, controller.isPictureInPicturePossible else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
@@ -175,13 +176,19 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
         controller.startPictureInPicture()
     }
 
+    @MainActor
     func stop() {
         guard let controller, controller.isPictureInPictureActive else { return }
         controller.stopPictureInPicture()
     }
 
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) { isActive = true }
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) { isActive = false }
+    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.isActive = true }
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.isActive = false }
+    }
 }
 
 @MainActor
