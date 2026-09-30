@@ -20,6 +20,10 @@ struct CinemaAPI {
         try await query("cinema.dailyUpdates", input: ["page": page])
     }
 
+    func topViewed(page: Int = 1, refresh: Bool = false) async throws -> MoviePage {
+        try await query("cinema.topViewed", input: ["page": page, "refresh": refresh])
+    }
+
     func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil) async throws -> MoviePage {
         let serverKind = kind == "ongoing" || kind == "completed" ? "series" : kind
         var input: [String: Any] = ["page": page, "kind": serverKind]

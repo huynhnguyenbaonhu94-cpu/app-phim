@@ -4,7 +4,7 @@ import { addFavorite, createLocalUser, getUserByEmail, isFavorite, listFavorites
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
+import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, getTopViewed, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
@@ -62,6 +62,7 @@ export const appRouter = router({
     search: publicProcedure.input(z.object({ keyword: z.string().trim().min(2).max(80), page: pageInput })).query(({ input }) => searchMovies(input)),
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),
     dailyUpdates: publicProcedure.input(z.object({ page: pageInput }).optional()).query(({ input }) => getDailyUpdates(input?.page)),
+    topViewed: publicProcedure.input(z.object({ page: pageInput, refresh: z.boolean().optional() }).optional()).query(({ input }) => getTopViewed(input?.page, input?.refresh)),
     meta: publicProcedure.query(() => getCatalogMeta()),
     submitRequest: publicProcedure.input(z.object({
       title: z.string().trim().min(2, "Vui lòng nhập tên phim.").max(255),

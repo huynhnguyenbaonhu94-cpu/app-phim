@@ -15,6 +15,9 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var homeLoadingMore = false
     @Published private(set) var homeHasMore = false
     @Published private(set) var homeError: String?
+    @Published private(set) var topViewedMovies: [Movie] = []
+    @Published private(set) var topViewedLoading = false
+    @Published private(set) var topViewedError: String?
     @Published private(set) var catalogMeta: CatalogMeta?
     @Published private(set) var searchResults: [Movie] = []
     @Published private(set) var searchLoading = false
@@ -29,17 +32,20 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var catalogPage = 1
     @Published private(set) var localFavorites: [LocalMovieRecord] = []
     @Published private(set) var localHistory: [LocalWatchRecord] = []
+    @Published var playbackDefaults = PlaybackDefaults()
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
     private let favoritesKey = "cinemora.local.favorites.v1"
     private let historyKey = "cinemora.local.history.v1"
+    private let playbackDefaultsKey = "cinemora.playback.defaults.v1"
     private var homePage = 1
     private var detailTask: Task<Void, Never>?
     private var catalogTask: Task<Void, Never>?
     private var detailRequestID = 0
     private var catalogRequestID = 0
     private var searchRequestID = 0
+    private var topViewedRequestID = 0
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -62,6 +68,9 @@ final class CinemaStore: ObservableObject {
         }
         if let data = localDefaults.data(forKey: historyKey), let records = try? decoder.decode([LocalWatchRecord].self, from: data) {
             localHistory = records
+        }
+        if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
+            playbackDefaults = defaults
         }
     }
 
@@ -107,6 +116,13 @@ final class CinemaStore: ObservableObject {
         persistLocalLibrary()
     }
 
+    func savePlaybackDefaults() {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(playbackDefaults) {
+            localDefaults.set(data, forKey: playbackDefaultsKey)
+        }
+    }
+
     private func persistLocalLibrary() {
         let encoder = JSONEncoder()
         if let data = try? encoder.encode(localFavorites) { localDefaults.set(data, forKey: favoritesKey) }
@@ -120,6 +136,23 @@ final class CinemaStore: ObservableObject {
 
     func refreshHome() async {
         await loadHomeSections(refresh: true)
+    }
+
+    func loadTopViewed(refresh: Bool = false) async {
+        guard !topViewedLoading || refresh else { return }
+        topViewedRequestID += 1
+        let requestID = topViewedRequestID
+        topViewedLoading = true
+        topViewedError = nil
+        defer { if requestID == topViewedRequestID { topViewedLoading = false } }
+        do {
+            let page = try await api.topViewed(refresh: refresh)
+            guard !Task.isCancelled, requestID == topViewedRequestID else { return }
+            topViewedMovies = page.items.filter { ($0.views ?? 0) > 0 }
+        } catch {
+            guard requestID == topViewedRequestID else { return }
+            topViewedError = error.localizedDescription
+        }
     }
 
     private func loadHomeSections(refresh: Bool) async {

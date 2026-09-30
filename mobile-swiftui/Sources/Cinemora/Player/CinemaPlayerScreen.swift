@@ -152,6 +152,39 @@ final class PlaybackController: ObservableObject {
 }
 
 @MainActor
+final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
+    @Published private(set) var isSupported = false
+    @Published private(set) var isActive = false
+    private var controller: AVPictureInPictureController?
+
+    func attach(to layer: AVPlayerLayer) {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        if controller?.playerLayer !== layer {
+            let next = AVPictureInPictureController(playerLayer: layer)
+            next.delegate = self
+            next.canStartPictureInPictureAutomaticallyFromInline = true
+            controller = next
+        }
+        isSupported = controller != nil
+    }
+
+    func start() {
+        guard let controller, controller.isPictureInPicturePossible else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        controller.startPictureInPicture()
+    }
+
+    func stop() {
+        guard let controller, controller.isPictureInPictureActive else { return }
+        controller.stopPictureInPicture()
+    }
+
+    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) { isActive = true }
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) { isActive = false }
+}
+
+@MainActor
 struct CinemaPlayerScreen: View {
     let movie: Movie
     let servers: [MovieServer]
@@ -161,6 +194,7 @@ struct CinemaPlayerScreen: View {
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playback = PlaybackController()
+    @StateObject private var pipCoordinator = PictureInPictureCoordinator()
     @State private var serverIndex = 0
     @State private var episodeIndex = 0
     @State private var controlsVisible = true
@@ -181,6 +215,8 @@ struct CinemaPlayerScreen: View {
     @State private var stopAtEpisodeEnabled = false
     @State private var stopAtEpisodeID: String?
     @State private var autoAdvanceEpisodes = true
+    @State private var pictureInPictureEnabled = true
+    @State private var hasAppliedPlaybackDefaults = false
     @State private var didHandleEpisodeEnd = false
     @State private var videoFit: VideoFit = .fit
     @State private var isScrubbing = false
@@ -245,7 +281,7 @@ struct CinemaPlayerScreen: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
-                    NativeVideoSurface(player: playback.player, fit: videoFit).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
+                    NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
@@ -343,7 +379,7 @@ struct CinemaPlayerScreen: View {
                 scheduleStopTimer()
             }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
-            .onAppear { loadCurrentEpisode(); scheduleHide() }
+            .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
@@ -370,6 +406,16 @@ struct CinemaPlayerScreen: View {
             if servers.count > 1 {
                 Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
+            }
+            if pictureInPictureEnabled && pipCoordinator.isSupported {
+                Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start(); scheduleHide() } label: {
+                    Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
+                        .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain).foregroundStyle(pipCoordinator.isActive ? Color.cinemaInk : .white)
+                .background(pipCoordinator.isActive ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+                .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
             }
             quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
             quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
@@ -632,33 +678,37 @@ struct CinemaPlayerScreen: View {
     }
 
     private func adjustmentHUD(for kind: AdjustmentKind) -> some View {
-        HStack(spacing: 12) {
+        VStack(spacing: 9) {
             Image(systemName: kind == .brightness ? "sun.max.fill" : (playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"))
-                .font(.system(size: 19, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(Color.cinemaAccent)
-                .frame(width: 34, height: 34)
+                .frame(width: 32, height: 32)
                 .background(Color.cinemaAccent.opacity(0.14), in: Circle())
                 .scaleEffect(adjustmentPulse ? 1.12 : 1)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(kind == .brightness ? "ĐỘ SÁNG" : "ÂM LƯỢNG")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
-                    .tracking(1.3)
-                    .foregroundStyle(.white.opacity(0.66))
-                ProgressView(value: adjustmentValue)
-                    .tint(Color.cinemaAccent)
-                    .frame(width: 132)
-                Text("\(Int(adjustmentValue * 100))%")
-                    .font(.system(size: 12, weight: .black, design: .monospaced))
-                    .foregroundStyle(.white)
+            GeometryReader { proxy in
+                let fillHeight = max(8, proxy.size.height * adjustmentValue)
+                ZStack(alignment: .bottom) {
+                    Capsule().fill(.white.opacity(0.16)).frame(width: 7)
+                    Capsule().fill(Color.cinemaAccent).frame(width: 7, height: fillHeight)
+                    Circle().fill(Color.cinemaAccent).frame(width: 20, height: 20)
+                        .overlay(Circle().stroke(.white.opacity(0.75), lineWidth: 1))
+                        .shadow(color: Color.cinemaAccent.opacity(0.55), radius: 9)
+                        .offset(y: -(fillHeight - 10))
+                }
             }
+            .frame(width: 26, height: 100)
+            Text("\(Int(adjustmentValue * 100))%")
+                .font(.system(size: 11, weight: .black, design: .monospaced))
+                .foregroundStyle(.white)
         }
-        .padding(.horizontal, 15)
+        .padding(.horizontal, 13)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.32), lineWidth: 0.8))
         .shadow(color: Color.cinemaAccent.opacity(0.18), radius: 22, y: 8)
-        .frame(maxWidth: .infinity, alignment: kind == .brightness ? .bottomLeading : .bottomTrailing)
+        .frame(width: 66, height: 174)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kind == .brightness ? .bottomLeading : .bottomTrailing)
         .padding(.horizontal, 34)
         .padding(.bottom, 86)
         .allowsHitTesting(false)
@@ -678,7 +728,7 @@ struct CinemaPlayerScreen: View {
             gestureStartValue = isBrightness ? Double(UIScreen.main.brightness) : volume
         }
 
-        let nextValue = min(1, max(0, gestureStartValue - Double(value.translation.height / 220)))
+        let nextValue = min(1, max(0, gestureStartValue - Double(value.translation.height / 340)))
         adjustmentValue = nextValue
         if adjustmentKind == .brightness {
             UIScreen.main.brightness = CGFloat(nextValue)
@@ -829,6 +879,14 @@ struct CinemaPlayerScreen: View {
         saveLocalWatchProgress()
     }
 
+    private func applyPlaybackDefaults() {
+        guard !hasAppliedPlaybackDefaults else { return }
+        hasAppliedPlaybackDefaults = true
+        autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
+        pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
+        stopTimer = StopTimer(rawValue: store.playbackDefaults.stopTimer) ?? .off
+    }
+
     private func saveLocalWatchProgress() {
         guard let episode else { return }
         store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
@@ -977,18 +1035,21 @@ private final class PlayerLayerView: UIView {
 private struct NativeVideoSurface: UIViewRepresentable {
     let player: AVPlayer
     let fit: CinemaPlayerScreen.VideoFit
+    let pipCoordinator: PictureInPictureCoordinator
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
         view.backgroundColor = .black
         view.playerLayer.player = player
         view.playerLayer.videoGravity = fit.gravity
+        pipCoordinator.attach(to: view.playerLayer)
         return view
     }
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
         view.playerLayer.videoGravity = fit.gravity
+        pipCoordinator.attach(to: view.playerLayer)
     }
 }
 

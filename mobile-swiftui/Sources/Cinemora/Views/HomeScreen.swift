@@ -17,6 +17,8 @@ struct HomeScreen: View {
                             .id("home-hero")
                     }
 
+                    topViewedSection
+
                     if store.homeLoading && store.homeSections.isEmpty {
                         ProgressView().tint(.cinemaAccent).frame(maxWidth: .infinity).padding(.top, 110)
                         Text("Đang cập nhật danh sách phim…")
@@ -58,9 +60,93 @@ struct HomeScreen: View {
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $scrollPosition)
-            .refreshable { await store.refreshHome() }
+            .refreshable {
+                await store.refreshHome()
+                await store.loadTopViewed(refresh: true)
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.loadHome() }
+        .task {
+            await store.loadHome()
+            await store.loadTopViewed()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { return }
+                await store.loadTopViewed(refresh: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var topViewedSection: some View {
+        if store.topViewedLoading && store.topViewedMovies.isEmpty {
+            VStack(alignment: .leading, spacing: 11) {
+                SectionHeading(eyebrow: "CẬP NHẬT LIÊN TỤC", title: "Top lượt xem")
+                ProgressView().tint(.cinemaAccent).frame(maxWidth: .infinity).padding(.vertical, 28)
+            }
+        } else if !store.topViewedMovies.isEmpty {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(alignment: .lastTextBaseline) {
+                    SectionHeading(eyebrow: "CẬP NHẬT LIÊN TỤC", title: "Top lượt xem")
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.green).frame(width: 6, height: 6)
+                        Text("LIVE").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.58))
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 13) {
+                        ForEach(Array(store.topViewedMovies.enumerated()), id: \.element.id) { index, movie in
+                            topViewedCard(movie, rank: index + 1)
+                                .id("top-viewed-\(movie.id)-\(movie.views ?? 0)")
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .animation(.easeInOut(duration: 0.32), value: store.topViewedMovies)
+        } else if let error = store.topViewedError {
+            Text("Top lượt xem tạm thời chưa khả dụng: \(error)")
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.48))
+        }
+    }
+
+    private func topViewedCard(_ movie: Movie, rank: Int) -> some View {
+        NavigationLink(value: movie) {
+            VStack(alignment: .leading, spacing: 7) {
+                ZStack(alignment: .bottomLeading) {
+                    PosterArt(url: movie.posterURL)
+                    LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .center, endPoint: .bottom)
+                    Text("\(rank)")
+                        .font(.system(size: 46, weight: .black, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .shadow(color: .black.opacity(0.55), radius: 8)
+                        .padding(.leading, 9).padding(.bottom, 4)
+                    if let views = movie.views {
+                        Label(formatViews(views), systemImage: "eye.fill")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(.black.opacity(0.68), in: Capsule())
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(8)
+                    }
+                }
+                .frame(width: 145, height: 211)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.13), lineWidth: 0.7))
+                Text(movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
+                Text(movie.originName ?? "Đang được quan tâm").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+            }
+            .frame(width: 145, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func formatViews(_ value: Int) -> String {
+        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
+        return String(value)
     }
 }

@@ -1,5 +1,11 @@
 import Foundation
 
+struct PlaybackDefaults: Codable, Equatable {
+    var autoAdvanceEpisodes = true
+    var stopTimer = "Tắt"
+    var pictureInPicture = true
+}
+
 struct LocalMovieRecord: Codable, Identifiable, Hashable {
     let slug: String
     let name: String
