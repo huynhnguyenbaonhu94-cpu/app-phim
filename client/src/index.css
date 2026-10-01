@@ -2570,6 +2570,11 @@ body {
 .tv-preview-header p { margin: 0; color: rgba(255,255,255,.52); font-size: 12px; }
 .tv-preview-video-wrap { overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; background: #050609; }
 .tv-preview-video-wrap video { display: block; width: 100%; height: 100%; object-fit: contain; background: #050609; }
+.tv-preview-video-wrap.has-error video { opacity: .22; }
+.tv-preview-play-overlay { position: absolute; top: 50%; left: 50%; display: inline-flex; align-items: center; gap: 9px; transform: translate(-50%, -50%); padding: 13px 18px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; color: #11140a; background: var(--accent); box-shadow: 0 12px 40px rgba(0,0,0,.36); font-size: 13px; font-weight: 800; }
+.tv-preview-video-wrap { position: relative; }
+.tv-preview-error { position: absolute; inset: 50% auto auto 50%; display: flex; align-items: center; gap: 9px; width: min(90%, 500px); transform: translate(-50%, -50%); padding: 13px 15px; border: 1px solid rgba(255,143,143,.32); border-radius: 13px; color: #ffd0d0; background: rgba(45,12,18,.92); font-size: 12px; }
+.tv-preview-error span { flex: 1; }
 .tv-preview-actions { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
 .tv-preview-audio-note { color: rgba(241,180,75,.85); font-size: 12px; }
 .tv-preview-spin { animation: tv-preview-spin .8s linear infinite; }

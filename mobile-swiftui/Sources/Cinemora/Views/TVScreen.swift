@@ -16,9 +16,28 @@ private final class TVPlaybackController: ObservableObject {
     private var hasSeparateAudio = false
     private var userPaused = false
     private var syncTask: Task<Void, Never>?
+    private var notificationTokens: [NSObjectProtocol] = []
+    private var lastAudioCorrectionAt: Date = .distantPast
 
     init() {
+        configureAudioSession()
         player.automaticallyWaitsToMinimizeStalling = true
+        separateAudioPlayer.automaticallyWaitsToMinimizeStalling = true
+        let center = NotificationCenter.default
+        notificationTokens = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+                Task { @MainActor in self?.handleAudioInterruption(note) }
+            },
+            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.handleAudioRouteChange() }
+            },
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.recoverAfterForeground() }
+            },
+            center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
+                Task { @MainActor in self?.handlePlayerFailure(note) }
+            }
+        ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
@@ -34,6 +53,7 @@ private final class TVPlaybackController: ObservableObject {
         currentAudioURL = audioURL
         hasSeparateAudio = audioURL != nil
         userPaused = false
+        lastAudioCorrectionAt = .distantPast
         syncTask?.cancel()
         itemObservation = nil
         player.pause()
@@ -67,7 +87,7 @@ private final class TVPlaybackController: ObservableObject {
     /// two independent HLS playlists do not share the same media timeline.
     func syncToLiveEdge() {
         guard let currentURL else { return }
-        let resume = !userPaused && isPlaying
+        let resume = !userPaused
         syncTask?.cancel()
         syncTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -135,7 +155,12 @@ private final class TVPlaybackController: ObservableObject {
         let videoLag = videoLiveEdge - CMTimeGetSeconds(player.currentTime())
         let audioLag = audioLiveEdge - CMTimeGetSeconds(separateAudioPlayer.currentTime())
         let lagDifference = audioLag - videoLag
-        if abs(lagDifference) > 0.75 {
+        // Independent HLS playlists naturally fluctuate by a few hundred ms.
+        // Repeated seeks can replay an AAC fragment and create crackling audio.
+        guard abs(lagDifference) > 2.5,
+              Date().timeIntervalSince(lastAudioCorrectionAt) > 5 else { return }
+        lastAudioCorrectionAt = Date()
+        if abs(lagDifference) > 2.5 {
             let target = max(audioRange.start.seconds, audioLiveEdge - max(0, videoLag))
             separateAudioPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
@@ -162,6 +187,53 @@ private final class TVPlaybackController: ObservableObject {
         target.seek(to: CMTime(seconds: edge, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
+    private func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
+        try? session.setActive(true, options: [])
+    }
+
+    private func handleAudioInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+        if type == .began {
+            player.pause(); separateAudioPlayer.pause(); isPlaying = false
+        } else if type == .ended {
+            configureAudioSession()
+            if let optionsRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt,
+               AVAudioSession.InterruptionOptions(rawValue: optionsRaw).contains(.shouldResume), !userPaused {
+                syncToLiveEdge()
+            }
+        }
+    }
+
+    private func handleAudioRouteChange() {
+        configureAudioSession()
+        guard !userPaused, currentURL != nil else { return }
+        if hasSeparateAudio && (separateAudioPlayer.rate == 0 || player.rate == 0) { syncToLiveEdge() }
+    }
+
+    private func recoverAfterForeground() {
+        configureAudioSession()
+        guard !userPaused, currentURL != nil else { return }
+        if player.currentItem?.status == .failed || (hasSeparateAudio && separateAudioPlayer.currentItem?.status == .failed) {
+            syncToLiveEdge()
+        } else if !isPlaying {
+            player.playImmediately(atRate: 1)
+            if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
+            isPlaying = true
+        }
+    }
+
+    private func handlePlayerFailure(_ note: Notification) {
+        guard let failedItem = note.object as? AVPlayerItem,
+              failedItem === player.currentItem || failedItem === separateAudioPlayer.currentItem,
+              !userPaused else { return }
+        isLoading = true
+        syncToLiveEdge()
+    }
+
     func shutdown() {
         syncTask?.cancel()
         itemObservation = nil
@@ -170,9 +242,11 @@ private final class TVPlaybackController: ObservableObject {
         player.replaceCurrentItem(with: nil)
         separateAudioPlayer.replaceCurrentItem(with: nil)
         isPlaying = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     deinit {
+        notificationTokens.forEach(NotificationCenter.default.removeObserver)
         if let timeObserver { player.removeTimeObserver(timeObserver) }
     }
 }
