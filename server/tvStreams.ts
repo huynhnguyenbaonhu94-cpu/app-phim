@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { ensureTvStreamsCompatibility, getDb } from "./db";
 import { tvStreams } from "../drizzle/schema";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -73,30 +73,49 @@ export async function saveTvPoster(input: { base64: string; mimeType: "image/jpe
   return `/uploads/tv-posters/${filename}`;
 }
 
-export async function checkStreamHealth(streamUrl: string, audioUrl?: string | null) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetch(streamUrl, {
-      method: "GET",
-      headers: { accept: "application/vnd.apple.mpegurl, application/x-mpegURL, video/*, */*", range: "bytes=0-2047", "user-agent": "Cinemora/1.0" },
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    try { await response.body?.cancel(); } catch { /* response body cancellation is best effort */ }
-    if (!response.ok) return { status: "offline" as const, message: `Stream HTTP ${response.status}` };
-    if (audioUrl) {
-      const audioResponse = await fetch(audioUrl, { method: "GET", headers: { accept: "audio/*, application/vnd.apple.mpegurl, */*", range: "bytes=0-2047", "user-agent": "Cinemora/1.0" }, redirect: "follow", signal: controller.signal });
-      try { await audioResponse.body?.cancel(); } catch { /* best effort */ }
-      if (!audioResponse.ok) return { status: "offline" as const, message: `Audio HTTP ${audioResponse.status}` };
-      return { status: "online" as const, message: "Stream và audio đang hoạt động" };
+type ProbeResult = { status: "online" | "offline" | "unknown"; message: string };
+
+async function probeStreamUrl(url: string, label: string): Promise<ProbeResult> {
+  let lastNetworkError = false;
+  for (const useRange of [true, false]) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const headers: Record<string, string> = {
+        accept: label === "Audio" ? "audio/*, application/vnd.apple.mpegurl, */*" : "application/vnd.apple.mpegurl, application/x-mpegURL, video/*, */*",
+        "cache-control": "no-cache",
+        "user-agent": "Mozilla/5.0 (compatible; Cinemora-TV-Health/1.0)",
+      };
+      // Some CDNs reject Range requests even though their HLS URL plays normally.
+      if (useRange) headers.range = "bytes=0-2047";
+      const response = await fetch(url, { method: "GET", headers, redirect: "follow", signal: controller.signal });
+      try { await response.body?.cancel(); } catch { /* best effort */ }
+      if (response.ok) return { status: "online", message: `${label} đang hoạt động` };
+      // A range probe can be rejected while a normal GET is valid; retry without Range.
+      if (useRange && [400, 405, 416, 429, 500, 501, 502, 503].includes(response.status)) continue;
+      return { status: "offline", message: `${label} HTTP ${response.status}` };
+    } catch (error) {
+      lastNetworkError = true;
+      if (!useRange) {
+        const message = error instanceof Error && error.name === "AbortError" ? "Không xác minh được: hết thời gian" : "Không xác minh được từ máy chủ";
+        return { status: "unknown", message };
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-    return { status: "online" as const, message: "Stream đang hoạt động" };
-  } catch (error) {
-    return { status: "offline" as const, message: error instanceof Error && error.name === "AbortError" ? "Hết thời gian kiểm tra" : "Không kết nối được stream" };
-  } finally {
-    clearTimeout(timeout);
   }
+  return { status: lastNetworkError ? "unknown" : "offline", message: "Không xác minh được từ máy chủ" };
+}
+
+export async function checkStreamHealth(streamUrl: string, audioUrl?: string | null) {
+  const stream = await probeStreamUrl(streamUrl, "Stream");
+  if (stream.status !== "online") return stream;
+  if (audioUrl) {
+    const audio = await probeStreamUrl(audioUrl, "Audio");
+    if (audio.status !== "online") return audio;
+    return { status: "online" as const, message: "Stream và audio đang hoạt động" };
+  }
+  return stream;
 }
 
 export async function listTvStreams(includeInactive = false) {
@@ -106,8 +125,10 @@ export async function listTvStreams(includeInactive = false) {
   const query = db.select().from(tvStreams);
   const rows = includeInactive
     ? await query.orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id))
-    : await query.where(and(eq(tvStreams.isActive, true), eq(tvStreams.healthStatus, "online"))).orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id));
-  return rows;
+    : await query.where(eq(tvStreams.isActive, true)).orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id));
+  // Unknown means the server could not verify the CDN, not that playback is broken.
+  // Keep it visible so a playable stream is not silently removed from the app.
+  return includeInactive ? rows : rows.filter(row => row.healthStatus !== "offline");
 }
 
 function normalizedValues(input: TvStreamPayload) {

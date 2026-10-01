@@ -14,13 +14,15 @@ private final class TVPlaybackController: ObservableObject {
     private var currentURL: URL?
     private var currentAudioURL: URL?
     private var hasSeparateAudio = false
+    private var userPaused = false
+    private var syncTask: Task<Void, Never>?
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.isPlaying = self.player.timeControlStatus == .playing
+                self.isPlaying = self.player.rate > 0.01 && (!self.hasSeparateAudio || self.separateAudioPlayer.rate > 0.01)
                 self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 self.correctSeparateAudioDriftIfNeeded()
             }
@@ -31,6 +33,8 @@ private final class TVPlaybackController: ObservableObject {
         currentURL = url
         currentAudioURL = audioURL
         hasSeparateAudio = audioURL != nil
+        userPaused = false
+        syncTask?.cancel()
         itemObservation = nil
         player.pause()
         separateAudioPlayer.pause()
@@ -53,22 +57,53 @@ private final class TVPlaybackController: ObservableObject {
         } else {
             separateAudioPlayer.replaceCurrentItem(with: nil)
         }
-        player.play()
-        if hasSeparateAudio { separateAudioPlayer.play() }
+        player.playImmediately(atRate: 1)
+        if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
         isPlaying = true
     }
 
-    /// Reload the HLS playlist so AVPlayer returns to the provider's live edge.
-    func refreshLiveStream() {
+    /// Rebuild both live items, then seek each one to its own live edge. This is
+    /// more reliable than seeking the audio to the video's raw CMTime because
+    /// two independent HLS playlists do not share the same media timeline.
+    func syncToLiveEdge() {
         guard let currentURL else { return }
-        load(currentURL, audioURL: currentAudioURL)
+        let resume = !userPaused && isPlaying
+        syncTask?.cancel()
+        syncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isLoading = true
+            self.player.pause()
+            self.separateAudioPlayer.pause()
+            self.player.replaceCurrentItem(with: AVPlayerItem(url: currentURL))
+            if let audioURL = self.currentAudioURL {
+                self.separateAudioPlayer.replaceCurrentItem(with: AVPlayerItem(url: audioURL))
+            }
+            await self.waitForItemsReady()
+            guard !Task.isCancelled else { return }
+            self.seekBothToLiveEdge()
+            self.isLoading = false
+            if resume {
+                self.player.playImmediately(atRate: 1)
+                if self.hasSeparateAudio { self.separateAudioPlayer.playImmediately(atRate: 1) }
+                self.isPlaying = true
+            } else {
+                self.userPaused = true
+                self.isPlaying = false
+            }
+        }
     }
 
     func togglePlayback() {
-        if player.timeControlStatus == .playing {
+        if isPlaying {
+            userPaused = true
             player.pause(); separateAudioPlayer.pause(); isPlaying = false
         } else {
-            player.play(); if hasSeparateAudio { separateAudioPlayer.play() }; isPlaying = true
+            userPaused = false
+            // Resume both at the same stored live position. The next observer
+            // pass only corrects a genuine drift, never a user pause.
+            player.playImmediately(atRate: 1)
+            if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
+            isPlaying = true
         }
     }
 
@@ -91,18 +126,44 @@ private final class TVPlaybackController: ObservableObject {
     }
 
     private func correctSeparateAudioDriftIfNeeded() {
-        guard hasSeparateAudio, player.timeControlStatus == .playing,
-              separateAudioPlayer.timeControlStatus == .playing else { return }
-        let videoTime = player.currentTime()
-        let audioTime = separateAudioPlayer.currentTime()
-        guard videoTime.isNumeric, audioTime.isNumeric else { return }
-        let drift = CMTimeGetSeconds(audioTime) - CMTimeGetSeconds(videoTime)
-        if abs(drift) > 0.45 {
-            separateAudioPlayer.seek(to: videoTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        guard hasSeparateAudio, !userPaused, isPlaying,
+              player.rate > 0.01, separateAudioPlayer.rate > 0.01 else { return }
+        guard let videoRange = player.currentItem?.seekableTimeRanges.last?.timeRangeValue,
+              let audioRange = separateAudioPlayer.currentItem?.seekableTimeRanges.last?.timeRangeValue else { return }
+        let videoLiveEdge = videoRange.end.seconds - 1.0
+        let audioLiveEdge = audioRange.end.seconds - 1.0
+        let videoLag = videoLiveEdge - CMTimeGetSeconds(player.currentTime())
+        let audioLag = audioLiveEdge - CMTimeGetSeconds(separateAudioPlayer.currentTime())
+        let lagDifference = audioLag - videoLag
+        if abs(lagDifference) > 0.75 {
+            let target = max(audioRange.start.seconds, audioLiveEdge - max(0, videoLag))
+            separateAudioPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
 
+    private func waitForItemsReady() async {
+        for _ in 0..<40 {
+            if Task.isCancelled { return }
+            let videoReady = player.currentItem?.status == .readyToPlay
+            let audioReady = !hasSeparateAudio || separateAudioPlayer.currentItem?.status == .readyToPlay
+            if videoReady && audioReady { return }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+    }
+
+    private func seekBothToLiveEdge() {
+        seekToLiveEdge(player)
+        if hasSeparateAudio { seekToLiveEdge(separateAudioPlayer) }
+    }
+
+    private func seekToLiveEdge(_ target: AVPlayer) {
+        guard let range = target.currentItem?.seekableTimeRanges.last?.timeRangeValue else { return }
+        let edge = max(range.start.seconds, range.end.seconds - 1.0)
+        target.seek(to: CMTime(seconds: edge, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     func shutdown() {
+        syncTask?.cancel()
         itemObservation = nil
         player.pause()
         separateAudioPlayer.pause()
@@ -264,11 +325,11 @@ private struct TVPlayerView: View {
                 .padding(.horizontal, 12).frame(height: 42)
                 .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
                 Spacer()
-                Button { playback.refreshLiveStream(); scheduleHide() } label: {
+                Button { playback.syncToLiveEdge(); scheduleHide() } label: {
                     Image(systemName: "arrow.clockwise").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
                 }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
-                .accessibilityLabel("Cập nhật thời gian phát trực tiếp")
+                .accessibilityLabel("Đồng bộ về thời gian phát trực tiếp")
                 quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue)
                 pipButton
                 Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
