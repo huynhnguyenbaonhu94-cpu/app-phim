@@ -68,6 +68,7 @@ private final class TVPlaybackController: ObservableObject {
 
 struct TVScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = TVPlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
     @State private var selectedStreamID: Int?
@@ -105,10 +106,13 @@ struct TVScreen: View {
                 }
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 36)
             }
-            .refreshable { await store.startTvLiveUpdates() }
+            .refreshable { await store.refreshTvStreams() }
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.startTvLiveUpdates() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await store.refreshTvStreams() } }
+        }
         .onChange(of: store.tvStreams) { _, streams in
             if selectedStreamID == nil { selectedStreamID = streams.first?.id }
             else if !streams.contains(where: { $0.id == selectedStreamID }) { selectedStreamID = streams.first?.id }
@@ -150,6 +154,8 @@ private enum TVVideoFit: String, CaseIterable, Identifiable {
     }
 }
 
+private enum TVQuickMenu: Equatable { case videoFit }
+
 private struct TVPlayerView: View {
     let stream: TvStream
     @ObservedObject var playback: TVPlaybackController
@@ -161,6 +167,7 @@ private struct TVPlayerView: View {
     @State private var volumePopoverOpen = false
     @State private var hideTask: Task<Void, Never>?
     @State private var videoFit: TVVideoFit = .fit
+    @State private var quickMenu: TVQuickMenu?
 
     var body: some View {
         GeometryReader { proxy in
@@ -195,41 +202,82 @@ private struct TVPlayerView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "tv.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(stream.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
-                    Text("TRUYỀN HÌNH TRỰC TIẾP").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.58))
-                }
-            }
-            .padding(.horizontal, 12).frame(height: 42)
-            .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
-            Spacer()
-            Button { playback.refreshLiveStream(); scheduleHide() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .buttonStyle(.plain).foregroundStyle(.white)
-            .cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
-            .accessibilityLabel("Cập nhật thời gian phát trực tiếp")
-            Menu {
-                Picker("Tỷ lệ khung hình", selection: $videoFit) {
-                    ForEach(TVVideoFit.allCases) { fit in
-                        Text(fit.rawValue).tag(fit)
+        VStack(alignment: .trailing, spacing: 8) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "tv.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stream.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+                        Text("TRUYỀN HÌNH TRỰC TIẾP").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.58))
                     }
                 }
-            } label: {
-                Image(systemName: "rectangle.on.rectangle")
-                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                .padding(.horizontal, 12).frame(height: 42)
+                .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+                Spacer()
+                Button { playback.refreshLiveStream(); scheduleHide() } label: {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
+                .accessibilityLabel("Cập nhật thời gian phát trực tiếp")
+                quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue)
+                pipButton
+                Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+                    .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
             }
-            .foregroundStyle(.white)
-            .tint(Color.cinemaAccent)
-            .accessibilityLabel("Tỷ lệ khung hình \(videoFit.rawValue)")
-            pipButton
-            Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
-                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
+            if quickMenu != nil { quickMenuPanel }
         }
+    }
+
+    private func quickControl(icon: String, title: String, value: String) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) { quickMenu = quickMenu == .videoFit ? nil : .videoFit; volumePopoverOpen = false }
+            scheduleHide()
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                Text(value).font(.system(size: 9, weight: .black, design: .rounded)).lineLimit(1)
+            }
+            .foregroundStyle(quickMenu == .videoFit ? Color.cinemaInk : .white)
+            .frame(width: 52, height: 42)
+            .background(quickMenu == .videoFit ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(quickMenu == .videoFit ? 0.35 : 0.14), lineWidth: 0.8))
+        }
+        .buttonStyle(.plain).accessibilityLabel(title).accessibilityValue(value)
+    }
+
+    private var quickMenuPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("TỶ LỆ KHUNG HÌNH").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
+                Spacer(minLength: 20)
+                Button { withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }; scheduleHide() } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 24, height: 24)
+                }.buttonStyle(.plain)
+            }
+            ForEach(TVVideoFit.allCases) { fit in
+                Button {
+                    videoFit = fit
+                    withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }
+                    scheduleHide()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: fit == videoFit ? "checkmark.circle.fill" : "circle").font(.system(size: 16, weight: .semibold)).foregroundStyle(fit == videoFit ? Color.cinemaAccent : .white.opacity(0.45))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(fit.rawValue).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                            Text(fit == .fit ? "Giữ nguyên khung hình" : fit == .fill ? "Lấp đầy màn hình" : "Phóng phủ toàn màn hình").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.52))
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(fit == videoFit ? Color.cinemaAccent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(12).frame(width: 260)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
     }
 
     private var pipButton: some View {

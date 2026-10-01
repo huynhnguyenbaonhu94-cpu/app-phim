@@ -33,6 +33,7 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var tvStreams: [TvStream] = []
     @Published private(set) var tvLoading = false
     @Published private(set) var tvError: String?
+    @Published private(set) var hasNewHomeContent = false
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
@@ -46,6 +47,7 @@ final class CinemaStore: ObservableObject {
     private var catalogRequestID = 0
     private var searchRequestID = 0
     private var tvEventsTask: Task<Void, Never>?
+    private var lastHomeRefreshAt: Date?
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -112,6 +114,20 @@ final class CinemaStore: ObservableObject {
     func stopTvLiveUpdates() {
         tvEventsTask?.cancel()
         tvEventsTask = nil
+    }
+
+    func refreshTvStreams() async {
+        do {
+            tvStreams = try await api.tvStreams()
+            tvError = nil
+        } catch {
+            tvError = error.localizedDescription
+        }
+        if tvEventsTask == nil { await startTvLiveUpdates() }
+    }
+
+    func clearNewHomeContent() {
+        hasNewHomeContent = false
     }
 
     private func applyTvEvent(_ payload: String) {
@@ -182,7 +198,13 @@ final class CinemaStore: ObservableObject {
     }
 
     func refreshHome() async {
+        lastHomeRefreshAt = Date()
         await loadHomeSections(refresh: true)
+    }
+
+    func autoRefreshHome() async {
+        if let lastHomeRefreshAt, Date().timeIntervalSince(lastHomeRefreshAt) < 60 { return }
+        await refreshHome()
     }
 
     private func loadHomeSections(refresh: Bool) async {
@@ -227,6 +249,11 @@ final class CinemaStore: ObservableObject {
         }
         results.sort { $0.0 < $1.0 }
 
+        let previousLatest = Set(homeSections.first(where: { $0.id == "latest" })?.movies.map(\.id) ?? [])
+        let nextLatest = Set(results.first(where: { $0.0 == 0 })?.1.map(\.id) ?? [])
+        if refresh && !previousLatest.isEmpty && !nextLatest.isEmpty && previousLatest != nextLatest {
+            hasNewHomeContent = true
+        }
         homeSections = results.enumerated().compactMap { index, result in
             guard !result.1.isEmpty else { return nil }
             return HomeSection(id: config[index].kind, title: config[index].title, movies: result.1)

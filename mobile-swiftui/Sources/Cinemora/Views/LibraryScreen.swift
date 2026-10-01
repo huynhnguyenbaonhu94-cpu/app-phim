@@ -8,6 +8,7 @@ private struct LibraryFilterOption: Identifiable {
 
 struct LibraryScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var kind = "latest"
     @State private var category = ""
     @State private var country = ""
@@ -95,6 +96,9 @@ struct LibraryScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadMeta(); load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { load() }
+        }
     }
 
     private func selectKind(_ value: String) {

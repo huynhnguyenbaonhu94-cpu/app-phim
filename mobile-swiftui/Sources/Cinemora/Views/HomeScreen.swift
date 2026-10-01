@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeScreen: View {
     @EnvironmentObject private var store: CinemaStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var scrollPosition: String?
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -12,6 +13,18 @@ struct HomeScreen: View {
                 VStack(alignment: .leading, spacing: 22) {
                     CinemaHeader(eyebrow: "PHIM HAY MỖI NGÀY", title: "CINEMORA")
                         .id("home-header")
+                    if store.hasNewHomeContent {
+                        Button {
+                            store.clearNewHomeContent()
+                            scrollPosition = "home-header"
+                        } label: {
+                            Label("Có phim mới — chạm để xem", systemImage: "sparkles")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.cinemaInk)
+                                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                                .background(Color.cinemaAccent, in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
                     if let hero = store.homeSections.first(where: { $0.id == "latest" })?.movies.first {
                         FeaturedMovieCard(movie: hero)
                             .id("home-hero")
@@ -62,5 +75,10 @@ struct HomeScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadHome() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !store.homeSections.isEmpty {
+                Task { await store.autoRefreshHome() }
+            }
+        }
     }
 }
