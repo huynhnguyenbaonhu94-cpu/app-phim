@@ -28,4 +28,4 @@ The Ubuntu sandbox used for editing has no Xcode or Swift compiler, so the actua
 
 Tab **Truyền Hình** tải các kênh admin cấu hình từ procedure `tv.list`, phát HLS bằng `AVPlayer` và lắng nghe `/api/tv/events` qua SSE. Khi admin thêm, sửa, ẩn hoặc xóa stream ở `https://cungcapicloud.id.vn/admin/tv`, danh sách trong app được thay đổi ngay khi màn hình Truyền hình đang mở; kết nối tự thử lại nếu mạng bị gián đoạn.
 
-Poster TV được lấy từ `posterUrl`; nếu admin bỏ trống, app dùng asset `TVPosterDefault`. Trình phát TV dùng AVPlayerLayer và hỗ trợ play/pause, âm lượng, fullscreen và Picture-in-Picture trên các thiết bị/iOS tương thích.
+Poster TV được lấy từ `posterUrl`; nếu admin bỏ trống, app dùng asset `TVPosterDefault`. Trình phát TV dùng AVPlayerLayer và hỗ trợ play/pause, âm lượng, fullscreen và Picture-in-Picture trên các thiết bị/iOS tương thích. Nếu kênh có `audioUrl`, app dùng player audio riêng, tắt audio của video và hiệu chỉnh vị trí định kỳ để hai nguồn bám cùng tiến trình live; khi không có `audioUrl`, app giữ nguyên audio tích hợp trong stream.

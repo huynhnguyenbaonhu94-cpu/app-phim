@@ -51,6 +51,7 @@ export async function ensureTvStreamsCompatibility(db: ReturnType<typeof drizzle
     console.log("[Database] Converted tv_streams charset from latin1 to utf8mb4.");
   }
   const missing: Record<string, string> = {
+    audioUrl: "ALTER TABLE `tv_streams` ADD COLUMN `audioUrl` text NULL",
     posterUrl: "ALTER TABLE `tv_streams` ADD COLUMN `posterUrl` text NULL",
     healthStatus: "ALTER TABLE `tv_streams` ADD COLUMN `healthStatus` enum('unknown','online','offline') NOT NULL DEFAULT 'unknown'",
     healthMessage: "ALTER TABLE `tv_streams` ADD COLUMN `healthMessage` varchar(255) NULL",

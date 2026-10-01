@@ -6,8 +6,8 @@ import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 
-type FormState = { id?: number; name: string; streamUrl: string; logoUrl: string; posterUrl: string; description: string; sortOrder: string; isActive: boolean };
-const emptyForm: FormState = { name: "", streamUrl: "", logoUrl: "", posterUrl: "", description: "", sortOrder: "0", isActive: true };
+type FormState = { id?: number; name: string; streamUrl: string; audioUrl: string; logoUrl: string; posterUrl: string; description: string; sortOrder: string; isActive: boolean };
+const emptyForm: FormState = { name: "", streamUrl: "", audioUrl: "", logoUrl: "", posterUrl: "", description: "", sortOrder: "0", isActive: true };
 
 export default function AdminTvStreams() {
   const { user, loading } = useAuth();
@@ -39,7 +39,7 @@ export default function AdminTvStreams() {
   }
   function submit(event: React.FormEvent) {
     event.preventDefault(); setMessage(null);
-    const payload = { name: form.name, streamUrl: form.streamUrl, logoUrl: form.logoUrl || null, posterUrl: form.posterUrl || null, description: form.description || null, sortOrder: Number(form.sortOrder) || 0, isActive: form.isActive };
+    const payload = { name: form.name, streamUrl: form.streamUrl, audioUrl: form.audioUrl || null, logoUrl: form.logoUrl || null, posterUrl: form.posterUrl || null, description: form.description || null, sortOrder: Number(form.sortOrder) || 0, isActive: form.isActive };
     if (form.id) update.mutate({ id: form.id, ...payload }); else create.mutate(payload);
   }
   return <PageShell><main className="content-wrap inner-page admin-tv-page">
@@ -49,6 +49,7 @@ export default function AdminTvStreams() {
       <div className="admin-tv-form-heading"><div><strong>{form.id ? "Chỉnh sửa kênh" : "Thêm kênh mới"}</strong><span>Hỗ trợ HLS `.m3u8` và các URL stream trực tiếp. Sau khi lưu hệ thống sẽ tự kiểm tra.</span></div>{form.id && <button type="button" className="button button-ghost" onClick={() => setForm(emptyForm)}><X size={15} /> Hủy sửa</button>}</div>
       <label>Tên kênh<input required value={form.name} onChange={e => setField("name", e.target.value)} placeholder="VTV1" /></label>
       <label>URL stream<input required type="url" value={form.streamUrl} onChange={e => setField("streamUrl", e.target.value)} placeholder="https://example.com/live/playlist.m3u8" /></label>
+      <label>URL audio riêng (không bắt buộc)<input type="url" value={form.audioUrl} onChange={e => setField("audioUrl", e.target.value)} placeholder="https://example.com/live/audio.m3u8 hoặc audio.mp3" /><small>Chỉ nhập khi stream video không có audio. App sẽ phát và giữ audio chạy cùng tiến trình live.</small></label>
       <div className="admin-tv-grid"><label>Upload poster<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => choosePoster(e.target.files?.[0])} />{uploadPoster.isPending && <small>Đang tải poster lên…</small>}</label><label>Thứ tự<input type="number" min="0" value={form.sortOrder} onChange={e => setField("sortOrder", e.target.value)} /></label></div>
       <label>URL poster<input type="text" value={form.posterUrl} onChange={e => setField("posterUrl", e.target.value)} placeholder="Tự điền sau khi upload hoặc https://.../poster.jpg" /><small>Poster upload có thể dùng trực tiếp đường dẫn /uploads/tv-posters/…</small></label>
       <label>Logo nhỏ (không bắt buộc)<input type="url" value={form.logoUrl} onChange={e => setField("logoUrl", e.target.value)} placeholder="https://.../logo.png" /></label>
@@ -57,6 +58,6 @@ export default function AdminTvStreams() {
       <button className="button button-primary" disabled={busy}><Save size={15} /> {busy ? "Đang kiểm tra và lưu…" : form.id ? "Lưu thay đổi" : "Thêm kênh"}</button>
       {(message || error) && <p className={error ? "admin-tv-error" : "admin-tv-success"}>{error || message}</p>}
     </form>
-    <section className="admin-tv-list"><SectionHeading eyebrow="DANH SÁCH HIỆN TẠI" title={`${query.data?.length || 0} kênh`} />{query.isLoading ? <p>Đang tải…</p> : (query.data || []).map(stream => <article className="admin-tv-item" key={stream.id}><div><strong>{stream.name}</strong><span>{stream.streamUrl}</span><small>{stream.isActive ? "Đang hiển thị" : "Đang ẩn"} · thứ tự {stream.sortOrder}</small><em className={`admin-tv-health admin-tv-health-${stream.healthStatus || "unknown"}`}>{stream.healthStatus === "online" ? "● Đang hoạt động" : stream.healthStatus === "offline" ? `● Không hoạt động · ${stream.healthMessage || "kiểm tra thất bại"}` : "● Chưa kiểm tra"}{stream.lastCheckedAt ? ` · ${new Date(stream.lastCheckedAt).toLocaleString("vi-VN")}` : ""}</em></div><div className="admin-tv-actions"><button className="button button-ghost" onClick={() => setForm({ id: stream.id, name: stream.name, streamUrl: stream.streamUrl, logoUrl: stream.logoUrl || "", posterUrl: stream.posterUrl || "", description: stream.description || "", sortOrder: String(stream.sortOrder), isActive: stream.isActive })}><Save size={14} /> Sửa</button><button className="button button-danger" disabled={remove.isPending} onClick={() => { if (window.confirm(`Xóa kênh ${stream.name}?`)) remove.mutate({ id: stream.id }); }}><Trash2 size={14} /> Xóa</button></div></article>)}</section>
+    <section className="admin-tv-list"><SectionHeading eyebrow="DANH SÁCH HIỆN TẠI" title={`${query.data?.length || 0} kênh`} />{query.isLoading ? <p>Đang tải…</p> : (query.data || []).map(stream => <article className="admin-tv-item" key={stream.id}><div><strong>{stream.name}</strong><span>{stream.streamUrl}</span>{stream.audioUrl && <span className="admin-tv-audio">Audio riêng: {stream.audioUrl}</span>}<small>{stream.isActive ? "Đang hiển thị" : "Đang ẩn"} · thứ tự {stream.sortOrder}</small><em className={`admin-tv-health admin-tv-health-${stream.healthStatus || "unknown"}`}>{stream.healthStatus === "online" ? "● Đang hoạt động" : stream.healthStatus === "offline" ? `● Không hoạt động · ${stream.healthMessage || "kiểm tra thất bại"}` : "● Chưa kiểm tra"}{stream.lastCheckedAt ? ` · ${new Date(stream.lastCheckedAt).toLocaleString("vi-VN")}` : ""}</em></div><div className="admin-tv-actions"><button className="button button-ghost" onClick={() => setForm({ id: stream.id, name: stream.name, streamUrl: stream.streamUrl, audioUrl: stream.audioUrl || "", logoUrl: stream.logoUrl || "", posterUrl: stream.posterUrl || "", description: stream.description || "", sortOrder: String(stream.sortOrder), isActive: stream.isActive })}><Save size={14} /> Sửa</button><button className="button button-danger" disabled={remove.isPending} onClick={() => { if (window.confirm(`Xóa kênh ${stream.name}?`)) remove.mutate({ id: stream.id }); }}><Trash2 size={14} /> Xóa</button></div></article>)}</section>
   </main></PageShell>;
 }

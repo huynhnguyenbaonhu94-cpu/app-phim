@@ -2536,6 +2536,7 @@ body {
 .admin-tv-list { display: grid; gap: 12px; }
 .admin-tv-item { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 17px 18px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: rgba(255,255,255,.035); }
 .admin-tv-item strong, .admin-tv-item span, .admin-tv-item small { display: block; }
+.admin-tv-item .admin-tv-audio { color: rgba(241,180,75,.82); }
 .admin-tv-item strong { color: #fff; font-size: 15px; }
 .admin-tv-item span { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,.55); font-size: 12px; margin-top: 4px; }
 .admin-tv-item small { color: rgba(255,255,255,.4); font-size: 11px; margin-top: 5px; }

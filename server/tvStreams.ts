@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 export type TvStreamPayload = {
   name: string;
   streamUrl: string;
+  audioUrl?: string | null;
   logoUrl?: string | null;
   posterUrl?: string | null;
   description?: string | null;
@@ -46,7 +47,7 @@ export function validateStreamUrl(value: string) {
   }
 }
 
-export function validateOptionalUrl(value: string | null | undefined) {
+export function validateOptionalUrl(value: string | null | undefined, label = "URL") {
   if (!value?.trim()) return null;
   const trimmed = value.trim();
   if (trimmed.startsWith("/uploads/tv-posters/")) return trimmed.slice(0, 1000);
@@ -56,7 +57,7 @@ export function validateOptionalUrl(value: string | null | undefined) {
     if (!["https:", "http:"].includes(url.protocol)) throw new Error();
     return url.toString();
   } catch {
-    throw new Error("URL poster/logo không hợp lệ.");
+    throw new Error(`${label} không hợp lệ.`);
   }
 }
 
@@ -72,7 +73,7 @@ export async function saveTvPoster(input: { base64: string; mimeType: "image/jpe
   return `/uploads/tv-posters/${filename}`;
 }
 
-export async function checkStreamHealth(streamUrl: string) {
+export async function checkStreamHealth(streamUrl: string, audioUrl?: string | null) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
@@ -83,7 +84,13 @@ export async function checkStreamHealth(streamUrl: string) {
       signal: controller.signal,
     });
     try { await response.body?.cancel(); } catch { /* response body cancellation is best effort */ }
-    if (!response.ok) return { status: "offline" as const, message: `HTTP ${response.status}` };
+    if (!response.ok) return { status: "offline" as const, message: `Stream HTTP ${response.status}` };
+    if (audioUrl) {
+      const audioResponse = await fetch(audioUrl, { method: "GET", headers: { accept: "audio/*, application/vnd.apple.mpegurl, */*", range: "bytes=0-2047", "user-agent": "Cinemora/1.0" }, redirect: "follow", signal: controller.signal });
+      try { await audioResponse.body?.cancel(); } catch { /* best effort */ }
+      if (!audioResponse.ok) return { status: "offline" as const, message: `Audio HTTP ${audioResponse.status}` };
+      return { status: "online" as const, message: "Stream và audio đang hoạt động" };
+    }
     return { status: "online" as const, message: "Stream đang hoạt động" };
   } catch (error) {
     return { status: "offline" as const, message: error instanceof Error && error.name === "AbortError" ? "Hết thời gian kiểm tra" : "Không kết nối được stream" };
@@ -107,7 +114,7 @@ function normalizedValues(input: TvStreamPayload) {
   const values = {
     name: input.name.trim().slice(0, 120),
     streamUrl: validateStreamUrl(input.streamUrl),
-    logoUrl: validateOptionalUrl(input.logoUrl),
+    audioUrl: validateOptionalUrl(input.audioUrl, "URL audio"),
     posterUrl: validateOptionalUrl(input.posterUrl),
     description: clean(input.description, 500),
     sortOrder: Math.max(0, Math.min(100000, Math.floor(input.sortOrder ?? 0))),
@@ -117,10 +124,10 @@ function normalizedValues(input: TvStreamPayload) {
   return values;
 }
 
-async function refreshHealth(id: number, streamUrl: string) {
+async function refreshHealth(id: number, streamUrl: string, audioUrl?: string | null) {
   const db = await getDb();
   if (!db) return;
-  const health = await checkStreamHealth(streamUrl);
+  const health = await checkStreamHealth(streamUrl, audioUrl);
   await db.update(tvStreams).set({ healthStatus: health.status, healthMessage: health.message, lastCheckedAt: new Date() }).where(eq(tvStreams.id, id));
 }
 
@@ -131,7 +138,7 @@ export async function refreshAllTvStreamsHealth() {
   const rows = await db.select().from(tvStreams);
   let changed = false;
   await Promise.all(rows.filter((row) => row.isActive).map(async (row) => {
-    const health = await checkStreamHealth(row.streamUrl);
+    const health = await checkStreamHealth(row.streamUrl, row.audioUrl);
     if (row.healthStatus !== health.status || row.healthMessage !== health.message) changed = true;
     await db.update(tvStreams)
       .set({ healthStatus: health.status, healthMessage: health.message, lastCheckedAt: new Date() })
@@ -149,7 +156,7 @@ export async function createTvStream(input: TvStreamPayload) {
   const rows = await db.select().from(tvStreams).where(eq(tvStreams.name, values.name)).orderBy(asc(tvStreams.id)).limit(1);
   const created = rows[0];
   if (!created) throw new Error("Không thể đọc stream vừa tạo.");
-  await refreshHealth(created.id, created.streamUrl);
+  await refreshHealth(created.id, created.streamUrl, created.audioUrl);
   publishTvStreamsChanged();
   const refreshed = await db.select().from(tvStreams).where(eq(tvStreams.id, created.id)).limit(1);
   return refreshed[0] || created;
@@ -161,7 +168,7 @@ export async function updateTvStream(id: number, input: TvStreamPayload) {
   await ensureTvStreamsCompatibility(db);
   const values = normalizedValues(input);
   await db.update(tvStreams).set({ ...values, healthStatus: "unknown", healthMessage: "Đang kiểm tra…", lastCheckedAt: new Date() }).where(eq(tvStreams.id, id));
-  await refreshHealth(id, values.streamUrl);
+  await refreshHealth(id, values.streamUrl, values.audioUrl);
   publishTvStreamsChanged();
   const rows = await db.select().from(tvStreams).where(eq(tvStreams.id, id)).limit(1);
   return rows[0] || null;

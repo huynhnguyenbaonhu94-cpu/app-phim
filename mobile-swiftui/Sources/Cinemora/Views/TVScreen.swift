@@ -6,11 +6,14 @@ import UIKit
 @MainActor
 private final class TVPlaybackController: ObservableObject {
     let player = AVPlayer()
+    private let separateAudioPlayer = AVPlayer()
     @Published private(set) var isPlaying = false
     @Published private(set) var isLoading = false
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
     private var currentURL: URL?
+    private var currentAudioURL: URL?
+    private var hasSeparateAudio = false
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -19,16 +22,21 @@ private final class TVPlaybackController: ObservableObject {
             Task { @MainActor in
                 self.isPlaying = self.player.timeControlStatus == .playing
                 self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.correctSeparateAudioDriftIfNeeded()
             }
         }
     }
 
-    func load(_ url: URL) {
+    func load(_ url: URL, audioURL: URL? = nil) {
         currentURL = url
+        currentAudioURL = audioURL
+        hasSeparateAudio = audioURL != nil
         itemObservation = nil
         player.pause()
+        separateAudioPlayer.pause()
         isPlaying = false
         isLoading = true
+        player.isMuted = hasSeparateAudio
         let item = AVPlayerItem(url: url)
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
@@ -38,27 +46,69 @@ private final class TVPlaybackController: ObservableObject {
             }
         }
         player.replaceCurrentItem(with: item)
+        if let audioURL {
+            separateAudioPlayer.replaceCurrentItem(with: AVPlayerItem(url: audioURL))
+            separateAudioPlayer.volume = player.volume
+            separateAudioPlayer.isMuted = player.isMuted
+        } else {
+            separateAudioPlayer.replaceCurrentItem(with: nil)
+        }
         player.play()
+        if hasSeparateAudio { separateAudioPlayer.play() }
         isPlaying = true
     }
 
     /// Reload the HLS playlist so AVPlayer returns to the provider's live edge.
     func refreshLiveStream() {
         guard let currentURL else { return }
-        load(currentURL)
+        load(currentURL, audioURL: currentAudioURL)
     }
 
     func togglePlayback() {
-        if player.timeControlStatus == .playing { player.pause(); isPlaying = false }
-        else { player.play(); isPlaying = true }
+        if player.timeControlStatus == .playing {
+            player.pause(); separateAudioPlayer.pause(); isPlaying = false
+        } else {
+            player.play(); if hasSeparateAudio { separateAudioPlayer.play() }; isPlaying = true
+        }
+    }
+
+    func setVolume(_ value: Double) {
+        if hasSeparateAudio {
+            separateAudioPlayer.volume = Float(value)
+            player.volume = 0
+        } else {
+            player.volume = Float(value)
+        }
+    }
+
+    func setMuted(_ muted: Bool) {
+        if hasSeparateAudio {
+            separateAudioPlayer.isMuted = muted
+            player.isMuted = true
+        } else {
+            player.isMuted = muted
+        }
+    }
+
+    private func correctSeparateAudioDriftIfNeeded() {
+        guard hasSeparateAudio, player.timeControlStatus == .playing,
+              separateAudioPlayer.timeControlStatus == .playing else { return }
+        let videoTime = player.currentTime()
+        let audioTime = separateAudioPlayer.currentTime()
+        guard videoTime.isNumeric, audioTime.isNumeric else { return }
+        let drift = CMTimeGetSeconds(audioTime) - CMTimeGetSeconds(videoTime)
+        if abs(drift) > 0.45 {
+            separateAudioPlayer.seek(to: videoTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
     }
 
     func shutdown() {
         itemObservation = nil
         player.pause()
+        separateAudioPlayer.pause()
         player.replaceCurrentItem(with: nil)
+        separateAudioPlayer.replaceCurrentItem(with: nil)
         isPlaying = false
-        if let timeObserver { player.removeTimeObserver(timeObserver); self.timeObserver = nil }
     }
 
     deinit {
@@ -133,9 +183,9 @@ struct TVScreen: View {
 
     private func play(_ stream: TvStream) {
         guard let url = stream.streamURL else { return }
-        playback.load(url)
-        playback.player.volume = Float(volume)
-        playback.player.isMuted = isMuted
+        playback.load(url, audioURL: stream.audioURL)
+        playback.setVolume(volume)
+        playback.setMuted(isMuted)
     }
 }
 
@@ -197,8 +247,8 @@ private struct TVPlayerView: View {
             .onAppear { scheduleHide() }
             .onDisappear { hideTask?.cancel() }
         }
-        .onChange(of: volume) { _, value in playback.player.volume = Float(value) }
-        .onChange(of: isMuted) { _, value in playback.player.isMuted = value }
+        .onChange(of: volume) { _, value in playback.setVolume(value) }
+        .onChange(of: isMuted) { _, value in playback.setMuted(value) }
     }
 
     private var topBar: some View {

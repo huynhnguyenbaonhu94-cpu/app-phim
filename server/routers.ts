@@ -105,6 +105,7 @@ export const appRouter = router({
     create: adminProcedure.input(z.object({
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),
+      audioUrl: z.string().trim().url().max(2000).nullable().optional(),
       logoUrl: z.string().trim().url().max(1000).nullable().optional(),
       posterUrl: tvPosterInput,
       description: z.string().trim().max(500).nullable().optional(),
@@ -115,6 +116,7 @@ export const appRouter = router({
       id: z.number().int().positive(),
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),
+      audioUrl: z.string().trim().url().max(2000).nullable().optional(),
       logoUrl: z.string().trim().url().max(1000).nullable().optional(),
       posterUrl: tvPosterInput,
       description: z.string().trim().max(500).nullable().optional(),

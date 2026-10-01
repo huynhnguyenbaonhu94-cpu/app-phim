@@ -4,6 +4,7 @@ struct TvStream: Decodable, Identifiable, Hashable {
     let id: Int
     let name: String
     let streamUrl: String
+    let audioUrl: String?
     let logoUrl: String?
     let posterUrl: String?
     let description: String?
@@ -14,6 +15,7 @@ struct TvStream: Decodable, Identifiable, Hashable {
     let lastCheckedAt: String?
 
     var streamURL: URL? { URL(string: streamUrl) }
+    var audioURL: URL? { CinemaAPI.absoluteURL(audioUrl) }
     var posterURL: URL? { CinemaAPI.absoluteURL(posterUrl ?? logoUrl) }
     var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
     var isOnline: Bool { healthStatus == "online" }

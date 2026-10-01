@@ -51,6 +51,7 @@ export const tvStreams = mysqlTable("tv_streams", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
   streamUrl: text("streamUrl").notNull(),
+  audioUrl: text("audioUrl"),
   logoUrl: text("logoUrl"),
   posterUrl: text("posterUrl"),
   description: varchar("description", { length: 500 }),
