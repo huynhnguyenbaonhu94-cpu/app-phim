@@ -135,6 +135,21 @@ struct TVScreen: View {
     }
 }
 
+private enum TVVideoFit: String, CaseIterable, Identifiable {
+    case fit = "Vừa"
+    case cover = "Phủ"
+    case fill = "Đầy"
+
+    var id: String { rawValue }
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fit: return .resizeAspect
+        case .cover: return .resizeAspectFill
+        case .fill: return .resize
+        }
+    }
+}
+
 private struct TVPlayerView: View {
     let stream: TvStream
     @ObservedObject var playback: TVPlaybackController
@@ -145,12 +160,13 @@ private struct TVPlayerView: View {
     @State private var controlsVisible = true
     @State private var volumePopoverOpen = false
     @State private var hideTask: Task<Void, Never>?
+    @State private var videoFit: TVVideoFit = .fit
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 Color.black
-                TVNativeVideoSurface(player: playback.player, pipCoordinator: pipCoordinator)
+                TVNativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator)
                     .accessibilityLabel("Đang phát \(stream.name)")
                 Color.clear.contentShape(Rectangle()).onTapGesture { toggleControls() }
                 if controlsVisible {
@@ -197,6 +213,19 @@ private struct TVPlayerView: View {
             .buttonStyle(.plain).foregroundStyle(.white)
             .cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
             .accessibilityLabel("Cập nhật thời gian phát trực tiếp")
+            Menu {
+                Picker("Tỷ lệ khung hình", selection: $videoFit) {
+                    ForEach(TVVideoFit.allCases) { fit in
+                        Text(fit.rawValue).tag(fit)
+                    }
+                }
+            } label: {
+                Image(systemName: "rectangle.on.rectangle")
+                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+            }
+            .foregroundStyle(.white)
+            .tint(Color.cinemaAccent)
+            .accessibilityLabel("Tỷ lệ khung hình \(videoFit.rawValue)")
             pipButton
             Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
@@ -344,12 +373,13 @@ private final class TVPlayerLayerView: UIView {
 
 private struct TVNativeVideoSurface: UIViewRepresentable {
     let player: AVPlayer
+    let fit: TVVideoFit
     let pipCoordinator: PictureInPictureCoordinator
     func makeUIView(context: Context) -> TVPlayerLayerView {
-        let view = TVPlayerLayerView(); view.backgroundColor = .black; view.playerLayer.player = player; view.playerLayer.videoGravity = .resizeAspect
+        let view = TVPlayerLayerView(); view.backgroundColor = .black; view.playerLayer.player = player; view.playerLayer.videoGravity = fit.gravity
         pipCoordinator.attach(to: view.playerLayer); return view
     }
     func updateUIView(_ view: TVPlayerLayerView, context: Context) {
-        view.playerLayer.player = player; pipCoordinator.attach(to: view.playerLayer)
+        view.playerLayer.player = player; view.playerLayer.videoGravity = fit.gravity; pipCoordinator.attach(to: view.playerLayer)
     }
 }

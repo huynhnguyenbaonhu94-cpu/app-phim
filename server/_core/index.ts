@@ -10,7 +10,7 @@ import { appRouter } from "../routers";
 import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource } from "../cinema";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { currentTvStreamsVersion, listTvStreams, subscribeTvStreams } from "../tvStreams";
+import { currentTvStreamsVersion, listTvStreams, refreshAllTvStreamsHealth, subscribeTvStreams } from "../tvStreams";
 import { initializeDatabase } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -209,6 +209,22 @@ async function startServer() {
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
+
+  let healthCheckRunning = false;
+  const runTvHealthCheck = async () => {
+    if (healthCheckRunning) return;
+    healthCheckRunning = true;
+    try {
+      await refreshAllTvStreamsHealth();
+    } catch (error) {
+      console.warn("[TV] Health check failed:", error instanceof Error ? error.message : error);
+    } finally {
+      healthCheckRunning = false;
+    }
+  };
+  void runTvHealthCheck();
+  const tvHealthTimer = setInterval(() => { void runTvHealthCheck(); }, 30_000);
+  tvHealthTimer.unref?.();
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);

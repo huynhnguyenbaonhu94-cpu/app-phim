@@ -14,12 +14,12 @@ export default function AdminTvStreams() {
   const [authOpen, setAuthOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
-  const query = trpc.tv.adminList.useQuery(undefined, { enabled: user?.role === "admin", retry: false });
+  const query = trpc.tv.adminList.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 15_000, refetchOnWindowFocus: true });
   const utils = trpc.useUtils();
   const create = trpc.tv.create.useMutation({ onSuccess: async () => { setForm(emptyForm); setMessage("Đã thêm kênh và kiểm tra stream."); await utils.tv.adminList.invalidate(); } });
   const update = trpc.tv.update.useMutation({ onSuccess: async () => { setForm(emptyForm); setMessage("Đã cập nhật, kiểm tra lại stream và gửi realtime."); await utils.tv.adminList.invalidate(); } });
   const remove = trpc.tv.remove.useMutation({ onSuccess: async () => { setMessage("Đã xóa kênh và gửi cập nhật realtime."); await utils.tv.adminList.invalidate(); } });
-  const uploadPoster = trpc.tv.uploadPoster.useMutation({ onSuccess: (url) => { setField("posterUrl", url); setMessage("Đã tải poster lên máy chủ."); } });
+  const uploadPoster = trpc.tv.uploadPoster.useMutation({ onSuccess: (url) => { setField("posterUrl", new URL(url, window.location.origin).toString()); setMessage("Đã tải poster lên máy chủ và tự điền URL public."); } });
 
   useEffect(() => { if (user && user.role !== "admin") setMessage("Tài khoản này chưa có quyền admin."); }, [user]);
   if (loading) return <PageShell><main className="content-wrap inner-page"><p>Đang kiểm tra quyền truy cập…</p></main></PageShell>;
@@ -27,7 +27,7 @@ export default function AdminTvStreams() {
   if (user.role !== "admin") return <PageShell><main className="content-wrap inner-page"><div className="empty-state"><Tv size={30} /><h3>Không có quyền truy cập</h3><p>Hãy dùng tài khoản quản trị viên của Cinemora.</p></div></main></PageShell>;
 
   const busy = create.isPending || update.isPending || uploadPoster.isPending;
-  const error = create.error?.message || update.error?.message || remove.error?.message;
+  const error = create.error?.message || update.error?.message || uploadPoster.error?.message || remove.error?.message;
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) { setForm(current => ({ ...current, [key]: value })); }
   function choosePoster(file: File | undefined) {
     if (!file) return;
@@ -50,7 +50,7 @@ export default function AdminTvStreams() {
       <label>Tên kênh<input required value={form.name} onChange={e => setField("name", e.target.value)} placeholder="VTV1" /></label>
       <label>URL stream<input required type="url" value={form.streamUrl} onChange={e => setField("streamUrl", e.target.value)} placeholder="https://example.com/live/playlist.m3u8" /></label>
       <div className="admin-tv-grid"><label>Upload poster<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => choosePoster(e.target.files?.[0])} />{uploadPoster.isPending && <small>Đang tải poster lên…</small>}</label><label>Thứ tự<input type="number" min="0" value={form.sortOrder} onChange={e => setField("sortOrder", e.target.value)} /></label></div>
-      <label>Hoặc dùng URL poster<input type="url" value={form.posterUrl} onChange={e => setField("posterUrl", e.target.value)} placeholder="https://.../poster.jpg" /></label>
+      <label>URL poster<input type="text" value={form.posterUrl} onChange={e => setField("posterUrl", e.target.value)} placeholder="Tự điền sau khi upload hoặc https://.../poster.jpg" /><small>Poster upload có thể dùng trực tiếp đường dẫn /uploads/tv-posters/…</small></label>
       <label>Logo nhỏ (không bắt buộc)<input type="url" value={form.logoUrl} onChange={e => setField("logoUrl", e.target.value)} placeholder="https://.../logo.png" /></label>
       <label>Mô tả<textarea rows={3} value={form.description} onChange={e => setField("description", e.target.value)} placeholder="Kênh truyền hình trực tiếp" /></label>
       <label className="admin-tv-check"><input type="checkbox" checked={form.isActive} onChange={e => setField("isActive", e.target.checked)} /> Hiển thị trên app</label>

@@ -22,6 +22,11 @@ const movieSnapshot = z.object({
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
 const movieRequestCooldown = new Map<string, number>();
+const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((value) => {
+  if (!value) return true;
+  if (value.startsWith("/uploads/tv-posters/") || value.startsWith("uploads/tv-posters/")) return true;
+  try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; }
+}, "Poster phải là URL http(s) hoặc file đã upload trên máy chủ.");
 
 function setSessionCookie(ctx: { req: Parameters<typeof getSessionCookieOptions>[0]; res: { cookie: (name: string, value: string, options: Record<string, unknown>) => void } }, token: string) {
   ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
@@ -101,7 +106,7 @@ export const appRouter = router({
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),
       logoUrl: z.string().trim().url().max(1000).nullable().optional(),
-      posterUrl: z.string().trim().url().max(1000).nullable().optional(),
+      posterUrl: tvPosterInput,
       description: z.string().trim().max(500).nullable().optional(),
       sortOrder: z.number().int().min(0).max(100000).optional(),
       isActive: z.boolean().optional(),
@@ -111,7 +116,7 @@ export const appRouter = router({
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),
       logoUrl: z.string().trim().url().max(1000).nullable().optional(),
-      posterUrl: z.string().trim().url().max(1000).nullable().optional(),
+      posterUrl: tvPosterInput,
       description: z.string().trim().max(500).nullable().optional(),
       sortOrder: z.number().int().min(0).max(100000).optional(),
       isActive: z.boolean().optional(),

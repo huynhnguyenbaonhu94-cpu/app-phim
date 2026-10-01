@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { ensureTvStreamsCompatibility, getDb } from "./db";
 import { tvStreams } from "../drizzle/schema";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -48,9 +48,11 @@ export function validateStreamUrl(value: string) {
 
 export function validateOptionalUrl(value: string | null | undefined) {
   if (!value?.trim()) return null;
-  if (value.trim().startsWith("/uploads/tv-posters/")) return value.trim().slice(0, 1000);
+  const trimmed = value.trim();
+  if (trimmed.startsWith("/uploads/tv-posters/")) return trimmed.slice(0, 1000);
+  if (trimmed.startsWith("uploads/tv-posters/")) return `/${trimmed}`.slice(0, 1000);
   try {
-    const url = new URL(value.trim());
+    const url = new URL(trimmed);
     if (!["https:", "http:"].includes(url.protocol)) throw new Error();
     return url.toString();
   } catch {
@@ -97,7 +99,7 @@ export async function listTvStreams(includeInactive = false) {
   const query = db.select().from(tvStreams);
   const rows = includeInactive
     ? await query.orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id))
-    : await query.where(eq(tvStreams.isActive, true)).orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id));
+    : await query.where(and(eq(tvStreams.isActive, true), eq(tvStreams.healthStatus, "online"))).orderBy(asc(tvStreams.sortOrder), asc(tvStreams.id));
   return rows;
 }
 
@@ -120,6 +122,22 @@ async function refreshHealth(id: number, streamUrl: string) {
   if (!db) return;
   const health = await checkStreamHealth(streamUrl);
   await db.update(tvStreams).set({ healthStatus: health.status, healthMessage: health.message, lastCheckedAt: new Date() }).where(eq(tvStreams.id, id));
+}
+
+export async function refreshAllTvStreamsHealth() {
+  const db = await getDb();
+  if (!db) return;
+  await ensureTvStreamsCompatibility(db);
+  const rows = await db.select().from(tvStreams);
+  let changed = false;
+  await Promise.all(rows.filter((row) => row.isActive).map(async (row) => {
+    const health = await checkStreamHealth(row.streamUrl);
+    if (row.healthStatus !== health.status || row.healthMessage !== health.message) changed = true;
+    await db.update(tvStreams)
+      .set({ healthStatus: health.status, healthMessage: health.message, lastCheckedAt: new Date() })
+      .where(eq(tvStreams.id, row.id));
+  }));
+  if (changed) publishTvStreamsChanged();
 }
 
 export async function createTvStream(input: TvStreamPayload) {
