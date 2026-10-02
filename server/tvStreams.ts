@@ -74,6 +74,25 @@ export async function saveTvPoster(input: { base64: string; mimeType: "image/jpe
 }
 
 type ProbeResult = { status: "online" | "offline" | "unknown"; message: string };
+const transientProbeStatuses = new Set([401, 403, 408, 425, 429, 500, 501, 502, 503, 504, 520, 521, 522, 523, 524]);
+
+function probeHeaders(url: string, label: string, useRange: boolean) {
+  const headers: Record<string, string> = {
+    accept: label === "Audio" ? "audio/*, application/vnd.apple.mpegurl, */*" : "application/vnd.apple.mpegurl, application/x-mpegURL, video/*, */*",
+    "cache-control": "no-cache",
+    "user-agent": "Mozilla/5.0 (compatible; Cinemora-TV-Health/1.0)",
+  };
+  try {
+    const hostname = new URL(url).hostname;
+    if (hostname === "d4.dhcn.vn" || hostname === "media.dhcn.vn") {
+      headers.origin = "https://baothanhhoa.vn";
+      headers.referer = "https://baothanhhoa.vn/";
+    }
+  } catch { /* URL validation is handled before health probing. */ }
+  // Some CDNs reject Range requests even though their HLS URL plays normally.
+  if (useRange) headers.range = "bytes=0-2047";
+  return headers;
+}
 
 async function probeStreamUrl(url: string, label: string): Promise<ProbeResult> {
   let lastNetworkError = false;
@@ -81,18 +100,17 @@ async function probeStreamUrl(url: string, label: string): Promise<ProbeResult> 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
-      const headers: Record<string, string> = {
-        accept: label === "Audio" ? "audio/*, application/vnd.apple.mpegurl, */*" : "application/vnd.apple.mpegurl, application/x-mpegURL, video/*, */*",
-        "cache-control": "no-cache",
-        "user-agent": "Mozilla/5.0 (compatible; Cinemora-TV-Health/1.0)",
-      };
-      // Some CDNs reject Range requests even though their HLS URL plays normally.
-      if (useRange) headers.range = "bytes=0-2047";
+      const headers = probeHeaders(url, label, useRange);
       const response = await fetch(url, { method: "GET", headers, redirect: "follow", signal: controller.signal });
       try { await response.body?.cancel(); } catch { /* best effort */ }
       if (response.ok) return { status: "online", message: `${label} đang hoạt động` };
       // A range probe can be rejected while a normal GET is valid; retry without Range.
-      if (useRange && [400, 405, 416, 429, 500, 501, 502, 503].includes(response.status)) continue;
+      if (useRange && (response.status === 400 || response.status === 405 || response.status === 416 || transientProbeStatuses.has(response.status))) continue;
+      // CDN edge authorization/rate-limit errors are often short-lived. Do not
+      // hide a channel that still plays in the app; keep it visible as unknown.
+      if (transientProbeStatuses.has(response.status)) {
+        return { status: "unknown", message: `${label} tạm thời không xác minh được (HTTP ${response.status})` };
+      }
       return { status: "offline", message: `${label} HTTP ${response.status}` };
     } catch (error) {
       lastNetworkError = true;

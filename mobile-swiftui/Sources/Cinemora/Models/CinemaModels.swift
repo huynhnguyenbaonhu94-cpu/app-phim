@@ -14,8 +14,8 @@ struct TvStream: Decodable, Identifiable, Hashable {
     let healthMessage: String?
     let lastCheckedAt: String?
 
-    var streamURL: URL? { URL(string: streamUrl) }
-    var audioURL: URL? { CinemaAPI.absoluteURL(audioUrl) }
+    var streamURL: URL? { CinemaAPI.tvStreamURL(streamUrl) }
+    var audioURL: URL? { CinemaAPI.tvStreamURL(audioUrl) }
     var posterURL: URL? { CinemaAPI.absoluteURL(posterUrl ?? logoUrl) }
     var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
     var isOnline: Bool { healthStatus == "online" }
@@ -24,6 +24,33 @@ struct TvStream: Decodable, Identifiable, Hashable {
 struct TvStreamSnapshot: Decodable {
     let version: Int
     let streams: [TvStream]
+}
+
+struct TvVideo: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let logoUrl: String?
+    let description: String?
+    let sortOrder: Int
+    let isActive: Bool
+    let episodes: [TvVideoEpisode]
+    var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
+}
+
+struct TvVideoEpisode: Decodable, Identifiable, Hashable {
+    let id: Int
+    let videoId: Int
+    let episodeNumber: Int
+    let name: String
+    let qualities: [TvVideoQuality]
+}
+
+struct TvVideoQuality: Decodable, Identifiable, Hashable {
+    let id: Int
+    let episodeId: Int
+    let label: String
+    let streamUrl: String
+    var streamURL: URL? { CinemaAPI.tvStreamURL(streamUrl) }
 }
 
 struct Movie: Decodable, Identifiable, Hashable {

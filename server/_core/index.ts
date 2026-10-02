@@ -11,7 +11,41 @@ import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource }
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { currentTvStreamsVersion, listTvStreams, refreshAllTvStreamsHealth, subscribeTvStreams } from "../tvStreams";
+import { refreshAllTvVideosHealth } from "../tvVideos";
 import { initializeDatabase } from "../db";
+
+const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
+const tvProxyOrigin = "https://baothanhhoa.vn";
+
+function getAllowedTvSource(raw: string | undefined) {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" || !tvProxyHosts.has(url.hostname)) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function tvProxyUrl(source: URL) {
+  return `/api/tv/proxy?url=${encodeURIComponent(source.toString())}`;
+}
+
+function rewriteTvPlaylist(playlist: string, source: URL) {
+  return playlist.split("\n").map((line) => {
+    const withUris = line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
+      const absolute = new URL(uri, source).toString();
+      const resolved = getAllowedTvSource(absolute);
+      return `URI="${resolved ? tvProxyUrl(resolved) : absolute}"`;
+    });
+    const trimmed = withUris.trim();
+    if (!trimmed || trimmed.startsWith("#")) return withUris;
+    const absolute = new URL(trimmed, source).toString();
+    const resolved = getAllowedTvSource(absolute);
+    return resolved ? tvProxyUrl(resolved) : trimmed;
+  }).join("\n");
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -117,6 +151,38 @@ async function startServer() {
     const unsubscribe = subscribeTvStreams(() => { void sendSnapshot(); });
     const heartbeat = setInterval(() => res.write(`: heartbeat ${Date.now()}\n\n`), 25_000);
     req.on("close", () => { clearInterval(heartbeat); unsubscribe(); });
+  });
+  // DHCN requires the baothanhhoa.vn Origin even for the playlist request.
+  // Browsers cannot set Origin/Referer from JavaScript, so proxy allowlisted
+  // HLS resources and rewrite every playlist URI through this route.
+  app.get("/api/tv/proxy", async (req, res) => {
+    const source = getAllowedTvSource(typeof req.query.url === "string" ? req.query.url : undefined);
+    if (!source) return res.status(400).send("TV source không hợp lệ");
+    try {
+      const headers: Record<string, string> = {
+        accept: "*/*",
+        origin: tvProxyOrigin,
+        referer: `${tvProxyOrigin}/`,
+        "user-agent": "Mozilla/5.0 (compatible; Cinemora-TV/1.0)",
+      };
+      if (typeof req.headers.range === "string") headers.range = req.headers.range;
+      const upstream = await fetch(source, { headers, redirect: "follow" });
+      if (!upstream.ok) return res.status(upstream.status === 404 ? 404 : 502).send("TV source unavailable");
+      const contentType = upstream.headers.get("content-type") || "";
+      const isPlaylist = source.pathname.endsWith(".m3u8") || contentType.includes("mpegurl") || contentType.includes("vnd.apple");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-store, no-cache");
+      if (isPlaylist) {
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+        return res.status(200).send(rewriteTvPlaylist(await upstream.text(), source));
+      }
+      res.setHeader("Content-Type", contentType || (source.pathname.endsWith(".ts") ? "video/mp2t" : "application/octet-stream"));
+      if (upstream.status === 206) res.status(206);
+      return res.send(Buffer.from(await upstream.arrayBuffer()));
+    } catch (error) {
+      console.warn("[TV] HLS proxy failed", error instanceof Error ? error.message : error);
+      return res.status(502).send("TV source unavailable");
+    }
   });
   // HTML phải luôn được kiểm tra phiên bản mới; các bundle Vite đã có hash
   // trong tên file nên có thể cache dài hạn an toàn.
@@ -225,6 +291,17 @@ async function startServer() {
   void runTvHealthCheck();
   const tvHealthTimer = setInterval(() => { void runTvHealthCheck(); }, 30_000);
   tvHealthTimer.unref?.();
+  let videoHealthCheckRunning = false;
+  const runTvVideoHealthCheck = async () => {
+    if (videoHealthCheckRunning) return;
+    videoHealthCheckRunning = true;
+    try { await refreshAllTvVideosHealth(); }
+    catch (error) { console.warn("[TV] Video health check failed:", error instanceof Error ? error.message : error); }
+    finally { videoHealthCheckRunning = false; }
+  };
+  void runTvVideoHealthCheck();
+  const tvVideoHealthTimer = setInterval(() => { void runTvVideoHealthCheck(); }, 60_000);
+  tvVideoHealthTimer.unref?.();
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);

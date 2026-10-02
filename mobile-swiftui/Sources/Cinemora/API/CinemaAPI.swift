@@ -12,6 +12,21 @@ struct CinemaAPI {
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
     }
 
+    /// DHCN requires a baothanhhoa.vn Origin/Referer and cannot be opened
+    /// directly by AVPlayer. The server proxy adds those headers and rewrites
+    /// the playlist's key and segment URLs as well.
+    static func tvStreamURL(_ value: String?) -> URL? {
+        guard let absolute = absoluteURL(value),
+              let host = absolute.host?.lowercased(),
+              host == "d4.dhcn.vn" || host == "media.dhcn.vn" else {
+            return absoluteURL(value)
+        }
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/api/tv/proxy"
+        components?.queryItems = [URLQueryItem(name: "url", value: absolute.absoluteString)]
+        return components?.url
+    }
+
     func home(page: Int = 1) async throws -> MoviePage {
         try await query("cinema.home", input: ["page": page])
     }
@@ -46,6 +61,10 @@ struct CinemaAPI {
 
     func tvStreams() async throws -> [TvStream] {
         try await query("tv.list", input: nil)
+    }
+
+    func tvVideos() async throws -> [TvVideo] {
+        try await query("tv.videos", input: nil)
     }
 
     func tvEventBytes() async throws -> URLSession.AsyncBytes {

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { MonitorPlay, RefreshCw, Save, Trash2, Tv, X } from "lucide-react";
+import { MonitorPlay, RefreshCw, Save, Search, Trash2, Tv, X } from "lucide-react";
 import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { TVStreamPreview } from "@/components/TVStreamPreview";
+import { AdminTvVideos } from "@/components/AdminTvVideos";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 
@@ -18,6 +19,7 @@ export default function AdminTvStreams() {
   const [message, setMessage] = useState<string | null>(null);
   const [previewStream, setPreviewStream] = useState<{ id: number; name: string; streamUrl: string; audioUrl?: string | null; posterUrl?: string | null } | null>(null);
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const query = trpc.tv.adminList.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 5_000, refetchIntervalInBackground: true, refetchOnWindowFocus: true });
   const utils = trpc.useUtils();
@@ -32,7 +34,13 @@ export default function AdminTvStreams() {
   if (user.role !== "admin") return <PageShell><main className="content-wrap inner-page"><div className="empty-state"><Tv size={30} /><h3>Không có quyền truy cập</h3><p>Hãy dùng tài khoản quản trị viên của Cinemora.</p></div></main></PageShell>;
 
   const streams = query.data || [];
-  const visibleStreams = healthFilter === "all" ? streams : streams.filter(stream => (stream.healthStatus || "unknown") === healthFilter);
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase("vi-VN");
+  const visibleStreams = streams.filter(stream => {
+    const matchesHealth = healthFilter === "all" || (stream.healthStatus || "unknown") === healthFilter;
+    if (!normalizedSearch) return matchesHealth;
+    const haystack = [stream.name, stream.streamUrl, stream.audioUrl || "", stream.description || ""].join(" ").toLocaleLowerCase("vi-VN");
+    return matchesHealth && haystack.includes(normalizedSearch);
+  });
   const counts = { all: streams.length, online: streams.filter(stream => stream.healthStatus === "online").length, offline: streams.filter(stream => stream.healthStatus === "offline").length, unknown: streams.filter(stream => !stream.healthStatus || stream.healthStatus === "unknown").length };
   const busy = create.isPending || update.isPending || uploadPoster.isPending;
   const error = create.error?.message || update.error?.message || uploadPoster.error?.message || remove.error?.message;
@@ -73,9 +81,11 @@ export default function AdminTvStreams() {
     </form>
     <section className="admin-tv-list">
       <div className="admin-tv-list-heading"><SectionHeading eyebrow="DANH SÁCH HIỆN TẠI" title={`${visibleStreams.length}/${streams.length} kênh`} /><div className="admin-tv-live-note"><span className="admin-tv-live-dot" /> Tự cập nhật mỗi 5 giây <button type="button" className="admin-tv-refresh" onClick={() => query.refetch()} disabled={query.isFetching} title="Cập nhật ngay"><RefreshCw size={14} className={query.isFetching ? "admin-tv-refresh-spin" : ""} /></button></div></div>
+      <label className="admin-tv-search"><Search size={15} /><input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Tìm nhanh theo tên kênh, URL hoặc mô tả…" aria-label="Tìm kiếm trong danh sách kênh" />{searchQuery && <button type="button" onClick={() => setSearchQuery("")} aria-label="Xóa tìm kiếm"><X size={15} /></button>}</label>
       <div className="admin-tv-filters" role="tablist" aria-label="Lọc trạng thái stream">{filterLabels.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={healthFilter === key} className={`admin-tv-filter ${healthFilter === key ? "is-active" : ""}`} onClick={() => setHealthFilter(key)}>{label}<b>{counts[key]}</b></button>)}</div>
       {query.isLoading ? <p>Đang tải…</p> : visibleStreams.length === 0 ? <div className="admin-tv-filter-empty">Không có kênh nào thuộc bộ lọc này.</div> : visibleStreams.map(stream => <article className="admin-tv-item" key={stream.id}><div><strong>{stream.name}</strong><span>{stream.streamUrl}</span>{stream.audioUrl && <span className="admin-tv-audio">Audio riêng: {stream.audioUrl}</span>}<small>{stream.isActive ? "Đang hiển thị" : "Đang ẩn"} · thứ tự {stream.sortOrder}</small><em className={`admin-tv-health admin-tv-health-${stream.healthStatus || "unknown"}`}>{stream.healthStatus === "online" ? "● Đang hoạt động" : stream.healthStatus === "offline" ? `● Gặp lỗi · ${stream.healthMessage || "kiểm tra thất bại"}` : `● Chưa xác minh · ${stream.healthMessage || "máy chủ chưa xác nhận được"}`}{stream.lastCheckedAt ? ` · ${new Date(stream.lastCheckedAt).toLocaleString("vi-VN")}` : ""}</em></div><div className="admin-tv-actions"><button type="button" className="button button-primary" onClick={() => setPreviewStream(stream)}><MonitorPlay size={14} /> Xem thử</button><button type="button" className="button button-ghost" onClick={() => beginEdit(stream)}><Save size={14} /> Sửa</button><button type="button" className="button button-danger" disabled={remove.isPending} onClick={() => { if (window.confirm(`Xóa kênh ${stream.name}?`)) remove.mutate({ id: stream.id }); }}><Trash2 size={14} /> Xóa</button></div></article>)}
     </section>
+    <AdminTvVideos />
     {previewStream && <TVStreamPreview name={previewStream.name} streamUrl={previewStream.streamUrl} audioUrl={previewStream.audioUrl} posterUrl={previewStream.posterUrl} onClose={() => setPreviewStream(null)} />}
   </main></PageShell>;
 }

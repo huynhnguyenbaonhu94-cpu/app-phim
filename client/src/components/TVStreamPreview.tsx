@@ -16,6 +16,16 @@ function isHlsUrl(url: string) {
   return /\.m3u8(?:$|[?#])/i.test(url);
 }
 
+function proxiedTvUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.protocol === "https:" && (parsed.hostname === "d4.dhcn.vn" || parsed.hostname === "media.dhcn.vn")) {
+      return `/api/tv/proxy?url=${encodeURIComponent(parsed.toString())}`;
+    }
+  } catch { /* Keep the original URL for non-DHCN sources. */ }
+  return url;
+}
+
 function seekableLiveEdge(element: HTMLMediaElement) {
   if (!element.seekable.length) return null;
   const end = element.seekable.end(element.seekable.length - 1);
@@ -141,8 +151,8 @@ export function TVStreamPreview({ name, streamUrl, audioUrl, posterUrl, onClose 
     video.addEventListener("error", onVideoError);
     video.addEventListener("volumechange", onVolume);
 
-    attach(video, streamUrl, videoHls, "video");
-    if (audioUrl) attach(audio, audioUrl, audioHls, "audio");
+    attach(video, proxiedTvUrl(streamUrl), videoHls, "video");
+    if (audioUrl) attach(audio, proxiedTvUrl(audioUrl), audioHls, "audio");
 
     syncTimer.current = setInterval(() => {
       if (!audioUrl || video.paused || audio.paused || audio.readyState < 2) return;

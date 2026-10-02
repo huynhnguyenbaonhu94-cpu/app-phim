@@ -31,4 +31,14 @@ describe("TV stream health probing", () => {
     await expect(checkStreamHealth("https://cdn.example.com/live.m3u8")).resolves.toMatchObject({ status: "unknown" });
     vi.unstubAllGlobals();
   });
+
+  it("keeps a playable stream visible when a CDN edge temporarily returns 403", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("Forbidden", { status: 403 }))
+      .mockResolvedValueOnce(new Response("Forbidden", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(checkStreamHealth("https://cdn.example.com/live.m3u8")).resolves.toMatchObject({ status: "unknown" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
 });

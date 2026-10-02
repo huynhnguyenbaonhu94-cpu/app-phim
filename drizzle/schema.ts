@@ -64,7 +64,36 @@ export const tvStreams = mysqlTable("tv_streams", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
   activeOrderIndex: index("tv_streams_active_order_idx").on(table.isActive, table.sortOrder),
-}));
+  }));
+
+export const tvVideos = mysqlTable("tv_videos", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 180 }).notNull(),
+  logoUrl: text("logoUrl"),
+  description: varchar("description", { length: 1000 }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({ activeOrderIndex: index("tv_videos_active_order_idx").on(table.isActive, table.sortOrder) }));
+
+export const tvVideoEpisodes = mysqlTable("tv_video_episodes", {
+  id: int("id").autoincrement().primaryKey(),
+  videoId: int("videoId").notNull(),
+  episodeNumber: int("episodeNumber").notNull(),
+  name: varchar("name", { length: 180 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ videoOrderIndex: index("tv_video_episodes_video_order_idx").on(table.videoId, table.episodeNumber) }));
+
+export const tvVideoQualities = mysqlTable("tv_video_qualities", {
+  id: int("id").autoincrement().primaryKey(),
+  episodeId: int("episodeId").notNull(),
+  label: varchar("label", { length: 40 }).notNull(),
+  streamUrl: text("streamUrl").notNull(),
+  healthStatus: varchar("healthStatus", { length: 20 }).default("unknown").notNull(),
+  healthMessage: varchar("healthMessage", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ episodeIndex: index("tv_video_qualities_episode_idx").on(table.episodeId) }));
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -72,3 +101,6 @@ export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
 export type InsertTvStream = typeof tvStreams.$inferInsert;
+export type TvVideo = typeof tvVideos.$inferSelect;
+export type TvVideoEpisode = typeof tvVideoEpisodes.$inferSelect;
+export type TvVideoQuality = typeof tvVideoQualities.$inferSelect;

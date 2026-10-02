@@ -9,6 +9,7 @@ import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, updateTvStream } from "./tvStreams";
+import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -98,6 +99,8 @@ export const appRouter = router({
   tv: router({
     list: publicProcedure.query(() => listTvStreams(false)),
     adminList: adminProcedure.query(() => listTvStreams(true)),
+    videos: publicProcedure.query(() => listTvVideos(false)),
+    adminVideos: adminProcedure.query(() => listTvVideos(true)),
     uploadPoster: adminProcedure.input(z.object({
       base64: z.string().min(1).max(11_200_000),
       mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
@@ -124,6 +127,15 @@ export const appRouter = router({
       isActive: z.boolean().optional(),
     })).mutation(({ input: { id, ...input } }) => updateTvStream(id, input)),
     remove: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvStream(input.id)),
+    createVideo: adminProcedure.input(z.object({
+      name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(),
+      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000) })).min(1) })).min(1),
+    })).mutation(({ input }) => createTvVideo(input)),
+    updateVideo: adminProcedure.input(z.object({
+      id: z.number().int().positive(), name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(),
+      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000) })).min(1) })).min(1),
+    })).mutation(({ input: { id, ...payload } }) => updateTvVideo(id, payload)),
+    removeVideo: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvVideo(input.id)),
   }),
   account: router({
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),

@@ -75,6 +75,12 @@ export async function ensureTvStreamsCompatibility(db: ReturnType<typeof drizzle
   }
 }
 
+export async function ensureTvVideosCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_videos (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, name varchar(180) NOT NULL, logoUrl text NULL, description varchar(1000) NULL, sortOrder int NOT NULL DEFAULT 0, isActive tinyint(1) NOT NULL DEFAULT 1, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX tv_videos_active_order_idx (isActive, sortOrder)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_episodes (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, videoId int NOT NULL, episodeNumber int NOT NULL, name varchar(180) NOT NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_episodes_video_order_idx (videoId, episodeNumber)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_qualities (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, episodeId int NOT NULL, label varchar(40) NOT NULL, streamUrl text NOT NULL, healthStatus varchar(20) NOT NULL DEFAULT 'unknown', healthMessage varchar(255) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_qualities_episode_idx (episodeId)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
 export async function initializeDatabase() {
   if (initialization) return initialization;
   initialization = (async () => {
@@ -88,6 +94,7 @@ export async function initializeDatabase() {
       console.warn("[Database] Migration warning, running compatibility repair:", error instanceof Error ? error.message : error);
     }
     await ensureTvStreamsCompatibility(db);
+    await ensureTvVideosCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {

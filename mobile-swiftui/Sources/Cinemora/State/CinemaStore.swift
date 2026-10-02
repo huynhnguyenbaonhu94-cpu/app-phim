@@ -31,6 +31,7 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var localHistory: [LocalWatchRecord] = []
     @Published var playbackDefaults = PlaybackDefaults()
     @Published private(set) var tvStreams: [TvStream] = []
+    @Published private(set) var tvVideos: [TvVideo] = []
     @Published private(set) var tvLoading = false
     @Published private(set) var tvError: String?
     @Published private(set) var hasNewHomeContent = false
@@ -82,7 +83,10 @@ final class CinemaStore: ObservableObject {
         guard tvEventsTask == nil else { return }
         tvLoading = tvStreams.isEmpty
         do {
-            tvStreams = try await api.tvStreams()
+            async let streams = api.tvStreams()
+            async let videos = api.tvVideos()
+            tvStreams = try await streams
+            tvVideos = (try? await videos) ?? []
             tvError = nil
         } catch {
             tvError = error.localizedDescription
@@ -118,7 +122,10 @@ final class CinemaStore: ObservableObject {
 
     func refreshTvStreams() async {
         do {
-            tvStreams = try await api.tvStreams()
+            async let streams = api.tvStreams()
+            async let videos = api.tvVideos()
+            tvStreams = try await streams
+            tvVideos = (try? await videos) ?? tvVideos
             tvError = nil
         } catch {
             tvError = error.localizedDescription
