@@ -273,6 +273,14 @@ struct TVScreen: View {
         return store.tvVideos.first { $0.id == selectedVideoID }
     }
 
+    /// Posted TV videos use the same movie player as catalog movies. Each
+    /// quality is represented as a source, while all sources expose the same
+    /// episode list. This keeps the player UI and playback behavior in one
+    /// place instead of maintaining a second, less capable video player.
+    private var selectedVideoMovie: Movie? {
+        selectedVideo?.asPlayerMovie
+    }
+
     var body: some View {
         ZStack {
             CinemaBackground()
@@ -302,7 +310,6 @@ struct TVScreen: View {
                                 TVVideoRow(video: video) {
                                     selectedVideoID = video.id
                                     selectedVideoEpisode = 0
-                                    play(video, episodeIndex: 0)
                                     selectedStreamID = nil
                                     isPlayerPresented = true
                                 }
@@ -333,8 +340,8 @@ struct TVScreen: View {
         .fullScreenCover(isPresented: $isPlayerPresented) {
             if let selectedStream {
                 TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
-            } else if let selectedVideo {
-                TVVideoFullscreenPlayer(video: selectedVideo, episodeIndex: $selectedVideoEpisode, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isPresented: $isPlayerPresented)
+            } else if let selectedVideoMovie {
+                CinemaPlayerScreen(movie: selectedVideoMovie, servers: selectedVideoMovie.availableServers, initialServer: 0, initialEpisode: selectedVideoEpisode)
             }
         }
     }
@@ -346,11 +353,62 @@ struct TVScreen: View {
         playback.setMuted(isMuted)
     }
 
-    private func play(_ video: TvVideo, episodeIndex: Int) {
-        guard video.episodes.indices.contains(episodeIndex), let url = video.episodes[episodeIndex].qualities.first?.streamURL else { return }
-        playback.load(url)
-        playback.setVolume(volume)
-        playback.setMuted(isMuted)
+}
+
+private extension TvVideo {
+    /// Convert the TV API shape into the shared player shape. URLs are
+    /// resolved through tvStreamURL so protected TV hosts receive the same
+    /// proxy treatment as live TV streams.
+    var asPlayerMovie: Movie {
+        var qualityLabels: [String] = []
+        for quality in episodes.flatMap(\.qualities) where !qualityLabels.contains(quality.label) {
+            qualityLabels.append(quality.label)
+        }
+        let servers = qualityLabels.compactMap { label -> MovieServer? in
+            let qualityEpisodes = episodes.compactMap { tvEpisode -> MovieEpisode? in
+                guard let quality = tvEpisode.qualities.first(where: { $0.label == label }),
+                      let streamURL = quality.streamURL else { return nil }
+                return MovieEpisode(
+                    name: tvEpisode.name,
+                    slug: "tv-\(id)-episode-\(tvEpisode.id)-quality-\(quality.id)",
+                    filename: "",
+                    embedUrl: nil,
+                    streamUrl: streamURL.absoluteString
+                )
+            }
+            guard !qualityEpisodes.isEmpty else { return nil }
+            return MovieServer(name: label, isAi: false, episodes: qualityEpisodes)
+        }
+        return Movie(
+            apiID: "tv-video-\(id)",
+            slug: "tv-video-\(id)",
+            name: name,
+            originName: nil,
+            poster: logoUrl,
+            backdrop: logoUrl,
+            year: nil,
+            quality: nil,
+            episodeCurrent: episodes.count > 1 ? "\(episodes.count) tập" : "Tập 1",
+            episodeTotal: episodes.count,
+            time: nil,
+            lang: nil,
+            description: description,
+            rating: nil,
+            categories: nil,
+            countries: nil,
+            actors: nil,
+            actorProfiles: nil,
+            directors: nil,
+            views: nil,
+            alternativeNames: nil,
+            status: nil,
+            tmdbId: nil,
+            imdbId: nil,
+            createdAt: nil,
+            updatedAt: nil,
+            servers: servers,
+            episodeGroups: nil
+        )
     }
 }
 

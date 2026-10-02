@@ -121,6 +121,12 @@ struct MovieServer: Decodable, Hashable, Identifiable {
     let episodes: [MovieEpisode]
     var id: String { name }
 
+    init(name: String, isAi: Bool, episodes: [MovieEpisode]) {
+        self.name = name
+        self.isAi = isAi
+        self.episodes = episodes
+    }
+
     enum CodingKeys: String, CodingKey {
         case name, serverName = "server_name"
         case isAi, isAiSnake = "is_ai"
@@ -154,6 +160,14 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
+
+    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?) {
+        self.name = name
+        self.slug = slug
+        self.filename = filename
+        self.embedUrl = embedUrl
+        self.streamUrl = streamUrl
+    }
 
     enum CodingKeys: String, CodingKey {
         case name, slug, filename
