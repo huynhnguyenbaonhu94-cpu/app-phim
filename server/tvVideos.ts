@@ -33,6 +33,14 @@ async function validateAllLinks(episodes: TvVideoEpisodeInput[]) {
   }
 }
 
+function getInsertId(result: unknown, label: string) {
+  const raw = result as { insertId?: number | bigint; [key: number]: { insertId?: number | bigint } | undefined };
+  const value = raw?.insertId ?? raw?.[0]?.insertId;
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error(`Không thể lấy ID sau khi thêm ${label}. Vui lòng thử lại.`);
+  return id;
+}
+
 export async function listTvVideos(includeInactive = false) {
   const db = await getDb(); if (!db) return [];
   await ensureTvVideosCompatibility(db);
@@ -51,10 +59,10 @@ export async function createTvVideo(input: TvVideoPayload) {
   const values = normalize(input);
   await validateAllLinks(values.episodes);
   const inserted = await db.insert(tvVideos).values({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive });
-  const videoId = Number((inserted as unknown as { insertId: number }).insertId);
+  const videoId = getInsertId(inserted, "video");
   for (const episode of values.episodes) {
     const result = await db.insert(tvVideoEpisodes).values({ videoId, episodeNumber: episode.episodeNumber, name: episode.name });
-    const episodeId = Number((result as unknown as { insertId: number }).insertId);
+    const episodeId = getInsertId(result, "tập");
     await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
   }
   return (await listTvVideos(true)).find((video) => video.id === videoId) || null;
@@ -71,7 +79,7 @@ export async function updateTvVideo(id: number, input: TvVideoPayload) {
   await db.delete(tvVideoEpisodes).where(eq(tvVideoEpisodes.videoId, id));
   for (const episode of values.episodes) {
     const result = await db.insert(tvVideoEpisodes).values({ videoId: id, episodeNumber: episode.episodeNumber, name: episode.name });
-    const episodeId = Number((result as unknown as { insertId: number }).insertId);
+    const episodeId = getInsertId(result, "tập");
     await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
   }
   return (await listTvVideos(true)).find((video) => video.id === id) || null;

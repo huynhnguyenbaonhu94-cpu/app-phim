@@ -654,6 +654,25 @@ private struct TVVideoFullscreenPlayer: View {
                         Button { isPresented = false } label: { Image(systemName: "chevron.down").frame(width: 42, height: 42) }.buttonStyle(.plain)
                         VStack(alignment: .leading) { Text(video.name).font(.system(size: 13, weight: .bold)); Text(episode?.name ?? "Video").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)) }
                         Spacer()
+                        if video.episodes.count > 1 {
+                            Menu {
+                                ForEach(video.episodes.indices, id: \.self) { index in
+                                    Button {
+                                        episodeIndex = index
+                                        scheduleHide()
+                                    } label: {
+                                        Label(video.episodes[index].name, systemImage: index == episodeIndex ? "checkmark.circle.fill" : "circle")
+                                    }
+                                }
+                            } label: {
+                                Label("Tập \(episodeIndex + 1)", systemImage: "list.number")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .padding(.horizontal, 11).frame(height: 38)
+                                    .background(.black.opacity(0.42), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Chọn tập")
+                        }
                         if let episode, episode.qualities.count > 1 { Menu { ForEach(episode.qualities.indices, id: \.self) { index in Button(episode.qualities[index].label) { qualityIndex = index; loadCurrent() } } } label: { Text(episode.qualities.indices.contains(qualityIndex) ? episode.qualities[qualityIndex].label : "Chất lượng").font(.system(size: 11, weight: .bold)).padding(10).background(.black.opacity(0.4), in: Capsule()) }.buttonStyle(.plain) }
                         Button { fit = fit == .fit ? .cover : fit == .cover ? .fill : .fit; scheduleHide() } label: { Image(systemName: "rectangle.on.rectangle").frame(width: 42, height: 42) }.buttonStyle(.plain)
                         if pipCoordinator.isSupported { Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start() } label: { Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter").frame(width: 42, height: 42) }.buttonStyle(.plain) }

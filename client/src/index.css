@@ -2618,3 +2618,88 @@ body {
 .tv-preview-spin { animation: tv-preview-spin .8s linear infinite; }
 @keyframes tv-preview-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) { .tv-preview-backdrop { padding: 10px; } .tv-preview-panel { padding: 15px; border-radius: 16px; } .tv-preview-header { flex-direction: column; } .tv-preview-actions { align-items: flex-start; flex-direction: column; gap: 9px; } }
+
+/* Video admin refresh: readable fields, cards and responsive layout */
+.admin-video-section { gap: 22px; }
+.admin-video-title { padding: 4px 2px 2px; }
+.admin-video-title h2 { font-size: clamp(24px, 3vw, 32px); letter-spacing: -.06em; }
+.admin-video-title p { font-size: 13px; }
+.admin-video-form { max-width: none; margin: 0; gap: 18px; padding: 24px; border-color: rgba(210,243,107,.18); border-radius: 20px; background: linear-gradient(145deg, rgba(255,255,255,.065), rgba(255,255,255,.025)); box-shadow: 0 18px 50px rgba(0,0,0,.18); }
+.admin-video-form label { display: grid; gap: 8px; color: rgba(255,255,255,.78); font-size: 13px; font-weight: 700; }
+.admin-video-form input, .admin-video-form textarea { width: 100%; box-sizing: border-box; min-height: 44px; padding: 11px 13px; border: 1px solid rgba(255,255,255,.15); border-radius: 10px; outline: none; color: #fff; background: rgba(0,0,0,.24); font: inherit; font-size: 13px; font-weight: 500; }
+.admin-video-form textarea { min-height: 78px; resize: vertical; }
+.admin-video-form input:focus, .admin-video-form textarea:focus { border-color: rgba(210,243,107,.7); box-shadow: 0 0 0 3px rgba(210,243,107,.1); }
+.admin-video-form input[type="file"] { min-height: 44px; padding: 8px; color: rgba(255,255,255,.65); }
+.admin-video-form input[type="checkbox"] { width: auto; min-height: auto; }
+.admin-video-form .admin-tv-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.admin-video-form .admin-tv-form-heading { padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,.09); }
+.admin-video-form .admin-tv-form-heading strong { font-size: 20px; }
+.admin-video-form .admin-tv-form-heading span { font-size: 12px; line-height: 1.5; }
+.admin-video-subtitle { padding: 3px 0 2px; }
+.admin-video-subtitle strong { font-size: 15px; }
+.admin-video-episode { gap: 14px; padding: 18px; border-color: rgba(210,243,107,.28); border-radius: 16px; background: rgba(5,8,7,.34); }
+.admin-video-quality { grid-template-columns: 125px minmax(0, 1fr) 34px; gap: 10px; }
+.admin-video-quality input { min-height: 42px; }
+.admin-video-form > .button-primary { min-height: 48px; justify-content: center; font-size: 13px; }
+.admin-video-list-head { padding-top: 10px; }
+.admin-video-list-head h3 { font-size: 16px; letter-spacing: -.02em; }
+.admin-video-list-head input { min-height: 42px; width: min(360px, 100%); font-size: 12px; }
+.admin-video-link-filters button { min-height: 38px; padding: 0 13px; font-size: 11px; }
+.admin-video-item { align-items: flex-start; padding: 20px; border-color: rgba(255,255,255,.13); background: rgba(255,255,255,.045); }
+.admin-video-item > div:first-child { min-width: 0; flex: 1; }
+.admin-video-item strong { font-size: 17px; }
+.admin-video-item span { font-size: 12px; line-height: 1.5; }
+.admin-video-item small { font-size: 11px; }
+.admin-video-link-row { grid-template-columns: 72px minmax(0, 1fr) auto; min-width: 0; padding: 5px 0; }
+.admin-video-link-row code { font-size: 10px; }
+@media (max-width: 680px) {
+  .admin-video-form { padding: 16px; }
+  .admin-video-form .admin-tv-grid { grid-template-columns: 1fr; }
+  .admin-video-form .admin-tv-form-heading, .admin-video-list-head { align-items: flex-start; flex-direction: column; }
+  .admin-video-quality { grid-template-columns: 1fr 34px; }
+  .admin-video-quality input:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .admin-video-item { flex-direction: column; }
+  .admin-video-item .admin-tv-actions { width: 100%; }
+  .admin-video-link-row { grid-template-columns: 64px minmax(0, 1fr); }
+  .admin-video-health { grid-column: 1 / -1; }
+}
+
+/* Ensure video fields remain visibly separated from their labels at compact viewport widths */
+.admin-video-form label { min-width: 0; line-height: 1.35; }
+.admin-video-form label > input, .admin-video-form label > textarea { display: block; width: 100%; min-width: 0; height: auto; }
+.admin-video-form label > input:not([type="checkbox"]):not([type="file"]) { min-height: 46px; }
+.admin-video-form label > textarea { min-height: 82px; }
+.admin-video-form .admin-tv-grid > label { min-width: 0; }
+.admin-video-form .admin-tv-grid > label > input { min-width: 0; }
+.admin-video-form input::placeholder, .admin-video-form textarea::placeholder { color: rgba(255,255,255,.42); opacity: 1; }
+
+/* Stronger field contrast for video form */
+.admin-video-form label { font-size: 14px; gap: 9px; }
+.admin-video-form label > input:not([type="checkbox"]), .admin-video-form label > textarea { background: #151a1d; border-color: rgba(210,243,107,.25); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
+.admin-video-form label > input:not([type="checkbox"]):focus, .admin-video-form label > textarea:focus { background: #19211e; border-color: var(--accent); }
+.admin-video-form .admin-tv-grid label > input[type="text"], .admin-video-form .admin-tv-grid label > input[type="url"] { background: #151a1d; }
+
+.admin-video-form label { display: flex !important; flex-direction: column; align-items: stretch; gap: 9px; }
+.admin-video-form label > input, .admin-video-form label > textarea { flex: 0 0 auto; }
+
+.admin-video-form label > span { display: block; width: 100%; color: rgba(255,255,255,.82); }
+.admin-video-form label > input:not([type="checkbox"]), .admin-video-form label > textarea { display: block !important; width: 100% !important; visibility: visible; opacity: 1; }
+.admin-video-form .admin-tv-check { flex-direction: row; align-items: center; }
+.admin-video-form .admin-tv-check > span { width: auto; }
+
+.admin-video-field { display: flex; flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; color: rgba(255,255,255,.82); font-size: 14px; font-weight: 700; line-height: 1.35; }
+.admin-video-field > span { display: block; width: 100%; }
+.admin-video-field > input, .admin-video-field > textarea { display: block !important; width: 100% !important; min-height: 46px; box-sizing: border-box; padding: 11px 13px; border: 1px solid rgba(210,243,107,.25); border-radius: 10px; outline: none; color: #fff; background: #151a1d; font: inherit; font-size: 13px; font-weight: 500; }
+.admin-video-field > textarea { min-height: 82px; resize: vertical; }
+.admin-video-field > input:focus, .admin-video-field > textarea:focus { border-color: var(--accent); background: #19211e; box-shadow: 0 0 0 3px rgba(210,243,107,.1); }
+.admin-video-field > input[type="file"] { min-height: 46px; padding: 8px; color: rgba(255,255,255,.72); }
+.admin-video-field small { color: #f0c674; font-size: 11px; font-weight: 500; }
+
+/* Independent scroll areas for long TV and video lists */
+.admin-tv-current-list-scroll, .admin-video-list-scroll { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; padding: 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 16px; background: rgba(0,0,0,.16); scrollbar-width: thin; scrollbar-color: rgba(210,243,107,.55) rgba(255,255,255,.06); }
+.admin-tv-current-list-scroll::-webkit-scrollbar, .admin-video-list-scroll::-webkit-scrollbar { width: 9px; }
+.admin-tv-current-list-scroll::-webkit-scrollbar-track, .admin-video-list-scroll::-webkit-scrollbar-track { border-radius: 9px; background: rgba(255,255,255,.045); }
+.admin-tv-current-list-scroll::-webkit-scrollbar-thumb, .admin-video-list-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 9px; background: rgba(210,243,107,.55); background-clip: padding-box; }
+.admin-tv-current-list-scroll .admin-tv-item, .admin-video-list-scroll .admin-video-item { margin-bottom: 10px; }
+.admin-tv-current-list-scroll .admin-tv-item:last-child, .admin-video-list-scroll .admin-video-item:last-child { margin-bottom: 0; }
+@media (max-width: 680px) { .admin-tv-current-list-scroll, .admin-video-list-scroll { max-height: 360px; padding: 8px; } }
