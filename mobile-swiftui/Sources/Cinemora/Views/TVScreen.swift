@@ -221,7 +221,7 @@ private final class TVPlaybackController: ObservableObject {
             configureAudioSession()
             if let optionsRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt,
                AVAudioSession.InterruptionOptions(rawValue: optionsRaw).contains(.shouldResume), !userPaused {
-                syncToLiveEdge()
+                resumeCurrentItems()
             }
         }
     }
@@ -229,7 +229,17 @@ private final class TVPlaybackController: ObservableObject {
     private func handleAudioRouteChange() {
         configureAudioSession()
         guard !userPaused, currentURL != nil else { return }
-        if hasSeparateAudio && (separateAudioPlayer.rate == 0 || player.rate == 0) { syncToLiveEdge() }
+        // Đổi công tắc chuông/im lặng chỉ là thay đổi audio route. Không dựng
+        // lại AVPlayer/HLS ở đây vì việc replace item có thể làm video đen.
+        if player.currentItem?.status != .failed {
+            resumeCurrentItems()
+        }
+    }
+
+    private func resumeCurrentItems() {
+        player.playImmediately(atRate: 1)
+        if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
+        isPlaying = true
     }
 
     private func recoverAfterForeground() {
@@ -315,7 +325,6 @@ struct TVScreen: View {
                             ForEach(store.tvStreams) { stream in
                                 TVStreamRow(stream: stream, isSelected: stream.id == selectedStream?.id) {
                                     selectedStreamID = stream.id
-                                    play(stream)
                                     isPlayerPresented = true
                                 }
                             }
@@ -359,7 +368,10 @@ struct TVScreen: View {
             if let selectedStream {
                 TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
             } else if let selectedVideoMovie {
-                CinemaPlayerScreen(movie: selectedVideoMovie, servers: selectedVideoMovie.availableServers, initialServer: 0, initialEpisode: selectedVideoEpisode, subtitleCustomizationEnabled: true)
+                // Tránh dựng TvVideo -> Movie hai lần trong cùng một lần mở
+                // fullscreen, vốn gây cảm giác đứng hình với video nhiều tập.
+                let servers = selectedVideoMovie.availableServers
+                CinemaPlayerScreen(movie: selectedVideoMovie, servers: servers, initialServer: 0, initialEpisode: selectedVideoEpisode, subtitleCustomizationEnabled: true)
             }
         }
     }
@@ -657,7 +669,14 @@ private struct TVFullscreenPlayer: View {
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .onAppear { forceLandscape() }
+        .onAppear {
+            if let url = stream.streamURL {
+                playback.load(url, audioURL: stream.audioURL)
+                playback.setVolume(volume)
+                playback.setMuted(isMuted)
+            }
+            forceLandscape()
+        }
         .onDisappear {
             if pipCoordinator.isActive { pipCoordinator.stop() }
             playback.shutdown()

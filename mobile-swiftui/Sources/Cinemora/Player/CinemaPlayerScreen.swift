@@ -24,9 +24,15 @@ final class PlaybackController: ObservableObject {
     private var suppressLoadingUntil = Date.distantPast
     private var overlayRecoveryTask: Task<Void, Never>?
     private var resumeAfterOverlay = false
+    private var notificationTokens: [NSObjectProtocol] = []
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
+        notificationTokens = [
+            NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.recoverAfterAudioRouteChange() }
+            }
+        ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             let requestID = MainActor.assumeIsolated { self?.activeRequestID }
             Task { @MainActor [weak self] in
@@ -59,10 +65,22 @@ final class PlaybackController: ObservableObject {
         itemObservation = nil
     }
 
+    deinit {
+        notificationTokens.forEach(NotificationCenter.default.removeObserver)
+    }
+
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
         try? session.setActive(true, options: [])
+    }
+    private func recoverAfterAudioRouteChange() {
+        guard activeURL != nil, isPlaying else { return }
+        configureAudioSession()
+        // Công tắc chuông/im lặng chỉ đổi audio route. Giữ nguyên item và
+        // vị trí hiện tại, không replace/reload để tránh màn hình đen.
+        player.play()
+        isPlaying = true
     }
     func load(_ episode: MovieEpisode, startAt: Double? = nil) {
         configureAudioSession()
@@ -555,14 +573,14 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onChange(of: playback.currentTime) { _, time in
-                subtitles.update(time: time, bilingual: subtitlePreferences.bilingual)
+                subtitles.update(time: time, bilingual: false)
                 handlePlaybackProgress()
             }
             .onChange(of: subtitlePreferences) { _, value in
                 guard subtitleCustomizationEnabled else { return }
                 store.playbackDefaults.subtitlePreferences = value
                 store.savePlaybackDefaults()
-                subtitles.update(time: playback.currentTime, bilingual: value.bilingual)
+                subtitles.update(time: playback.currentTime, bilingual: false)
             }
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
             .onChange(of: stopAtEpisodeEnabled) { _, enabled in
@@ -694,7 +712,7 @@ struct CinemaPlayerScreen: View {
 
     private var hasCurrentSubtitle: Bool {
         guard subtitleCustomizationEnabled, let episode else { return false }
-        return episode.subtitleURL != nil || episode.bilingualSubtitleURL != nil
+        return episode.subtitleURL != nil
     }
 
     private var visibleSettingsTabs: [SettingsTab] {
@@ -793,8 +811,10 @@ struct CinemaPlayerScreen: View {
             .font(subtitlePreferences.font)
             .foregroundStyle(subtitlePreferences.textColor)
             .multilineTextAlignment(subtitlePreferences.textAlignment)
-            .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
             .padding(.horizontal, 24)
+            .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+            .background(subtitlePreferences.backgroundEnabled ? subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
@@ -931,12 +951,14 @@ struct CinemaPlayerScreen: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(height: 92)
-                Text(subtitlePreferences.bilingual ? "Đây là phụ đề xem trước\nThis is a bilingual preview" : "Đây là phụ đề xem trước")
+                Text("Đây là phụ đề xem trước")
                     .font(subtitlePreferences.font)
                     .foregroundStyle(subtitlePreferences.textColor)
                     .multilineTextAlignment(subtitlePreferences.textAlignment)
-                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
                     .padding(.horizontal, 12)
+                    .padding(.vertical, subtitlePreferences.backgroundEnabled ? 4 : 0)
+                    .background(subtitlePreferences.backgroundEnabled ? subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
                     // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
                     // chiều với subtitle thật khi đổi khoảng cách phía dưới.
                     .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
@@ -1294,7 +1316,7 @@ struct CinemaPlayerScreen: View {
         guard let episode else { return }
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
-        subtitles.load(url: hasCurrentSubtitle ? episode.subtitleURL : nil, bilingualURL: hasCurrentSubtitle ? episode.bilingualSubtitleURL : nil)
+        subtitles.load(url: hasCurrentSubtitle ? episode.subtitleURL : nil, bilingualURL: nil)
         playback.load(episode, startAt: startAt)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
@@ -1307,7 +1329,6 @@ struct CinemaPlayerScreen: View {
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
         if subtitleCustomizationEnabled {
             var defaults = store.playbackDefaults.subtitlePreferences
-            defaults.bilingual = false
             subtitlePreferences = defaults
         } else {
             subtitlePreferences = SubtitlePreferences()
