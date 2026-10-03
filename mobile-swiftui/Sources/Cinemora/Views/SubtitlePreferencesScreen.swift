@@ -49,7 +49,6 @@ struct SubtitlePreferencesEditor: View {
             Toggle("", isOn: $preferences.backgroundEnabled).labelsHidden().tint(Color.cinemaAccent)
         }
         if preferences.backgroundEnabled {
-            colorRow(title: "Màu nền", value: preferences.backgroundColorHex) { backgroundColorButton }
             sliderRow(title: "Độ trong nền", value: $preferences.backgroundOpacity, range: 0.1...1, suffix: "")
         }
         resetButton
@@ -84,21 +83,6 @@ struct SubtitlePreferencesEditor: View {
             get: { Color(hex: preferences[keyPath: keyPath]) },
             set: { preferences[keyPath: keyPath] = $0.hexString }
         )
-    }
-
-    private var backgroundColorButton: some View {
-        Button {
-            let choices = ["#000000", "#20242A", "#102A43", "#3A2418", "#FFFFFF"]
-            let current = choices.firstIndex(of: preferences.backgroundColorHex) ?? 0
-            preferences.backgroundColorHex = choices[(current + 1) % choices.count]
-        } label: {
-            Circle()
-                .fill(preferences.backgroundColor)
-                .frame(width: 28, height: 28)
-                .overlay(Circle().strokeBorder(.white.opacity(0.65), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Đổi màu nền phụ đề")
     }
 
     private var resetButton: some View {
@@ -136,7 +120,7 @@ struct SubtitlePreferencesEditor: View {
         ZStack {
             if preferences.backgroundEnabled {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(preferences.backgroundColor.opacity(preferences.safeBackgroundOpacity))
+                    .fill(Color.black.opacity(preferences.safeBackgroundOpacity))
             }
             Text("Đây là phụ đề xem trước")
                 .font(preferences.font)

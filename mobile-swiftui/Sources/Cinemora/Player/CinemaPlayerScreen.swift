@@ -812,7 +812,7 @@ struct CinemaPlayerScreen: View {
         ZStack {
             if subtitlePreferences.backgroundEnabled {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.safeBackgroundOpacity))
+                    .fill(Color.black.opacity(subtitlePreferences.safeBackgroundOpacity))
             }
             Text(text)
                 .font(subtitlePreferences.font)
@@ -961,7 +961,7 @@ struct CinemaPlayerScreen: View {
                 ZStack {
                     if subtitlePreferences.backgroundEnabled {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.safeBackgroundOpacity))
+                            .fill(Color.black.opacity(subtitlePreferences.safeBackgroundOpacity))
                     }
                     Text("Đây là phụ đề xem trước")
                         .font(subtitlePreferences.font)
