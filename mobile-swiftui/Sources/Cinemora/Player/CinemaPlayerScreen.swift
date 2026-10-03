@@ -84,6 +84,12 @@ final class PlaybackController: ObservableObject {
         activeURL = url
         isLoading = true
         let item = AVPlayerItem(url: url)
+        // Video đã đăng render subtitle bằng SubtitleController bên dưới.
+        // Không cho AVPlayer tự chọn legible track, nếu không sẽ xuất hiện
+        // một subtitle hệ thống phía dưới và một subtitle tùy chỉnh phía trên.
+        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+            item.select(nil, in: group)
+        }
         item.preferredForwardBufferDuration = 8
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -91,6 +97,9 @@ final class PlaybackController: ObservableObject {
                 guard self.activeRequestID == requestID else { return }
                 switch item.status {
                 case .readyToPlay:
+                    if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+                        item.select(nil, in: group)
+                    }
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                     if let startAt, startAt > 0, startAt.isFinite {
                         let duration = item.duration.seconds
@@ -344,6 +353,7 @@ struct CinemaPlayerScreen: View {
     @State private var controlsLocked = false
     @State private var lockIndicatorVisible = true
     @State private var settingsOpen = false
+    @State private var settingsAdvanced = false
     @State private var settingsTab: SettingsTab = .subtitle
     @State private var stopTimer: StopTimer = .off
     @State private var stopAtEpisodeEnabled = false
@@ -525,7 +535,7 @@ struct CinemaPlayerScreen: View {
                 }
                 if settingsOpen {
                     settingsOverlay
-                        .transition(.opacity)
+                        .transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)))
                         .zIndex(13)
                 }
             }
@@ -538,6 +548,7 @@ struct CinemaPlayerScreen: View {
             )
             .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
             .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: settingsOpen)
             .onChange(of: episodeIndex) { _, _ in loadCurrentEpisode() }
             .onChange(of: serverIndex) { _, _ in
                 if episodeIndex != 0 { episodeIndex = 0 }
@@ -633,6 +644,7 @@ struct CinemaPlayerScreen: View {
                     if !visibleSettingsTabs.contains(settingsTab) {
                         settingsTab = visibleSettingsTabs[0]
                     }
+                    settingsAdvanced = false
                     settingsOpen.toggle()
                     quickMenu = nil
                     volumePopoverOpen = false
@@ -776,8 +788,7 @@ struct CinemaPlayerScreen: View {
             .foregroundStyle(subtitlePreferences.textColor)
             .multilineTextAlignment(subtitlePreferences.textAlignment)
             .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
-            .padding(.horizontal, 24).padding(.vertical, 6)
-            .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 7))
+            .padding(.horizontal, 24)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
@@ -813,9 +824,30 @@ struct CinemaPlayerScreen: View {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(width: 28, height: 28)
                 }.buttonStyle(.plain).background(.white.opacity(0.07), in: Circle()).accessibilityLabel("Đóng cài đặt")
             }
-            settingsTabs
-            Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
-            settingsTabContent
+            Text("QUICK CONTROLS")
+                .font(.system(size: 9, weight: .black, design: .rounded))
+                .tracking(1.1)
+                .foregroundStyle(Color.cinemaAccent)
+            quickSettings
+            Button {
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) { settingsAdvanced.toggle() }
+            } label: {
+                HStack {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Advanced Settings").font(.system(size: 12, weight: .bold, design: .rounded))
+                    Spacer()
+                    Image(systemName: settingsAdvanced ? "chevron.up" : "chevron.down")
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11).frame(height: 42)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            if settingsAdvanced {
+                settingsTabs
+                Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+                settingsTabContent
+            }
         }
         .padding(18)
         .frame(width: width, alignment: .topLeading)
@@ -826,6 +858,23 @@ struct CinemaPlayerScreen: View {
         .shadow(color: .black.opacity(0.48), radius: 28, x: -8, y: 12)
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onTapGesture { }
+    }
+
+    private var quickSettings: some View {
+        VStack(spacing: 7) {
+            Toggle(isOn: $subtitlePreferences.enabled) {
+                settingsLabel(icon: "captions.bubble.fill", title: "Phụ đề", detail: subtitlePreferences.enabled ? "Đang bật · chạm Advanced để chỉnh" : "Đang tắt")
+            }.tint(Color.cinemaAccent)
+            Toggle(isOn: $autoAdvanceEpisodes) {
+                settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
+            }.tint(Color.cinemaAccent)
+            Toggle(isOn: $stopAtEpisodeEnabled) {
+                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Giữ lại lựa chọn chi tiết trong Advanced")
+            }.tint(Color.cinemaAccent)
+        }
+        .padding(11)
+        .background(Color.cinemaAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.22), lineWidth: 0.8))
     }
 
     private var settingsTabs: some View {
@@ -858,7 +907,10 @@ struct CinemaPlayerScreen: View {
             }
         case .subtitle:
             if subtitleCustomizationEnabled {
-                ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2) }.frame(minHeight: 245, maxHeight: 360, alignment: .top)
+                ScrollView(.vertical, showsIndicators: false) {
+                    subtitlePreview
+                    SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2)
+                }.frame(minHeight: 245, maxHeight: 390, alignment: .top)
             } else {
                 settingsEmpty(icon: "captions.bubble", text: "Tập này chưa bật tùy chỉnh phụ đề.")
             }
@@ -900,6 +952,32 @@ struct CinemaPlayerScreen: View {
                 if stopAtEpisodeEnabled { episodeStopSelector }
                 Toggle(isOn: $autoAdvanceEpisodes) { settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc") }.tint(Color.cinemaAccent)
             }
+        }
+    }
+
+    private var subtitlePreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("XEM TRƯỚC REALTIME")
+                .font(.system(size: 8, weight: .black, design: .rounded))
+                .tracking(1)
+                .foregroundStyle(Color.cinemaAccent)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 92)
+                Text(subtitlePreferences.bilingual ? "Đây là phụ đề xem trước\nThis is a bilingual preview" : "Đây là phụ đề xem trước")
+                    .font(subtitlePreferences.font)
+                    .foregroundStyle(subtitlePreferences.textColor)
+                    .multilineTextAlignment(subtitlePreferences.textAlignment)
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
 
