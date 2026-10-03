@@ -298,6 +298,7 @@ struct CinemaPlayerScreen: View {
     let initialServer: Int
     let initialEpisode: Int
     let resumeTime: Double?
+    let subtitleCustomizationEnabled: Bool
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -321,6 +322,7 @@ struct CinemaPlayerScreen: View {
     @State private var controlsLocked = false
     @State private var lockIndicatorVisible = true
     @State private var settingsOpen = false
+    @State private var settingsTab: SettingsTab = .display
     @State private var stopTimer: StopTimer = .off
     @State private var stopAtEpisodeEnabled = false
     @State private var stopAtEpisodeID: String?
@@ -343,6 +345,23 @@ struct CinemaPlayerScreen: View {
     private enum PickerKind { case episodes, sources }
     private enum AdjustmentKind: Equatable { case brightness, volume }
     private enum QuickMenu: Equatable { case videoFit, playbackRate }
+    private enum SettingsTab: String, CaseIterable, Identifiable {
+        case audio = "Âm thanh"
+        case subtitle = "Phụ đề"
+        case display = "Hiển thị"
+        case speed = "Tốc độ"
+        case general = "Chung"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .audio: return "speaker.wave.2.fill"
+            case .subtitle: return "captions.bubble.fill"
+            case .display: return "textformat.size"
+            case .speed: return "speedometer"
+            case .general: return "slider.horizontal.3"
+            }
+        }
+    }
     private enum StopTimer: String, CaseIterable, Identifiable {
         case off = "Tắt"
         case fifteen = "15 phút"
@@ -382,12 +401,13 @@ struct CinemaPlayerScreen: View {
             .lowercased()
     }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
         self.resumeTime = resumeTime
+        self.subtitleCustomizationEnabled = subtitleCustomizationEnabled
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
         _serverIndex = State(initialValue: server)
@@ -400,7 +420,7 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    if subtitlePreferences.enabled, let subtitle = subtitles.currentText {
+                    if subtitleCustomizationEnabled, subtitlePreferences.enabled, let subtitle = subtitles.currentText {
                         VStack { Spacer(); subtitleText(subtitle).padding(.bottom, proxy.safeAreaInsets.bottom + subtitlePreferences.bottomSpacing) }
                             .allowsHitTesting(false)
                     }
@@ -502,6 +522,7 @@ struct CinemaPlayerScreen: View {
                 handlePlaybackProgress()
             }
             .onChange(of: subtitlePreferences) { _, value in
+                guard subtitleCustomizationEnabled else { return }
                 store.playbackDefaults.subtitlePreferences = value
                 store.savePlaybackDefaults()
                 subtitles.update(time: playback.currentTime, bilingual: value.bilingual)
@@ -728,56 +749,96 @@ struct CinemaPlayerScreen: View {
     }
 
     private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("CÀI ĐẶT PHÁT VIDEO").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
-                    Text("Xem gọn hơn").font(.system(size: 16, weight: .black, design: .rounded)).foregroundStyle(.white)
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Image(systemName: "gearshape.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
+                Text("Cài đặt").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(.white)
                 Spacer()
                 Button { withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }; scheduleHide() } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 25, height: 25)
-                }.buttonStyle(.plain).accessibilityLabel("Đóng cài đặt")
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(width: 28, height: 28)
+                }.buttonStyle(.plain).background(.white.opacity(0.07), in: Circle()).accessibilityLabel("Đóng cài đặt")
             }
-            ScrollView(.vertical, showsIndicators: false) {
-                SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true)
-            }
-            .frame(maxHeight: 340)
-            settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") {
-                Picker("Tự dừng phát", selection: $stopTimer) {
-                    ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) }
-                }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent)
-            }
-            if let stopTimerRemaining {
-                HStack(spacing: 7) {
-                    Image(systemName: "timer").foregroundStyle(Color.cinemaAccent)
-                    Text("Tự dừng sau \(formatCountdown(stopTimerRemaining))")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white)
-                    Spacer()
-                }
-                .padding(.leading, 32)
-            } else if stopTimer == .endOfEpisode {
-                Text("Video sẽ dừng khi hết tập hiện tại.")
-                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).padding(.leading, 32)
-            }
-            Toggle(isOn: $stopAtEpisodeEnabled) {
-                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: autoAdvanceEpisodes ? "Tự chuyển đến tập mục tiêu rồi dừng" : "Dừng khi xem xong tập mục tiêu")
-            }.tint(Color.cinemaAccent)
-            if stopAtEpisodeEnabled {
-                episodeStopSelector
-            }
-            Toggle(isOn: $autoAdvanceEpisodes) {
-                settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
-            }.tint(Color.cinemaAccent)
-            Text("iOS không cho ứng dụng tự tắt nguồn thiết bị. Các lựa chọn trên sẽ tự dừng phát video an toàn.")
-                .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.48)).fixedSize(horizontal: false, vertical: true)
+            settingsTabs
+            Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+            settingsTabContent
         }
-        .padding(14)
-        .frame(width: 315)
-        .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
+        .padding(13)
+        .frame(width: 350)
+        .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.42), radius: 22, y: 10)
         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+    }
+
+    private var settingsTabs: some View {
+        HStack(spacing: 4) {
+            ForEach(SettingsTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { settingsTab = tab }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon).font(.system(size: 11, weight: .bold))
+                        Text(tab.rawValue).font(.system(size: 8, weight: .bold, design: .rounded)).lineLimit(1)
+                    }
+                    .foregroundStyle(settingsTab == tab ? Color.cinemaInk : .white.opacity(0.6))
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .background(settingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }.buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var settingsTabContent: some View {
+        switch settingsTab {
+        case .audio:
+            settingsRow(icon: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", title: "Âm lượng", detail: playback.isMuted ? "Đang tắt tiếng" : "\(Int(volume * 100))%") {
+                HStack(spacing: 7) {
+                    Slider(value: $volume, in: 0...1).tint(Color.cinemaAccent).frame(width: 130).onChange(of: volume) { _, value in playback.setVolume(value) }
+                    Button { playback.toggleMute() } label: { Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(Color.cinemaAccent) }.buttonStyle(.plain)
+                }
+            }
+        case .subtitle:
+            if subtitleCustomizationEnabled {
+                ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 265)
+            } else {
+                settingsEmpty(icon: "captions.bubble", text: "Tập này chưa bật tùy chỉnh phụ đề.")
+            }
+        case .display:
+            if subtitleCustomizationEnabled {
+                ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 265)
+            } else {
+                settingsEmpty(icon: "textformat.size", text: "Tùy chỉnh phụ đề sẽ xuất hiện khi nguồn phát hỗ trợ phụ đề.")
+            }
+        case .speed:
+            VStack(alignment: .leading, spacing: 8) {
+                settingsLabel(icon: "speedometer", title: "Tốc độ phát", detail: "Đang chọn \(playbackRateLabel)")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], spacing: 6) {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button { playback.setPlaybackRate(Float(rate)); scheduleHide() } label: {
+                            Text(rate == 1 ? "Bình thường" : "\(formatRate(Float(rate)))x").font(.system(size: 10, weight: .bold)).foregroundStyle(playback.playbackRate == Float(rate) ? Color.cinemaInk : .white.opacity(0.78)).frame(maxWidth: .infinity).frame(height: 30).background(playback.playbackRate == Float(rate) ? Color.cinemaAccent : .white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+        case .general:
+            VStack(alignment: .leading, spacing: 10) {
+                settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") { Picker("Tự dừng phát", selection: $stopTimer) { ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) } }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent) }
+                if let stopTimerRemaining {
+                    HStack(spacing: 7) { Image(systemName: "timer").foregroundStyle(Color.cinemaAccent); Text("Tự dừng sau \(formatCountdown(stopTimerRemaining))").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white); Spacer() }
+                }
+                Toggle(isOn: $stopAtEpisodeEnabled) {
+                    settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Tự chuyển đến tập mục tiêu rồi dừng")
+                }.tint(Color.cinemaAccent)
+                if stopAtEpisodeEnabled { episodeStopSelector }
+                Toggle(isOn: $autoAdvanceEpisodes) { settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc") }.tint(Color.cinemaAccent)
+            }
+        }
+    }
+
+    private func settingsEmpty(icon: String, text: String) -> some View {
+        HStack(spacing: 9) { Image(systemName: icon).foregroundStyle(Color.cinemaAccent); Text(text).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.58)).fixedSize(horizontal: false, vertical: true) }
+            .padding(.vertical, 10)
     }
 
     private var episodeStopSelector: some View {
@@ -1120,7 +1181,7 @@ struct CinemaPlayerScreen: View {
         guard let episode else { return }
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
-        subtitles.load(url: episode.subtitleURL, bilingualURL: episode.bilingualSubtitleURL)
+        subtitles.load(url: subtitleCustomizationEnabled ? episode.subtitleURL : nil, bilingualURL: subtitleCustomizationEnabled ? episode.bilingualSubtitleURL : nil)
         playback.load(episode, startAt: startAt)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
@@ -1131,7 +1192,7 @@ struct CinemaPlayerScreen: View {
         hasAppliedPlaybackDefaults = true
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
-        subtitlePreferences = store.playbackDefaults.subtitlePreferences
+        subtitlePreferences = subtitleCustomizationEnabled ? store.playbackDefaults.subtitlePreferences : SubtitlePreferences()
         stopTimer = StopTimer(rawValue: store.playbackDefaults.stopTimer) ?? .off
     }
 

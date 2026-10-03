@@ -341,7 +341,7 @@ struct TVScreen: View {
             if let selectedStream {
                 TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
             } else if let selectedVideoMovie {
-                CinemaPlayerScreen(movie: selectedVideoMovie, servers: selectedVideoMovie.availableServers, initialServer: 0, initialEpisode: selectedVideoEpisode)
+                CinemaPlayerScreen(movie: selectedVideoMovie, servers: selectedVideoMovie.availableServers, initialServer: 0, initialEpisode: selectedVideoEpisode, subtitleCustomizationEnabled: true)
             }
         }
     }
@@ -374,8 +374,8 @@ private extension TvVideo {
                     filename: "",
                     embedUrl: nil,
                     streamUrl: streamURL.absoluteString,
-                    subtitleUrl: quality.subtitleURL?.absoluteString ?? tvEpisode.subtitleURL?.absoluteString,
-                    bilingualSubtitleUrl: quality.bilingualSubtitleURL?.absoluteString ?? tvEpisode.bilingualSubtitleURL?.absoluteString
+                    subtitleUrl: quality.subtitleURL?.absoluteString,
+                    bilingualSubtitleUrl: quality.bilingualSubtitleURL?.absoluteString
                 )
             }
             guard !qualityEpisodes.isEmpty else { return nil }
