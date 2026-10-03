@@ -353,7 +353,6 @@ struct CinemaPlayerScreen: View {
     @State private var controlsLocked = false
     @State private var lockIndicatorVisible = true
     @State private var settingsOpen = false
-    @State private var settingsAdvanced = false
     @State private var settingsTab: SettingsTab = .subtitle
     @State private var stopTimer: StopTimer = .off
     @State private var stopAtEpisodeEnabled = false
@@ -452,7 +451,7 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    if subtitleCustomizationEnabled, subtitlePreferences.enabled, let subtitle = subtitles.currentText {
+                    if hasCurrentSubtitle, subtitlePreferences.enabled, let subtitle = subtitles.currentText {
                         VStack { Spacer(); subtitleText(subtitle).padding(.bottom, proxy.safeAreaInsets.bottom + subtitlePreferences.bottomSpacing) }
                             .allowsHitTesting(false)
                     }
@@ -644,7 +643,6 @@ struct CinemaPlayerScreen: View {
                     if !visibleSettingsTabs.contains(settingsTab) {
                         settingsTab = visibleSettingsTabs[0]
                     }
-                    settingsAdvanced = false
                     settingsOpen.toggle()
                     quickMenu = nil
                     volumePopoverOpen = false
@@ -694,11 +692,19 @@ struct CinemaPlayerScreen: View {
         playback.playbackRate == 1 ? "1x" : "\(formatRate(playback.playbackRate))x"
     }
 
+    private var hasCurrentSubtitle: Bool {
+        guard subtitleCustomizationEnabled, let episode else { return false }
+        return episode.subtitleURL != nil || episode.bilingualSubtitleURL != nil
+    }
+
     private var visibleSettingsTabs: [SettingsTab] {
-        // TV videos are the only player that exposes subtitle customization.
-        // Audio, display and speed already have dedicated controls outside
-        // this drawer, so they should not be duplicated in Settings.
-        subtitleCustomizationEnabled ? [.subtitle, .general] : [.general]
+        // Chỉ cho chỉnh phụ đề khi tập hiện tại thật sự có subtitle đã đăng.
+        // Các tùy chọn phát còn lại nằm trong Advanced > Chung để không bị lặp.
+        hasCurrentSubtitle ? [.subtitle, .general] : [.general]
+    }
+
+    private var effectiveSettingsTab: SettingsTab {
+        visibleSettingsTabs.contains(settingsTab) ? settingsTab : .general
     }
 
     private func formatRate(_ rate: Float) -> String {
@@ -824,30 +830,9 @@ struct CinemaPlayerScreen: View {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(width: 28, height: 28)
                 }.buttonStyle(.plain).background(.white.opacity(0.07), in: Circle()).accessibilityLabel("Đóng cài đặt")
             }
-            Text("QUICK CONTROLS")
-                .font(.system(size: 9, weight: .black, design: .rounded))
-                .tracking(1.1)
-                .foregroundStyle(Color.cinemaAccent)
-            quickSettings
-            Button {
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) { settingsAdvanced.toggle() }
-            } label: {
-                HStack {
-                    Image(systemName: "slider.horizontal.3")
-                    Text("Advanced Settings").font(.system(size: 12, weight: .bold, design: .rounded))
-                    Spacer()
-                    Image(systemName: settingsAdvanced ? "chevron.up" : "chevron.down")
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 11).frame(height: 42)
-                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            if settingsAdvanced {
-                settingsTabs
-                Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
-                settingsTabContent
-            }
+            settingsTabs
+            Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+            settingsTabContent
         }
         .padding(18)
         .frame(width: width, alignment: .topLeading)
@@ -860,23 +845,6 @@ struct CinemaPlayerScreen: View {
         .onTapGesture { }
     }
 
-    private var quickSettings: some View {
-        VStack(spacing: 7) {
-            Toggle(isOn: $subtitlePreferences.enabled) {
-                settingsLabel(icon: "captions.bubble.fill", title: "Phụ đề", detail: subtitlePreferences.enabled ? "Đang bật · chạm Advanced để chỉnh" : "Đang tắt")
-            }.tint(Color.cinemaAccent)
-            Toggle(isOn: $autoAdvanceEpisodes) {
-                settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
-            }.tint(Color.cinemaAccent)
-            Toggle(isOn: $stopAtEpisodeEnabled) {
-                settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Giữ lại lựa chọn chi tiết trong Advanced")
-            }.tint(Color.cinemaAccent)
-        }
-        .padding(11)
-        .background(Color.cinemaAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.22), lineWidth: 0.8))
-    }
-
     private var settingsTabs: some View {
         HStack(spacing: 4) {
             ForEach(visibleSettingsTabs) { tab in
@@ -887,9 +855,9 @@ struct CinemaPlayerScreen: View {
                         Image(systemName: tab.icon).font(.system(size: 11, weight: .bold))
                         Text(tab.rawValue).font(.system(size: 8, weight: .bold, design: .rounded)).lineLimit(1)
                     }
-                    .foregroundStyle(settingsTab == tab ? Color.cinemaInk : .white.opacity(0.6))
+                    .foregroundStyle(effectiveSettingsTab == tab ? Color.cinemaInk : .white.opacity(0.6))
                     .frame(maxWidth: .infinity).frame(height: 42)
-                    .background(settingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .background(effectiveSettingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }.buttonStyle(.plain)
             }
         }
@@ -897,7 +865,7 @@ struct CinemaPlayerScreen: View {
 
     @ViewBuilder
     private var settingsTabContent: some View {
-        switch settingsTab {
+        switch effectiveSettingsTab {
         case .audio:
             settingsRow(icon: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", title: "Âm lượng", detail: playback.isMuted ? "Đang tắt tiếng" : "\(Int(volume * 100))%") {
                 HStack(spacing: 7) {
@@ -906,13 +874,11 @@ struct CinemaPlayerScreen: View {
                 }
             }
         case .subtitle:
-            if subtitleCustomizationEnabled {
+            if hasCurrentSubtitle {
                 ScrollView(.vertical, showsIndicators: false) {
                     subtitlePreview
                     SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2)
                 }.frame(minHeight: 245, maxHeight: 390, alignment: .top)
-            } else {
-                settingsEmpty(icon: "captions.bubble", text: "Tập này chưa bật tùy chỉnh phụ đề.")
             }
         case .display:
             VStack(alignment: .leading, spacing: 10) {
@@ -1326,7 +1292,7 @@ struct CinemaPlayerScreen: View {
         guard let episode else { return }
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
-        subtitles.load(url: subtitleCustomizationEnabled ? episode.subtitleURL : nil, bilingualURL: subtitleCustomizationEnabled ? episode.bilingualSubtitleURL : nil)
+        subtitles.load(url: hasCurrentSubtitle ? episode.subtitleURL : nil, bilingualURL: hasCurrentSubtitle ? episode.bilingualSubtitleURL : nil)
         playback.load(episode, startAt: startAt)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
