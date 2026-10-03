@@ -65,6 +65,10 @@ private final class TVPlaybackController: ObservableObject {
         currentTime = 0
         player.isMuted = hasSeparateAudio
         let item = AVPlayerItem(url: url)
+        // Video đã đăng dùng SubtitleController để render một track duy nhất.
+        // Tắt legible track tích hợp của AVPlayer để subtitle trong stream
+        // không xuất hiện chồng lên subtitle do người dùng tùy chỉnh.
+        disableEmbeddedSubtitles(in: item)
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -83,6 +87,12 @@ private final class TVPlaybackController: ObservableObject {
         player.playImmediately(atRate: 1)
         if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
         isPlaying = true
+    }
+
+    private func disableEmbeddedSubtitles(in item: AVPlayerItem) {
+        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+            item.select(nil, in: group)
+        }
     }
 
     /// Rebuild both live items, then seek each one to its own live edge. This is
@@ -735,15 +745,17 @@ private struct TVVideoFullscreenPlayer: View {
             Color.black.ignoresSafeArea()
             TVNativeVideoSurface(player: playback.player, fit: fit, pipCoordinator: pipCoordinator).ignoresSafeArea()
             if subtitlePreferences.enabled, let text = subtitles.currentText {
-                VStack { Spacer(); Text(text).font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 24).padding(.vertical, 6).background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 7)).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).padding(.bottom, 36) }.allowsHitTesting(false)
+                VStack { Spacer(); Text(text).font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 24).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth).padding(.bottom, 36) }.allowsHitTesting(false)
             }
             Color.clear.contentShape(Rectangle()).onTapGesture { guard !locked, !settingsOpen else { return }; withAnimation { controlsVisible.toggle() }; if controlsVisible { scheduleHide() } }
             if controlsVisible && !settingsOpen { playerControls }
             if locked { VStack { Spacer(); HStack { Spacer(); Button { locked = false; controlsVisible = true; scheduleHide() } label: { Image(systemName: "lock.fill").frame(width: 48, height: 48).background(.black.opacity(0.48), in: Circle()) }.buttonStyle(.plain).foregroundStyle(.white).padding(22) } }.transition(.opacity) }
-            if settingsOpen { settingsOverlay.transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(10) }
+            if settingsOpen { settingsOverlay.transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))).zIndex(10) }
         }
         .preferredColorScheme(.dark).statusBarHidden(true).persistentSystemOverlays(.hidden)
         .onAppear { loadCurrent(); scheduleHide() }
+        .animation(.spring(response: 0.42, dampingFraction: 0.84), value: settingsOpen)
+        .animation(.easeOut(duration: 0.24), value: advancedSettings)
         .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown() }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
@@ -762,7 +774,7 @@ private struct TVVideoFullscreenPlayer: View {
                 Button { isPresented = false } label: { Image(systemName: "chevron.down").frame(width: 42, height: 42) }.buttonStyle(.plain)
                 VStack(alignment: .leading, spacing: 3) { Text(video.name).font(.system(size: 13, weight: .bold)); Text(episode?.name ?? "Video").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)) }.lineLimit(1)
                 Spacer()
-                Button { withAnimation { settingsOpen = true }; hideTask?.cancel() } label: { Image(systemName: "gearshape.fill").frame(width: 42, height: 42) }.buttonStyle(.plain).foregroundStyle(Color.cinemaInk).background(Color.cinemaAccent, in: Circle()).accessibilityLabel("Cài đặt video")
+                Button { withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) { settingsOpen = true; advancedSettings = false }; hideTask?.cancel() } label: { Image(systemName: "gearshape.fill").frame(width: 42, height: 42) }.buttonStyle(.plain).foregroundStyle(Color.cinemaInk).background(Color.cinemaAccent, in: Circle()).accessibilityLabel("Cài đặt video")
                 Button { locked = true; controlsVisible = false } label: { Image(systemName: "lock.open").frame(width: 42, height: 42) }.buttonStyle(.plain)
             }.foregroundStyle(.white).padding(.horizontal, 14).padding(.top, 12)
             Spacer()
@@ -790,11 +802,26 @@ private struct TVVideoFullscreenPlayer: View {
                     if stopAtEpisode { Picker("Tập dừng", selection: $stopAtEpisodeIndex) { ForEach(video.episodes.indices, id: \.self) { index in Text(video.episodes[index].name).tag(index) } }.pickerStyle(.menu).tint(Color.cinemaAccent) }
                     HStack { Label("Tự dừng phát", systemImage: "moon.zzz.fill"); Spacer(); Picker("Tự dừng", selection: $stopTimer) { ForEach(TVStopTimer.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent) }
                     Divider().overlay(.white.opacity(0.15))
-                    Button { withAnimation { advancedSettings.toggle() } } label: { HStack { Label("Advanced Settings", systemImage: "slider.horizontal.3"); Spacer(); Image(systemName: advancedSettings ? "chevron.up" : "chevron.down") } }.buttonStyle(.plain).foregroundStyle(.white)
-                    if advancedSettings { ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 330) }
+                    Button { withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) { advancedSettings.toggle() } } label: { HStack { Label("Advanced Settings", systemImage: "slider.horizontal.3"); Spacer(); Image(systemName: advancedSettings ? "chevron.up" : "chevron.down") } }.buttonStyle(.plain).foregroundStyle(.white)
+                    if advancedSettings {
+                        subtitlePreview
+                        ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 330)
+                    }
                 }.foregroundStyle(.white).padding(18).frame(width: min(380, max(300, proxy.size.width - 24)), alignment: .topLeading).frame(maxHeight: .infinity, alignment: .topLeading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous)).background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8)).shadow(color: .black.opacity(0.45), radius: 28, x: -8, y: 12).padding(.top, max(14, proxy.safeAreaInsets.top + 8)).padding(.trailing, max(14, proxy.safeAreaInsets.trailing + 10)).padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 8))
             }
         }.ignoresSafeArea()
+    }
+
+    private var subtitlePreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("XEM TRƯỚC REALTIME").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(Color.cinemaAccent)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(height: 92)
+                Text(subtitlePreferences.bilingual ? "Đây là phụ đề xem trước\nThis is a bilingual preview" : "Đây là phụ đề xem trước")
+                    .font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 12).padding(.bottom, 10)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+            }.clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 
     private func loadCurrent() {

@@ -203,8 +203,13 @@ final class SubtitleController: ObservableObject {
             async let primaryText = Self.fetchText(url)
             async let secondaryText = Self.fetchText(distinctBilingualURL)
             guard !Task.isCancelled, let self else { return }
-            if let text = await primaryText { self.cues = Self.parse(text) }
-            if let text = await secondaryText { self.bilingualCues = Self.parse(text) }
+            let primary = await primaryText
+            let secondary = await secondaryText
+            if let text = primary { self.cues = Self.parse(text) }
+            if let text = secondary,
+               Self.normalizedTrack(text) != Self.normalizedTrack(primary ?? "") {
+                self.bilingualCues = Self.parse(text)
+            }
         }
     }
     private static func fetchText(_ url: URL?) async -> String? {
@@ -229,6 +234,12 @@ final class SubtitleController: ObservableObject {
         let combined = lines.joined(separator: "\n")
         currentText = combined.isEmpty ? nil : combined
     }
+    private static func normalizedTrack(_ source: String) -> String {
+        source.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
     private static func parse(_ source: String) -> [SubtitleCue] {
         let blocks = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n")
         return blocks.compactMap { block in
