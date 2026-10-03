@@ -668,13 +668,13 @@ struct CinemaPlayerScreen: View {
             hideTask?.cancel()
         } label: {
             VStack(spacing: 2) {
-                Image(systemName: icon).font(.system(size: 18, weight: .bold))
-                Text(value).font(.system(size: 12, weight: .black, design: .rounded)).lineLimit(1)
+                Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                Text(value).font(.system(size: 9, weight: .black, design: .rounded)).lineLimit(1)
             }
             .foregroundStyle(quickMenu == menu ? Color.cinemaInk : .white)
-            .frame(width: 68, height: 54)
-            .background(quickMenu == menu ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(quickMenu == menu ? 0.35 : 0.14), lineWidth: 0.8))
+            .frame(width: 52, height: 42)
+            .background(quickMenu == menu ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(quickMenu == menu ? 0.35 : 0.14), lineWidth: 0.8))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -752,19 +752,19 @@ struct CinemaPlayerScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 9) {
                 Image(systemName: "gearshape.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
-                Text("Cài đặt").font(.system(size: 23, weight: .black, design: .rounded)).foregroundStyle(.white)
+                Text("Cài đặt").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(.white)
                 Spacer()
                 Button { withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }; scheduleHide() } label: {
-                    Image(systemName: "xmark").font(.system(size: 14, weight: .bold)).foregroundStyle(.white.opacity(0.72)).frame(width: 40, height: 40)
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(width: 28, height: 28)
                 }.buttonStyle(.plain).background(.white.opacity(0.07), in: Circle()).accessibilityLabel("Đóng cài đặt")
             }
             settingsTabs
             Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
             settingsTabContent
         }
-        .padding(20)
-        .frame(width: 460, alignment: .topLeading)
-        .frame(maxHeight: 500, alignment: .top)
+        .padding(13)
+        .frame(width: 350, alignment: .topLeading)
+        .frame(minHeight: 335, maxHeight: 500, alignment: .top)
         .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.42), radius: 22, y: 10)
@@ -777,13 +777,13 @@ struct CinemaPlayerScreen: View {
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) { settingsTab = tab }
                 } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: tab.icon).font(.system(size: 17, weight: .bold))
-                        Text(tab.rawValue).font(.system(size: 11, weight: .bold, design: .rounded)).lineLimit(1)
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.icon).font(.system(size: 11, weight: .bold))
+                        Text(tab.rawValue).font(.system(size: 8, weight: .bold, design: .rounded)).lineLimit(1)
                     }
                     .foregroundStyle(settingsTab == tab ? Color.cinemaInk : .white.opacity(0.6))
-                    .frame(maxWidth: .infinity).frame(height: 64)
-                    .background(settingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .background(settingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }.buttonStyle(.plain)
             }
         }
@@ -801,7 +801,7 @@ struct CinemaPlayerScreen: View {
             }
         case .subtitle:
             if subtitleCustomizationEnabled {
-                ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 360)
+                ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2) }.frame(minHeight: 245, maxHeight: 360, alignment: .top)
             } else {
                 settingsEmpty(icon: "captions.bubble", text: "Tập này chưa bật tùy chỉnh phụ đề.")
             }
@@ -847,16 +847,16 @@ struct CinemaPlayerScreen: View {
     }
 
     private func settingsEmpty(icon: String, text: String) -> some View {
-        HStack(spacing: 11) { Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(Color.cinemaAccent); Text(text).font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.62)).fixedSize(horizontal: false, vertical: true) }
-            .padding(.vertical, 16)
+        HStack(spacing: 9) { Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.cinemaAccent); Text(text).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.58)).fixedSize(horizontal: false, vertical: true) }
+            .padding(.vertical, 10)
     }
 
     private var episodeStopSelector: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("CHỌN TẬP DỪNG").font(.system(size: 11, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.52)).padding(.leading, 4)
+            Text("CHỌN TẬP DỪNG").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.48)).padding(.leading, 4)
             if selectableStopEpisodes.isEmpty {
                 Text("API chưa trả về danh sách tập cho phim này. Hãy đóng trình phát và mở lại phim để tải dữ liệu mới.")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.58)).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 5) {
@@ -867,12 +867,12 @@ struct CinemaPlayerScreen: View {
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: stopAtEpisodeID == stopEpisodeKey(item) ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: 18, weight: .semibold))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .foregroundStyle(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent : .white.opacity(0.42))
-                                    Text(item.name).font(.system(size: 13, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                                    Text(item.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 12).frame(minHeight: 44)
+                                .padding(.horizontal, 9).frame(minHeight: 32)
                                 .background(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             }
                             .buttonStyle(.plain)
@@ -901,8 +901,8 @@ struct CinemaPlayerScreen: View {
         HStack(spacing: 9) {
             Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.cinemaAccent).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                Text(detail).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.56)).lineLimit(2)
+                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                Text(detail).font(.system(size: 8, weight: .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
             }
         }
     }

@@ -148,8 +148,8 @@ struct SubtitlePreferencesEditor: View {
     private func row<Content: View>(title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: compact ? 14 : 15, weight: .bold)).foregroundStyle(.white)
-                Text(detail).font(.system(size: compact ? 10 : 11)).foregroundStyle(.white.opacity(0.52)).lineLimit(1)
+                Text(title).font(.system(size: compact ? 11 : 11, weight: .bold)).foregroundStyle(.white)
+                Text(detail).font(.system(size: compact ? 8 : 8)).foregroundStyle(.white.opacity(0.48)).lineLimit(1)
             }
             Spacer(minLength: 4)
             content()
@@ -162,7 +162,7 @@ struct SubtitlePreferencesEditor: View {
                 Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                 Spacer()
                 Text("\(Int(value.wrappedValue))\(suffix)")
-                    .font(.system(size: compact ? 12 : 13, weight: .bold, design: .monospaced))
+                    .font(.system(size: compact ? 10 : 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(Color.cinemaAccent)
             }
             Slider(value: value, in: range, step: 1).tint(Color.cinemaAccent)
