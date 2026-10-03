@@ -33,6 +33,7 @@ struct TvVideo: Decodable, Identifiable, Hashable {
     let description: String?
     let sortOrder: Int
     let isActive: Bool
+    let allowPip: Bool?
     let episodes: [TvVideoEpisode]
     var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
 }
@@ -42,7 +43,11 @@ struct TvVideoEpisode: Decodable, Identifiable, Hashable {
     let videoId: Int
     let episodeNumber: Int
     let name: String
+    let subtitleUrl: String?
+    let bilingualSubtitleUrl: String?
     let qualities: [TvVideoQuality]
+    var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
+    var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
 }
 
 struct TvVideoQuality: Decodable, Identifiable, Hashable {
@@ -50,7 +55,11 @@ struct TvVideoQuality: Decodable, Identifiable, Hashable {
     let episodeId: Int
     let label: String
     let streamUrl: String
+    let subtitleUrl: String?
+    let bilingualSubtitleUrl: String?
     var streamURL: URL? { CinemaAPI.tvStreamURL(streamUrl) }
+    var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
+    var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
 }
 
 struct Movie: Decodable, Identifiable, Hashable {
@@ -81,6 +90,7 @@ struct Movie: Decodable, Identifiable, Hashable {
     let createdAt: String?
     let updatedAt: String?
     let servers: [MovieServer]?
+    let allowPip: Bool? = nil
     // Some API responses expose the same groups as `episodes` instead of `servers`.
     var episodeGroups: [MovieServer]?
 
@@ -97,7 +107,7 @@ struct Movie: Decodable, Identifiable, Hashable {
         case apiID = "id", slug, name, originName, poster, backdrop, year, quality
         case episodeCurrent, episodeTotal, time, lang, description, rating, categories
         case countries, actors, actorProfiles, directors, views, alternativeNames, status
-        case tmdbId, imdbId, createdAt, updatedAt, servers, episodeGroups = "episodes"
+        case tmdbId, imdbId, createdAt, updatedAt, servers, episodeGroups = "episodes", allowPip
     }
 }
 
@@ -157,22 +167,27 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     let filename: String
     let embedUrl: String?
     let streamUrl: String?
+    let subtitleUrl: String?
+    let bilingualSubtitleUrl: String?
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
 
-    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?) {
+    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, subtitleUrl: String? = nil, bilingualSubtitleUrl: String? = nil) {
         self.name = name
         self.slug = slug
         self.filename = filename
         self.embedUrl = embedUrl
         self.streamUrl = streamUrl
+        self.subtitleUrl = subtitleUrl
+        self.bilingualSubtitleUrl = bilingualSubtitleUrl
     }
 
     enum CodingKeys: String, CodingKey {
         case name, slug, filename
         case embedUrl, embedURLSnake = "embed_url", linkEmbed = "link_embed"
         case streamUrl, streamURLSnake = "stream_url", linkM3U8 = "link_m3u8", link
+        case subtitleUrl, subtitleURLSnake = "subtitle_url", bilingualSubtitleUrl, bilingualSubtitleURLSnake = "bilingual_subtitle_url"
     }
 
     init(from decoder: Decoder) throws {
@@ -187,6 +202,10 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
             ?? container.decodeIfPresent(String.self, forKey: .streamURLSnake)
             ?? container.decodeIfPresent(String.self, forKey: .linkM3U8)
             ?? container.decodeIfPresent(String.self, forKey: .link)
+        subtitleUrl = try container.decodeIfPresent(String.self, forKey: .subtitleUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .subtitleURLSnake)
+        bilingualSubtitleUrl = try container.decodeIfPresent(String.self, forKey: .bilingualSubtitleUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .bilingualSubtitleURLSnake)
     }
 }
 

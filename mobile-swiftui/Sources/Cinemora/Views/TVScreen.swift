@@ -16,7 +16,6 @@ private final class TVPlaybackController: ObservableObject {
     private var hasSeparateAudio = false
     private var userPaused = false
     private var syncTask: Task<Void, Never>?
-    private var foregroundRecoveryTask: Task<Void, Never>?
     private var notificationTokens: [NSObjectProtocol] = []
     private var lastAudioCorrectionAt: Date = .distantPast
 
@@ -31,9 +30,6 @@ private final class TVPlaybackController: ObservableObject {
             },
             center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.handleAudioRouteChange() }
-            },
-            center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.prepareForSystemOverlay() }
             },
             center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.recoverAfterForeground() }
@@ -213,43 +209,20 @@ private final class TVPlaybackController: ObservableObject {
     }
 
     private func handleAudioRouteChange() {
-        // Volume changes made inside Control Center can emit a route-change
-        // notification while the app is inactive. Never rebuild HLS items in
-        // that window; foreground recovery handles playback afterwards.
-        guard UIApplication.shared.applicationState == .active else { return }
         configureAudioSession()
         guard !userPaused, currentURL != nil else { return }
         if hasSeparateAudio && (separateAudioPlayer.rate == 0 || player.rate == 0) { syncToLiveEdge() }
     }
 
-    func prepareForSystemOverlay() {
-        // Do not rebuild AVPlayer while Control Center owns the audio route.
-        // Replacing the item at that moment can leave AVPlayerLayer black.
-        foregroundRecoveryTask?.cancel()
+    private func recoverAfterForeground() {
+        configureAudioSession()
         guard !userPaused, currentURL != nil else { return }
-        player.pause()
-        separateAudioPlayer.pause()
-        isPlaying = false
-    }
-    func recoverAfterForeground() {
-        foregroundRecoveryTask?.cancel()
-        foregroundRecoveryTask = Task { @MainActor [weak self] in
-            // Let iOS finish restoring the audio route/window before touching
-            // AVPlayer. This prevents the black frame seen after volume changes.
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled, let self, !self.userPaused, self.currentURL != nil else { return }
-            self.configureAudioSession()
-            let videoItem = self.player.currentItem
-            let audioItem = self.separateAudioPlayer.currentItem
-            let videoBroken = videoItem == nil || videoItem?.status == .failed
-            let audioBroken = self.hasSeparateAudio && (audioItem == nil || audioItem?.status == .failed)
-            if videoBroken || audioBroken {
-                self.syncToLiveEdge()
-            } else {
-                self.player.playImmediately(atRate: 1)
-                if self.hasSeparateAudio { self.separateAudioPlayer.playImmediately(atRate: 1) }
-                self.isPlaying = true
-            }
+        if player.currentItem?.status == .failed || (hasSeparateAudio && separateAudioPlayer.currentItem?.status == .failed) {
+            syncToLiveEdge()
+        } else if !isPlaying {
+            player.playImmediately(atRate: 1)
+            if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
+            isPlaying = true
         }
     }
 
@@ -263,24 +236,9 @@ private final class TVPlaybackController: ObservableObject {
 
     func shutdown() {
         syncTask?.cancel()
-        foregroundRecoveryTask?.cancel()
-        syncTask = nil
-        foregroundRecoveryTask = nil
         itemObservation = nil
-        // Mark this as an explicit user stop. Otherwise the next
-        // didBecomeActive notification can mistake the old URL for an
-        // interrupted session and start the TV audio again.
-        userPaused = true
-        currentURL = nil
-        currentAudioURL = nil
-        hasSeparateAudio = false
-        isLoading = false
         player.pause()
         separateAudioPlayer.pause()
-        player.isMuted = true
-        separateAudioPlayer.isMuted = true
-        player.volume = 0
-        separateAudioPlayer.volume = 0
         player.replaceCurrentItem(with: nil)
         separateAudioPlayer.replaceCurrentItem(with: nil)
         isPlaying = false
@@ -366,20 +324,7 @@ struct TVScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.startTvLiveUpdates() }
         .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                playback.recoverAfterForeground()
-                Task {
-                    await store.startTvLiveUpdates()
-                    await store.refreshTvStreams()
-                }
-            case .inactive, .background:
-                // Keep the player object/items alive. Only pause temporarily;
-                // shutdown is reserved for an explicit player close.
-                playback.prepareForSystemOverlay()
-            @unknown default:
-                break
-            }
+            if phase == .active { Task { await store.refreshTvStreams() } }
         }
         .onChange(of: store.tvStreams) { _, streams in
             if selectedStreamID == nil { selectedStreamID = streams.first?.id }
@@ -391,10 +336,7 @@ struct TVScreen: View {
                 playback.shutdown()
             }
         }
-        // Do not call playback.shutdown() here. SwiftUI may call onDisappear
-        // while the scene is being backgrounded; clearing AVPlayer items there
-        // makes returning to the app look like a fresh launch.
-        .onDisappear { store.stopTvLiveUpdates() }
+        .onDisappear { playback.shutdown(); store.stopTvLiveUpdates() }
         .fullScreenCover(isPresented: $isPlayerPresented) {
             if let selectedStream {
                 TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
@@ -431,7 +373,9 @@ private extension TvVideo {
                     slug: "tv-\(id)-episode-\(tvEpisode.id)-quality-\(quality.id)",
                     filename: "",
                     embedUrl: nil,
-                    streamUrl: streamURL.absoluteString
+                    streamUrl: streamURL.absoluteString,
+                    subtitleUrl: quality.subtitleURL?.absoluteString ?? tvEpisode.subtitleURL?.absoluteString,
+                    bilingualSubtitleUrl: quality.bilingualSubtitleURL?.absoluteString ?? tvEpisode.bilingualSubtitleURL?.absoluteString
                 )
             }
             guard !qualityEpisodes.isEmpty else { return nil }
@@ -465,7 +409,8 @@ private extension TvVideo {
             createdAt: nil,
             updatedAt: nil,
             servers: servers,
-            episodeGroups: nil
+            episodeGroups: nil,
+            allowPip: allowPip
         )
     }
 }
@@ -552,12 +497,7 @@ private struct TVPlayerView: View {
                 .accessibilityLabel("Đồng bộ về thời gian phát trực tiếp")
                 quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue)
                 pipButton
-                Button {
-                    // Stop both video and optional separate audio before
-                    // dismissing the cover, so no sound survives the exit.
-                    playback.shutdown()
-                    isFullscreen = false
-                } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+                Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
             }
             if quickMenu != nil { quickMenuPanel }
@@ -702,8 +642,7 @@ private struct TVFullscreenPlayer: View {
         .onAppear { forceLandscape() }
         .onDisappear {
             if pipCoordinator.isActive { pipCoordinator.stop() }
-            // TVScreen shuts down only after isPlayerPresented becomes false.
-            // Avoid clearing AVPlayer during a temporary scene transition.
+            playback.shutdown()
             forcePortrait()
         }
     }
@@ -818,9 +757,7 @@ private struct TVVideoFullscreenPlayer: View {
         }
         .preferredColorScheme(.dark).statusBarHidden(true).persistentSystemOverlays(.hidden)
         .onAppear { loadCurrent(); scheduleHide() }
-        // The parent owns shutdown when the fullscreen presentation is truly
-        // closed; do not clear the player during a temporary scene transition.
-        .onDisappear { hideTask?.cancel() }
+        .onDisappear { hideTask?.cancel(); playback.shutdown() }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in if notification.object as? AVPlayerItem === playback.player.currentItem { moveEpisode(1) } }
     }

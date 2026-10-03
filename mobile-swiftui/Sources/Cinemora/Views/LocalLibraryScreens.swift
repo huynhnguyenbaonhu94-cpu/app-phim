@@ -190,6 +190,7 @@ struct SavedHubScreen: View {
                     savedDestination(icon: "clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục những bộ phim bạn đang xem", destination: WatchHistoryScreen())
                     savedDestination(icon: "heart.fill", title: "Yêu thích", detail: "Danh sách phim đã lưu", destination: FavoritesScreen())
                     savedDestination(icon: "slider.horizontal.3", title: "Cài đặt mặc định", detail: "Thiết lập cách phát video mỗi khi mở phim", destination: PlaybackDefaultsScreen())
+                    savedDestination(icon: "textformat.size", title: "Tùy chỉnh phụ đề", detail: "Phông chữ, màu sắc, vị trí, viền và song ngữ", destination: SubtitlePreferencesScreen())
                     savedDestination(icon: "text.bubble.fill", title: "Yêu cầu phim", detail: "Gửi tên phim muốn Cinemora cập nhật", destination: MovieRequestScreen())
                 }
                 .padding(.horizontal, 20)

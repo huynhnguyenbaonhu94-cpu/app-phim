@@ -8,7 +8,7 @@ import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, ge
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
-import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, updateTvStream } from "./tvStreams";
+import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
@@ -105,6 +105,10 @@ export const appRouter = router({
       base64: z.string().min(1).max(11_200_000),
       mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
     })).mutation(({ input }) => saveTvPoster(input)),
+    uploadSubtitle: adminProcedure.input(z.object({
+      base64: z.string().min(1).max(28_000_000),
+      mimeType: z.enum(["text/vtt", "application/octet-stream"]),
+    })).mutation(({ input }) => saveTvSubtitle(input)),
     create: adminProcedure.input(z.object({
       name: z.string().trim().min(1).max(120),
       streamUrl: z.string().trim().url().max(2000),
@@ -128,12 +132,12 @@ export const appRouter = router({
     })).mutation(({ input: { id, ...input } }) => updateTvStream(id, input)),
     remove: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvStream(input.id)),
     createVideo: adminProcedure.input(z.object({
-      name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(),
-      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000) })).min(1) })).min(1),
+      name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(), allowPip: z.boolean().optional(),
+      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), subtitleUrl: z.string().trim().max(2000).nullable().optional(), bilingualSubtitleUrl: z.string().trim().max(2000).nullable().optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000), subtitleUrl: z.string().trim().max(2000).nullable().optional(), bilingualSubtitleUrl: z.string().trim().max(2000).nullable().optional() })).min(1) })).min(1),
     })).mutation(({ input }) => createTvVideo(input)),
     updateVideo: adminProcedure.input(z.object({
-      id: z.number().int().positive(), name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(),
-      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000) })).min(1) })).min(1),
+      id: z.number().int().positive(), name: z.string().trim().min(1).max(180), logoUrl: z.string().trim().url().max(2000).nullable().optional(), description: z.string().trim().max(1000).nullable().optional(), sortOrder: z.number().int().min(0).max(100000).optional(), isActive: z.boolean().optional(), allowPip: z.boolean().optional(),
+      episodes: z.array(z.object({ episodeNumber: z.number().int().min(1), name: z.string().trim().max(180).optional(), subtitleUrl: z.string().trim().max(2000).nullable().optional(), bilingualSubtitleUrl: z.string().trim().max(2000).nullable().optional(), qualities: z.array(z.object({ label: z.string().trim().max(40), streamUrl: z.string().trim().url().max(2000), subtitleUrl: z.string().trim().max(2000).nullable().optional(), bilingualSubtitleUrl: z.string().trim().max(2000).nullable().optional() })).min(1) })).min(1),
     })).mutation(({ input: { id, ...payload } }) => updateTvVideo(id, payload)),
     removeVideo: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvVideo(input.id)),
   }),

@@ -4,6 +4,20 @@ struct PlaybackDefaults: Codable, Equatable {
     var autoAdvanceEpisodes = true
     var stopTimer = "Tắt"
     var pictureInPicture = true
+    var subtitlePreferences = SubtitlePreferences()
+
+    private enum CodingKeys: String, CodingKey {
+        case autoAdvanceEpisodes, stopTimer, pictureInPicture, subtitlePreferences
+    }
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        autoAdvanceEpisodes = try container.decodeIfPresent(Bool.self, forKey: .autoAdvanceEpisodes) ?? true
+        stopTimer = try container.decodeIfPresent(String.self, forKey: .stopTimer) ?? "Tắt"
+        pictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .pictureInPicture) ?? true
+        subtitlePreferences = try container.decodeIfPresent(SubtitlePreferences.self, forKey: .subtitlePreferences) ?? SubtitlePreferences()
+    }
 }
 
 struct LocalMovieRecord: Codable, Identifiable, Hashable {

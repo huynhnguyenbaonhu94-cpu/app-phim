@@ -61,6 +61,21 @@ export function validateOptionalUrl(value: string | null | undefined, label = "U
   }
 }
 
+export async function saveTvSubtitle(input: { base64: string; mimeType: "text/vtt" | "application/octet-stream" }) {
+  const raw = input.base64.includes(",") ? input.base64.split(",", 2)[1] : input.base64;
+  const bytes = Buffer.from(raw, "base64");
+  if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File phụ đề phải nhỏ hơn 20MB.");
+  const text = bytes.toString("utf8").replace(/^\uFEFF/, "");
+  const hasCueTiming = /\d{2}:\d{2}:\d{2}[.,]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[.,]\d{3}/m.test(text);
+  const isVtt = /^WEBVTT(?:\s|$)/i.test(text);
+  const isSrt = hasCueTiming && /\d{2}:\d{2}:\d{2},\d{3}\s+-->/.test(text);
+  if (!hasCueTiming || (!isVtt && !isSrt)) throw new Error("File phụ đề phải là WebVTT (.vtt) hoặc SubRip (.srt) hợp lệ.");
+  const directory = path.resolve(process.cwd(), "uploads", "tv-subtitles");
+  await mkdir(directory, { recursive: true });
+  const filename = `${randomUUID()}.vtt`;
+  await writeFile(path.join(directory, filename), bytes, { flag: "wx" });
+  return `/uploads/tv-subtitles/${filename}`;
+}
 export async function saveTvPoster(input: { base64: string; mimeType: "image/jpeg" | "image/png" | "image/webp" }) {
   const raw = input.base64.includes(",") ? input.base64.split(",", 2)[1] : input.base64;
   const bytes = Buffer.from(raw, "base64");

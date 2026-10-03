@@ -73,6 +73,7 @@ export const tvVideos = mysqlTable("tv_videos", {
   description: varchar("description", { length: 1000 }),
   sortOrder: int("sortOrder").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
+  allowPip: boolean("allowPip").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({ activeOrderIndex: index("tv_videos_active_order_idx").on(table.isActive, table.sortOrder) }));
@@ -82,6 +83,8 @@ export const tvVideoEpisodes = mysqlTable("tv_video_episodes", {
   videoId: int("videoId").notNull(),
   episodeNumber: int("episodeNumber").notNull(),
   name: varchar("name", { length: 180 }).notNull(),
+  subtitleUrl: text("subtitleUrl"),
+  bilingualSubtitleUrl: text("bilingualSubtitleUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ videoOrderIndex: index("tv_video_episodes_video_order_idx").on(table.videoId, table.episodeNumber) }));
 
@@ -90,6 +93,8 @@ export const tvVideoQualities = mysqlTable("tv_video_qualities", {
   episodeId: int("episodeId").notNull(),
   label: varchar("label", { length: 40 }).notNull(),
   streamUrl: text("streamUrl").notNull(),
+  subtitleUrl: text("subtitleUrl"),
+  bilingualSubtitleUrl: text("bilingualSubtitleUrl"),
   healthStatus: varchar("healthStatus", { length: 20 }).default("unknown").notNull(),
   healthMessage: varchar("healthMessage", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

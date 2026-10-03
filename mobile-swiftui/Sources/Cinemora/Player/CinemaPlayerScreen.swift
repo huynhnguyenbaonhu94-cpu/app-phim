@@ -22,6 +22,8 @@ final class PlaybackController: ObservableObject {
     private var activeRequestID = UUID()
     private var seekRequestID = UUID()
     private var suppressLoadingUntil = Date.distantPast
+    private var overlayRecoveryTask: Task<Void, Never>?
+    private var resumeAfterOverlay = false
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -42,6 +44,9 @@ final class PlaybackController: ObservableObject {
     func shutdown() {
         loadTask?.cancel()
         loadTask = nil
+        overlayRecoveryTask?.cancel()
+        overlayRecoveryTask = nil
+        resumeAfterOverlay = false
         player.pause()
         player.replaceCurrentItem(with: nil)
         activeURL = nil
@@ -54,7 +59,13 @@ final class PlaybackController: ObservableObject {
         itemObservation = nil
     }
 
+    private func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
+        try? session.setActive(true, options: [])
+    }
     func load(_ episode: MovieEpisode, startAt: Double? = nil) {
+        configureAudioSession()
         loadTask?.cancel()
         activeRequestID = UUID()
         let requestID = activeRequestID
@@ -106,18 +117,23 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    func prepareForSystemOverlay() {
+        guard activeURL != nil else { return }
+        // Keep the current AVPlayerItem alive. iOS may keep audio/video
+        // running under Control Center; rebuilding or seeking here causes
+        // buffering and loses the exact viewing position.
+        resumeAfterOverlay = isPlaying || player.timeControlStatus == .playing
+    }
+    func recoverAfterForeground() {
+        guard resumeAfterOverlay, activeURL != nil else { return }
+        // Resume the same item; never reload HLS or seek on this path.
+        player.play()
+        isPlaying = true
+        resumeAfterOverlay = false
+    }
     func togglePlayback() {
         if player.timeControlStatus == .playing { player.pause(); isPlaying = false }
         else { player.play(); isPlaying = true }
-    }
-    func recoverAfterForeground() {
-        guard activeURL != nil, errorMessage == nil else { return }
-        if player.currentItem?.status == .failed {
-            errorMessage = "Nguồn phát bị gián đoạn. Hãy chọn thử lại nguồn này."
-            return
-        }
-        player.play()
-        isPlaying = true
     }
 
     func pause() {
@@ -161,6 +177,69 @@ final class PlaybackController: ObservableObject {
                 self.isLoading = false
             }
         }
+    }
+}
+
+struct SubtitleCue: Identifiable, Equatable {
+    let id = UUID()
+    let start: Double
+    let end: Double
+    let text: String
+}
+@MainActor
+final class SubtitleController: ObservableObject {
+    @Published private(set) var currentText: String?
+    private var cues: [SubtitleCue] = []
+    private var bilingualCues: [SubtitleCue] = []
+    private var loadTask: Task<Void, Never>?
+    func load(url: URL?, bilingualURL: URL? = nil) {
+        loadTask?.cancel(); cues = []; bilingualCues = []; currentText = nil
+        guard url != nil || bilingualURL != nil else { return }
+        loadTask = Task { @MainActor [weak self] in
+            async let primaryText = Self.fetchText(url)
+            async let secondaryText = Self.fetchText(bilingualURL)
+            guard !Task.isCancelled, let self else { return }
+            if let text = await primaryText { self.cues = Self.parse(text) }
+            if let text = await secondaryText { self.bilingualCues = Self.parse(text) }
+        }
+    }
+    private static func fetchText(_ url: URL?) async -> String? {
+        guard let url else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode ?? 200 < 400 else { return nil }
+            return String(data: data, encoding: .utf8)
+        } catch { return nil }
+    }
+    func update(time: Double, bilingual: Bool) {
+        guard time.isFinite else { return }
+        let primary = cues.last(where: { time >= $0.start && time < $0.end })
+        let secondary = bilingual ? bilingualCues.last(where: { time >= $0.start && time < $0.end }) : nil
+        let combined = [primary?.text, secondary?.text].compactMap { $0 }.joined(separator: "\n")
+        currentText = combined.isEmpty ? nil : combined
+    }
+    private static func parse(_ source: String) -> [SubtitleCue] {
+        let blocks = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n")
+        return blocks.compactMap { block in
+            let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            guard let timingIndex = lines.firstIndex(where: { $0.contains("-->") }) else { return nil }
+            let parts = lines[timingIndex].components(separatedBy: "-->")
+            guard parts.count >= 2 else { return nil }
+            let right = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rightParts = right.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard let start = parseTime(parts[0]), let end = parseTime(rightParts.first.map(String.init) ?? "") else { return nil }
+            let inlineText = rightParts.count > 1 ? String(rightParts[1]) : ""
+            let followingText = lines.dropFirst(timingIndex + 1).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = followingText.isEmpty ? inlineText : followingText
+            guard !text.isEmpty else { return nil }
+            return SubtitleCue(start: start, end: end, text: text)
+        }.sorted { $0.start < $1.start }
+    }
+    private static func parseTime(_ raw: String) -> Double? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+        let parts = value.split(separator: ":").map(String.init)
+        guard parts.count == 3, let h = Double(parts[0]), let m = Double(parts[1]), let sec = Double(parts[2]) else { return nil }
+        return h * 3600 + m * 60 + sec
     }
 }
 
@@ -224,6 +303,8 @@ struct CinemaPlayerScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = PlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
+    @StateObject private var subtitles = SubtitleController()
+    @State private var subtitlePreferences = SubtitlePreferences()
     @State private var serverIndex = 0
     @State private var episodeIndex = 0
     @State private var controlsVisible = true
@@ -319,6 +400,10 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
+                    if subtitlePreferences.enabled, let subtitle = subtitles.currentText {
+                        VStack { Spacer(); subtitleText(subtitle).padding(.bottom, proxy.safeAreaInsets.bottom + subtitlePreferences.bottomSpacing) }
+                            .allowsHitTesting(false)
+                    }
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
@@ -397,9 +482,6 @@ struct CinemaPlayerScreen: View {
                         .zIndex(12)
                 }
             }
-            // Do not use a zero-distance gesture across the whole player:
-            // a Control Center swipe starts at the top edge and used to be
-            // interpreted as our brightness/volume gesture.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
                     .onChanged { value in
@@ -415,7 +497,15 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onChange(of: playback.currentTime) { _, _ in handlePlaybackProgress() }
+            .onChange(of: playback.currentTime) { _, time in
+                subtitles.update(time: time, bilingual: subtitlePreferences.bilingual)
+                handlePlaybackProgress()
+            }
+            .onChange(of: subtitlePreferences) { _, value in
+                store.playbackDefaults.subtitlePreferences = value
+                store.savePlaybackDefaults()
+                subtitles.update(time: playback.currentTime, bilingual: value.bilingual)
+            }
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
             .onChange(of: stopAtEpisodeEnabled) { _, enabled in
                 if enabled, stopAtEpisodeID == nil {
@@ -425,16 +515,8 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
             .onChange(of: scenePhase) { _, phase in
-                // A system overlay (Control Center, notification shade, etc.)
-                // must never leave a pending adjustment gesture or stale HUD.
-                if phase != .active {
-                    finishAdjustmentGesture()
-                    adjustmentHideTask?.cancel()
-                    adjustmentKind = nil
-                    adjustmentPulse = false
-                } else {
-                    playback.recoverAfterForeground()
-                }
+                if phase == .active { playback.recoverAfterForeground() }
+                else { playback.prepareForSystemOverlay() }
             }
             .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
             .task {
@@ -443,14 +525,8 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            // Scene transitions must not destroy the player. The controller
-            // is cleaned up when this fullscreen screen is actually released.
             .onDisappear {
-                saveLocalWatchProgress()
-                hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
-                // A real player dismissal happens while the scene is active.
-                // Backgrounding/Control Center is handled by scenePhase and
-                // must not clear the player.
+                saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
                 if scenePhase == .active { playback.shutdown() }
                 forcePortrait()
             }
@@ -469,7 +545,7 @@ struct CinemaPlayerScreen: View {
     private var topBar: some View {
         VStack(alignment: .trailing, spacing: 9) {
             HStack(spacing: 10) {
-            Button { exitPlayer() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+            Button { dismiss() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Trở lại")
             VStack(alignment: .leading, spacing: 3) {
                 Text(movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
@@ -482,7 +558,7 @@ struct CinemaPlayerScreen: View {
                 Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
             }
-            if pictureInPictureEnabled && pipCoordinator.isSupported {
+            if pictureInPictureEnabled && movie.allowPip != false && pipCoordinator.isSupported {
                 Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start(); scheduleHide() } label: {
                     Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
                         .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
@@ -637,6 +713,20 @@ struct CinemaPlayerScreen: View {
         }.buttonStyle(.plain)
     }
 
+    private func subtitleText(_ text: String) -> some View {
+        Text(text)
+            .font(subtitlePreferences.font)
+            .foregroundStyle(subtitlePreferences.textColor)
+            .multilineTextAlignment(subtitlePreferences.textAlignment)
+            .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+            .padding(.horizontal, 24).padding(.vertical, 6)
+            .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 7))
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+    }
+
     private var settingsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -649,6 +739,10 @@ struct CinemaPlayerScreen: View {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 25, height: 25)
                 }.buttonStyle(.plain).accessibilityLabel("Đóng cài đặt")
             }
+            ScrollView(.vertical, showsIndicators: false) {
+                SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true)
+            }
+            .frame(maxHeight: 340)
             settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") {
                 Picker("Tự dừng phát", selection: $stopTimer) {
                     ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) }
@@ -804,9 +898,6 @@ struct CinemaPlayerScreen: View {
 
     private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat, height: CGFloat) {
         guard !controlsLocked, picker == nil, !settingsOpen, !relatedRecommendationsVisible else { return }
-        // Keep the top 22% reserved for iOS system gestures. The previous
-        // implementation accepted any vertical drag, so opening Control
-        // Center also changed the app volume/brightness HUD.
         guard value.startLocation.y > height * 0.22 else { return }
         if !isAdjustmentGestureActive {
             guard abs(value.translation.height) > max(8, abs(value.translation.width) * 0.75) else { return }
@@ -897,7 +988,7 @@ struct CinemaPlayerScreen: View {
             Image(systemName: "wifi.exclamationmark").font(.system(size: 22)).foregroundStyle(Color.cinemaAccent)
             Text("Không thể phát video").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
             Text(message).font(.system(size: 10)).foregroundStyle(.white.opacity(0.66)).multilineTextAlignment(.center).lineLimit(3)
-            Button("Trở lại") { exitPlayer() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
+            Button("Trở lại") { dismiss() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
         }
         .padding(18).frame(maxWidth: 340).cinemaGlass(in: RoundedRectangle(cornerRadius: 24), tint: .black.opacity(0.54))
     }
@@ -1029,6 +1120,7 @@ struct CinemaPlayerScreen: View {
         guard let episode else { return }
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
+        subtitles.load(url: episode.subtitleURL, bilingualURL: episode.bilingualSubtitleURL)
         playback.load(episode, startAt: startAt)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
@@ -1039,6 +1131,7 @@ struct CinemaPlayerScreen: View {
         hasAppliedPlaybackDefaults = true
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
+        subtitlePreferences = store.playbackDefaults.subtitlePreferences
         stopTimer = StopTimer(rawValue: store.playbackDefaults.stopTimer) ?? .off
     }
 
@@ -1160,12 +1253,6 @@ struct CinemaPlayerScreen: View {
         }
     }
 
-    private func exitPlayer() {
-        saveLocalWatchProgress()
-        playback.shutdown()
-        forcePortrait()
-        dismiss()
-    }
     private func formatTime(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60

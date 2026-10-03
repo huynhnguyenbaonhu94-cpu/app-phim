@@ -52,41 +52,35 @@ private struct LaunchLoader: View {
 @MainActor
 struct CinemoraTabShell: View {
     @EnvironmentObject private var connectivity: ConnectivityMonitor
-    @SceneStorage("cinemora.selectedTab") private var selectedTab = 0
     @State private var showLaunchLoader = true
 
     var body: some View {
         ZStack(alignment: .top) {
-            TabView(selection: $selectedTab) {
+            TabView {
                 tabRoot {
                     HomeScreen()
                 }
                 .tabItem { Label("Trang Chủ", systemImage: "sparkles.tv") }
-                .tag(0)
 
                 tabRoot {
                     TVScreen()
                 }
                 .tabItem { Label("Truyền Hình", systemImage: "tv.fill") }
-                .tag(1)
 
                 tabRoot {
                     LibraryScreen()
                 }
                 .tabItem { Label("Thư Viện", systemImage: "square.grid.2x2") }
-                .tag(2)
 
                 tabRoot {
                     SearchScreen()
                 }
                 .tabItem { Label("Tìm Kiếm", systemImage: "magnifyingglass") }
-                .tag(3)
 
                 tabRoot {
                     SavedHubScreen()
                 }
                 .tabItem { Label("Lưu", systemImage: "bookmark.fill") }
-                .tag(4)
 
             }
             .tint(.cinemaAccent)

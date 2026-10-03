@@ -3,11 +3,17 @@ import { getDb, ensureTvVideosCompatibility } from "./db";
 import { tvVideos, tvVideoEpisodes, tvVideoQualities } from "../drizzle/schema";
 import { checkStreamHealth, validateOptionalUrl, validateStreamUrl } from "./tvStreams";
 
-export type TvVideoQualityInput = { label: string; streamUrl: string };
-export type TvVideoEpisodeInput = { episodeNumber: number; name?: string; qualities: TvVideoQualityInput[] };
-export type TvVideoPayload = { name: string; logoUrl?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean; episodes: TvVideoEpisodeInput[] };
+export type TvVideoQualityInput = { label: string; streamUrl: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null };
+export type TvVideoEpisodeInput = { episodeNumber: number; name?: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null; qualities: TvVideoQualityInput[] };
+export type TvVideoPayload = { name: string; logoUrl?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean; allowPip?: boolean; episodes: TvVideoEpisodeInput[] };
 
 function clean(value: string | null | undefined, max: number) { return value?.trim().slice(0, max) || null; }
+function validateSubtitleUrl(value: string | null | undefined) {
+  if (!value?.trim()) return null;
+  const trimmed = value.trim();
+  if (trimmed.startsWith("/uploads/tv-subtitles/") || trimmed.startsWith("uploads/tv-subtitles/")) return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  try { const url = new URL(trimmed); if (!["http:", "https:"].includes(url.protocol)) throw new Error(); return url.toString(); } catch { throw new Error("URL phụ đề phải là URL http(s) hoặc file VTT đã upload."); }
+}
 function normalize(input: TvVideoPayload) {
   const name = input.name.trim().slice(0, 180);
   if (!name) throw new Error("Tên video không được để trống.");
@@ -17,13 +23,17 @@ function normalize(input: TvVideoPayload) {
     return {
       episodeNumber: Math.max(1, Math.floor(episode.episodeNumber || index + 1)),
       name: clean(episode.name, 180) || `Tập ${episode.episodeNumber || index + 1}`,
+      subtitleUrl: validateSubtitleUrl(episode.subtitleUrl),
+      bilingualSubtitleUrl: validateSubtitleUrl(episode.bilingualSubtitleUrl),
       qualities: episode.qualities.map((quality) => ({
         label: quality.label.trim().slice(0, 40) || "Auto",
         streamUrl: validateStreamUrl(quality.streamUrl),
+        subtitleUrl: validateSubtitleUrl(quality.subtitleUrl),
+        bilingualSubtitleUrl: validateSubtitleUrl(quality.bilingualSubtitleUrl),
       })),
     };
   });
-  return { name, logoUrl: validateOptionalUrl(input.logoUrl, "URL logo"), description: clean(input.description, 1000), sortOrder: Math.max(0, Math.min(100000, Math.floor(input.sortOrder ?? 0))), isActive: input.isActive !== false, episodes };
+  return { name, logoUrl: validateOptionalUrl(input.logoUrl, "URL logo"), description: clean(input.description, 1000), sortOrder: Math.max(0, Math.min(100000, Math.floor(input.sortOrder ?? 0))), isActive: input.isActive !== false, allowPip: input.allowPip !== false, episodes };
 }
 
 async function validateAllLinks(episodes: TvVideoEpisodeInput[]) {
@@ -58,12 +68,12 @@ export async function createTvVideo(input: TvVideoPayload) {
   await ensureTvVideosCompatibility(db);
   const values = normalize(input);
   await validateAllLinks(values.episodes);
-  const inserted = await db.insert(tvVideos).values({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive });
+  const inserted = await db.insert(tvVideos).values({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip });
   const videoId = getInsertId(inserted, "video");
   for (const episode of values.episodes) {
-    const result = await db.insert(tvVideoEpisodes).values({ videoId, episodeNumber: episode.episodeNumber, name: episode.name });
+    const result = await db.insert(tvVideoEpisodes).values({ videoId, episodeNumber: episode.episodeNumber, name: episode.name, subtitleUrl: episode.subtitleUrl, bilingualSubtitleUrl: episode.bilingualSubtitleUrl });
     const episodeId = getInsertId(result, "tập");
-    await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
+    await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
   }
   return (await listTvVideos(true)).find((video) => video.id === videoId) || null;
 }
@@ -73,14 +83,14 @@ export async function updateTvVideo(id: number, input: TvVideoPayload) {
   await ensureTvVideosCompatibility(db);
   const values = normalize(input);
   await validateAllLinks(values.episodes);
-  await db.update(tvVideos).set({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive }).where(eq(tvVideos.id, id));
+  await db.update(tvVideos).set({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip }).where(eq(tvVideos.id, id));
   const oldEpisodes = await db.select({ id: tvVideoEpisodes.id }).from(tvVideoEpisodes).where(eq(tvVideoEpisodes.videoId, id));
   if (oldEpisodes.length) await db.delete(tvVideoQualities).where(inArray(tvVideoQualities.episodeId, oldEpisodes.map((episode) => episode.id)));
   await db.delete(tvVideoEpisodes).where(eq(tvVideoEpisodes.videoId, id));
   for (const episode of values.episodes) {
-    const result = await db.insert(tvVideoEpisodes).values({ videoId: id, episodeNumber: episode.episodeNumber, name: episode.name });
+    const result = await db.insert(tvVideoEpisodes).values({ videoId: id, episodeNumber: episode.episodeNumber, name: episode.name, subtitleUrl: episode.subtitleUrl, bilingualSubtitleUrl: episode.bilingualSubtitleUrl });
     const episodeId = getInsertId(result, "tập");
-    await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
+    await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => ({ episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: "online", healthMessage: "Stream đang hoạt động" })));
   }
   return (await listTvVideos(true)).find((video) => video.id === id) || null;
 }
