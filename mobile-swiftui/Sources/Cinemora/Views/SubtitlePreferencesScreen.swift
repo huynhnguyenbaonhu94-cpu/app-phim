@@ -17,7 +17,9 @@ struct SubtitlePreferencesEditor: View {
                 preview
                 fullControls
             } else {
-                compactControls
+                // Fullscreen dùng cùng một bộ điều khiển với mục Lưu để mọi
+                // thay đổi đều có hiệu lực và được phản ánh ngay trong player.
+                fullControls
             }
         }
     }
@@ -47,27 +49,6 @@ struct SubtitlePreferencesEditor: View {
             Toggle("", isOn: $preferences.bilingual).labelsHidden().tint(Color.cinemaAccent)
         }
         resetButton
-    }
-
-    @ViewBuilder
-    private var compactControls: some View {
-        // Keep the first control visible in the player popover, matching the
-        // reference layout instead of nesting a tall form inside the panel.
-        alignmentRow
-        row(title: "Phông chữ", detail: preferences.fontName) { fontPicker }
-        sliderRow(title: "Cỡ chữ", value: $preferences.fontSize, range: 12...34, suffix: "pt")
-        row(title: "Chữ đậm", detail: "Tăng độ tương phản") {
-            Toggle("", isOn: $preferences.bold).labelsHidden().tint(Color.cinemaAccent)
-        }
-        HStack(spacing: 10) {
-            row(title: "Hiển thị phụ đề", detail: preferences.enabled ? "Đang bật" : "Đang tắt") {
-                Toggle("", isOn: $preferences.enabled).labelsHidden().tint(Color.cinemaAccent)
-            }
-            row(title: "Song ngữ", detail: preferences.bilingual ? "Đang bật" : "Đang tắt") {
-                Toggle("", isOn: $preferences.bilingual).labelsHidden().tint(Color.cinemaAccent)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var alignmentRow: some View {
@@ -123,7 +104,10 @@ struct SubtitlePreferencesEditor: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(colors: [.gray.opacity(0.45), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom))
                     .frame(height: 128)
-                subtitleSample.padding(.bottom, 12)
+                subtitleSample
+                    // Thu nhỏ theo preview nhưng vẫn phản ánh đúng chiều
+                    // hướng của khoảng cách phía dưới trong player.
+                    .padding(.bottom, min(max(preferences.bottomSpacing * 0.55, 4), 100))
             }
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
@@ -137,7 +121,7 @@ struct SubtitlePreferencesEditor: View {
         .font(preferences.font)
         .foregroundStyle(preferences.textColor)
         .multilineTextAlignment(preferences.textAlignment)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
         .padding(.horizontal, 12)
         .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
         .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)

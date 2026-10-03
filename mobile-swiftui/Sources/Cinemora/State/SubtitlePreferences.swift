@@ -19,6 +19,9 @@ struct SubtitlePreferences: Codable, Equatable {
     var textAlignment: TextAlignment {
         switch alignment { case "Trái": return .leading; case "Phải": return .trailing; default: return .center }
     }
+    var frameAlignment: Alignment {
+        switch alignment { case "Trái": return .leading; case "Phải": return .trailing; default: return .center }
+    }
     var font: Font {
         let weight: Font.Weight = bold ? .bold : .regular
         return fontName == "System" ? .system(size: fontSize, weight: weight, design: .rounded) : .custom(fontName, size: fontSize).weight(weight)

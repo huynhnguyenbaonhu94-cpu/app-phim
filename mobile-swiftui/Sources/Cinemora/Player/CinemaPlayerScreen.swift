@@ -793,7 +793,7 @@ struct CinemaPlayerScreen: View {
             .font(subtitlePreferences.font)
             .foregroundStyle(subtitlePreferences.textColor)
             .multilineTextAlignment(subtitlePreferences.textAlignment)
-            .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+            .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
             .padding(.horizontal, 24)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
@@ -935,9 +935,11 @@ struct CinemaPlayerScreen: View {
                     .font(subtitlePreferences.font)
                     .foregroundStyle(subtitlePreferences.textColor)
                     .multilineTextAlignment(subtitlePreferences.textAlignment)
-                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
                     .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
+                    // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
+                    // chiều với subtitle thật khi đổi khoảng cách phía dưới.
+                    .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
