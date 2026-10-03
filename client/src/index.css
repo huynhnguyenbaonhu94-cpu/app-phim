@@ -2640,6 +2640,14 @@ body {
 .admin-video-episode { gap: 14px; padding: 18px; border-color: rgba(210,243,107,.28); border-radius: 16px; background: rgba(5,8,7,.34); }
 .admin-video-quality { grid-template-columns: 125px minmax(0, 1fr) 34px; gap: 10px; }
 .admin-video-quality input { min-height: 42px; }
+.admin-video-subtitle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; border: 1px solid rgba(210,243,107,.16); border-radius: 12px; background: rgba(210,243,107,.035); }
+.admin-video-subtitle-grid label, .admin-video-quality-subtitles label { display: grid; gap: 7px; color: rgba(255,255,255,.78); font-size: 12px; font-weight: 700; }
+.admin-video-subtitle-grid input[type="file"], .admin-video-quality-subtitles input[type="file"] { min-height: 42px; }
+.admin-video-quality { grid-template-columns: 125px minmax(0, 1fr) minmax(0, 1.35fr) 34px; align-items: start; }
+.admin-video-quality-subtitles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; min-width: 0; }
+.admin-video-quality-subtitles label { font-size: 11px; }
+.admin-video-quality-subtitles input { min-width: 0; }
+
 .admin-video-form > .button-primary { min-height: 48px; justify-content: center; font-size: 13px; }
 .admin-video-list-head { padding-top: 10px; }
 .admin-video-list-head h3 { font-size: 16px; letter-spacing: -.02em; }
@@ -2656,6 +2664,7 @@ body {
   .admin-video-form { padding: 16px; }
   .admin-video-form .admin-tv-grid { grid-template-columns: 1fr; }
   .admin-video-form .admin-tv-form-heading, .admin-video-list-head { align-items: flex-start; flex-direction: column; }
+  .admin-video-subtitle-grid, .admin-video-quality-subtitles { grid-template-columns: 1fr; }
   .admin-video-quality { grid-template-columns: 1fr 34px; }
   .admin-video-quality input:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
   .admin-video-item { flex-direction: column; }

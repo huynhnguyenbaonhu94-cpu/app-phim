@@ -374,8 +374,8 @@ private extension TvVideo {
                     filename: "",
                     embedUrl: nil,
                     streamUrl: streamURL.absoluteString,
-                    subtitleUrl: quality.subtitleURL?.absoluteString,
-                    bilingualSubtitleUrl: quality.bilingualSubtitleURL?.absoluteString
+                    subtitleUrl: (quality.subtitleURL ?? tvEpisode.subtitleURL)?.absoluteString,
+                    bilingualSubtitleUrl: (quality.bilingualSubtitleURL ?? tvEpisode.bilingualSubtitleURL)?.absoluteString
                 )
             }
             guard !qualityEpisodes.isEmpty else { return nil }
