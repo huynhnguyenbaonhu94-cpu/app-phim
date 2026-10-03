@@ -409,8 +409,8 @@ private extension TvVideo {
             createdAt: nil,
             updatedAt: nil,
             servers: servers,
-            episodeGroups: nil,
-            allowPip: allowPip
+            allowPip: allowPip,
+            episodeGroups: nil
         )
     }
 }

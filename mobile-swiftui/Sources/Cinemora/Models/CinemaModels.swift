@@ -90,7 +90,7 @@ struct Movie: Decodable, Identifiable, Hashable {
     let createdAt: String?
     let updatedAt: String?
     let servers: [MovieServer]?
-    let allowPip: Bool? = nil
+    let allowPip: Bool?
     // Some API responses expose the same groups as `episodes` instead of `servers`.
     var episodeGroups: [MovieServer]?
 
@@ -172,6 +172,8 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
+    var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
+    var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
 
     init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, subtitleUrl: String? = nil, bilingualSubtitleUrl: String? = nil) {
         self.name = name
