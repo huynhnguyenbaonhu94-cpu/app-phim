@@ -807,7 +807,8 @@ struct CinemaPlayerScreen: View {
             settingsTabContent
         }
         .padding(18)
-        .frame(width: width, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: width, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8))
