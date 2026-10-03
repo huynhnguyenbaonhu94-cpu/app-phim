@@ -264,9 +264,23 @@ private final class TVPlaybackController: ObservableObject {
     func shutdown() {
         syncTask?.cancel()
         foregroundRecoveryTask?.cancel()
+        syncTask = nil
+        foregroundRecoveryTask = nil
         itemObservation = nil
+        // Mark this as an explicit user stop. Otherwise the next
+        // didBecomeActive notification can mistake the old URL for an
+        // interrupted session and start the TV audio again.
+        userPaused = true
+        currentURL = nil
+        currentAudioURL = nil
+        hasSeparateAudio = false
+        isLoading = false
         player.pause()
         separateAudioPlayer.pause()
+        player.isMuted = true
+        separateAudioPlayer.isMuted = true
+        player.volume = 0
+        separateAudioPlayer.volume = 0
         player.replaceCurrentItem(with: nil)
         separateAudioPlayer.replaceCurrentItem(with: nil)
         isPlaying = false
