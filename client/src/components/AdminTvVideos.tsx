@@ -2,10 +2,10 @@ import { useRef, useState } from "react";
 import { Film, Plus, Save, Trash2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
-type Quality = { label: string; streamUrl: string; subtitleUrl: string };
+type Quality = { label: string; streamUrl: string };
 type Episode = { episodeNumber: number; name: string; subtitleUrl: string; qualities: Quality[] };
 type VideoForm = { id?: number; name: string; logoUrl: string; description: string; sortOrder: string; isActive: boolean; allowPip: boolean; episodes: Episode[] };
-const blankQuality = (): Quality => ({ label: "1080p", streamUrl: "", subtitleUrl: "" });
+const blankQuality = (): Quality => ({ label: "1080p", streamUrl: "" });
 const blankEpisode = (number = 1): Episode => ({ episodeNumber: number, name: `Tập ${number}`, subtitleUrl: "", qualities: [blankQuality()] });
 const emptyForm: VideoForm = { name: "", logoUrl: "", description: "", sortOrder: "0", isActive: true, allowPip: true, episodes: [blankEpisode()] };
 const videoFieldStyle: React.CSSProperties = { minHeight: 46, width: "100%", boxSizing: "border-box", border: "1px solid rgba(210,243,107,.25)", borderRadius: 10, background: "#151a1d", color: "#fff", padding: "11px 13px" };
@@ -37,13 +37,13 @@ export function AdminTvVideos() {
     reader.readAsDataURL(file);
   }
 
-  function uploadSubtitleFile(file: File | undefined, episodeIndex: number, qualityIndex: number | null) {
+  function uploadSubtitleFile(file: File | undefined, episodeIndex: number) {
     if (!file) return;
     const extension = file.name.toLowerCase().split(".").pop();
     if (extension !== "vtt" && extension !== "srt" && file.type !== "text/vtt" && file.type !== "application/x-subrip") { setMessage("Phụ đề chỉ hỗ trợ file .vtt hoặc .srt."); return; }
     if (file.size > 20 * 1024 * 1024) { setMessage("File phụ đề phải nhỏ hơn 20MB."); return; }
     const reader = new FileReader();
-    reader.onload = () => uploadSubtitle.mutate({ base64: String(reader.result), mimeType: "text/vtt" }, { onSuccess: url => set("episodes", form.episodes.map((episode, index) => index === episodeIndex ? { ...episode, ...(qualityIndex === null ? { subtitleUrl: new URL(url, window.location.origin).toString() } : { qualities: episode.qualities.map((quality, qIndex) => qIndex === qualityIndex ? { ...quality, subtitleUrl: new URL(url, window.location.origin).toString() } : quality) }) } : episode)) });
+    reader.onload = () => uploadSubtitle.mutate({ base64: String(reader.result), mimeType: "text/vtt" }, { onSuccess: url => set("episodes", form.episodes.map((episode, index) => index === episodeIndex ? { ...episode, subtitleUrl: new URL(url, window.location.origin).toString() } : episode)) });
     reader.readAsDataURL(file);
   }
   function submit(event: React.FormEvent) {
@@ -54,7 +54,7 @@ export function AdminTvVideos() {
   }
 
   function edit(video: any) {
-    setForm({ id: video.id, name: video.name, logoUrl: video.logoUrl || "", description: video.description || "", sortOrder: String(video.sortOrder), isActive: video.isActive, allowPip: video.allowPip !== false, episodes: video.episodes.map((episode: any) => ({ episodeNumber: episode.episodeNumber, name: episode.name, subtitleUrl: episode.subtitleUrl || "", qualities: episode.qualities.map((quality: any) => ({ label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl || "" })) })) });
+    setForm({ id: video.id, name: video.name, logoUrl: video.logoUrl || "", description: video.description || "", sortOrder: String(video.sortOrder), isActive: video.isActive, allowPip: video.allowPip !== false, episodes: video.episodes.map((episode: any) => ({ episodeNumber: episode.episodeNumber, name: episode.name, subtitleUrl: episode.subtitleUrl || "", qualities: episode.qualities.map((quality: any) => ({ label: quality.label, streamUrl: quality.streamUrl })) })) });
     requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -86,14 +86,11 @@ export function AdminTvVideos() {
         {form.episodes.map((episode, episodeIndex) => <div className="admin-video-episode" key={episodeIndex}>
           <div className="admin-tv-grid"><div className="admin-video-field" style={{ display: "flex", flexDirection: "column", gap: 9 }}><span>Số tập</span><input style={videoFieldStyle} type="number" min="1" value={episode.episodeNumber} onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, episodeNumber: Number(event.target.value) } : item))} /></div><div className="admin-video-field" style={{ display: "flex", flexDirection: "column", gap: 9 }}><span>Tên tập</span><input style={videoFieldStyle} value={episode.name} onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, name: event.target.value } : item))} /></div></div>
           <div className="admin-video-subtitle-grid">
-            <label><span>Phụ đề chính (.vtt/.srt)</span><input type="url" value={episode.subtitleUrl} aria-label="URL phụ đề chính của tập" placeholder="URL phụ đề chính (không bắt buộc)" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitleUrl: event.target.value } : item))} /><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload phụ đề chính của tập" onChange={event => uploadSubtitleFile(event.target.files?.[0], episodeIndex, null)} /></label>
+            <label><span>Phụ đề chính (.vtt/.srt)</span><input type="url" value={episode.subtitleUrl} aria-label="URL phụ đề chính của tập" placeholder="URL phụ đề chính (không bắt buộc)" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitleUrl: event.target.value } : item))} /><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload phụ đề chính của tập" onChange={event => uploadSubtitleFile(event.target.files?.[0], episodeIndex)} /></label>
           </div>
           {episode.qualities.map((quality, qualityIndex) => <div className="admin-video-quality" key={qualityIndex}>
             <input value={quality.label} aria-label="Chất lượng" placeholder="1080p" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, qualities: item.qualities.map((q, qIndex) => qIndex === qualityIndex ? { ...q, label: event.target.value } : q) } : item))} />
             <input required type="url" value={quality.streamUrl} aria-label="Link video" placeholder="https://.../video.m3u8 hoặc .mp4" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, qualities: item.qualities.map((q, qIndex) => qIndex === qualityIndex ? { ...q, streamUrl: event.target.value } : q) } : item))} />
-            <div className="admin-video-quality-subtitles">
-              <label><span>Sub chính</span><input type="url" value={quality.subtitleUrl} aria-label="URL phụ đề VTT chính" placeholder="URL sub chính .vtt/.srt" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, qualities: item.qualities.map((q, qIndex) => qIndex === qualityIndex ? { ...q, subtitleUrl: event.target.value } : q) } : item))} /><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload phụ đề VTT/SRT chính" onChange={event => uploadSubtitleFile(event.target.files?.[0], episodeIndex, qualityIndex)} /></label>
-            </div>
             {episode.qualities.length > 1 && <button type="button" className="icon-button" onClick={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, qualities: item.qualities.filter((_, qIndex) => qIndex !== qualityIndex) } : item))}><Trash2 size={15} /></button>}
           </div>)}
           <button type="button" className="button button-muted" onClick={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, qualities: [...item.qualities, blankQuality()] } : item))}><Plus size={13} /> Thêm chất lượng</button>

@@ -1,5 +1,11 @@
 import SwiftUI
 
+private struct SubtitleBackgroundChoice: Identifiable {
+    let name: String
+    let hex: String
+    var id: String { hex }
+}
+
 struct SubtitlePreferencesEditor: View {
     @Binding var preferences: SubtitlePreferences
     var compact = false
@@ -50,7 +56,7 @@ struct SubtitlePreferencesEditor: View {
         }
         if preferences.backgroundEnabled {
             colorRow(title: "Màu nền", value: preferences.backgroundColorHex) {
-                ColorPicker("", selection: colorBinding(for: \.backgroundColorHex)).labelsHidden()
+                backgroundColorMenu
             }
             sliderRow(title: "Độ trong nền", value: $preferences.backgroundOpacity, range: 0.1...1, suffix: "")
         }
@@ -86,6 +92,28 @@ struct SubtitlePreferencesEditor: View {
             get: { Color(hex: preferences[keyPath: keyPath]) },
             set: { preferences[keyPath: keyPath] = $0.hexString }
         )
+    }
+
+    private var backgroundColorMenu: some View {
+        Menu {
+            ForEach([
+                SubtitleBackgroundChoice(name: "Đen", hex: "#000000"),
+                SubtitleBackgroundChoice(name: "Xám đậm", hex: "#20242A"),
+                SubtitleBackgroundChoice(name: "Xanh đậm", hex: "#102A43"),
+                SubtitleBackgroundChoice(name: "Nâu đậm", hex: "#3A2418"),
+                SubtitleBackgroundChoice(name: "Trắng", hex: "#FFFFFF")
+            ]) { choice in
+                Button { preferences.backgroundColorHex = choice.hex } label: {
+                    Label(choice.name, systemImage: preferences.backgroundColorHex == choice.hex ? "checkmark.circle.fill" : "circle.fill")
+                }
+            }
+        } label: {
+            Circle()
+                .fill(preferences.backgroundColor)
+                .frame(width: 28, height: 28)
+                .overlay(Circle().strokeBorder(.white.opacity(0.65), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private var resetButton: some View {
