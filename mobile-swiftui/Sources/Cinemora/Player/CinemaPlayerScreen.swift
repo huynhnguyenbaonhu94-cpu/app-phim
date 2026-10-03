@@ -196,8 +196,12 @@ final class SubtitleController: ObservableObject {
         loadTask?.cancel(); cues = []; bilingualCues = []; currentText = nil
         guard url != nil || bilingualURL != nil else { return }
         loadTask = Task { @MainActor [weak self] in
+            // The TV API may expose the same uploaded file at both the
+            // episode and quality subtitle fields. Do not load it twice as
+            // primary + bilingual, otherwise one subtitle appears twice.
+            let distinctBilingualURL = bilingualURL == url ? nil : bilingualURL
             async let primaryText = Self.fetchText(url)
-            async let secondaryText = Self.fetchText(bilingualURL)
+            async let secondaryText = Self.fetchText(distinctBilingualURL)
             guard !Task.isCancelled, let self else { return }
             if let text = await primaryText { self.cues = Self.parse(text) }
             if let text = await secondaryText { self.bilingualCues = Self.parse(text) }
@@ -215,7 +219,14 @@ final class SubtitleController: ObservableObject {
         guard time.isFinite else { return }
         let primary = cues.last(where: { time >= $0.start && time < $0.end })
         let secondary = bilingual ? bilingualCues.last(where: { time >= $0.start && time < $0.end }) : nil
-        let combined = [primary?.text, secondary?.text].compactMap { $0 }.joined(separator: "\n")
+        var seen = Set<String>()
+        let lines = [primary?.text, secondary?.text].compactMap { $0 }.filter { text in
+            let key = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return seen.insert(key).inserted
+        }
+        let combined = lines.joined(separator: "\n")
         currentText = combined.isEmpty ? nil : combined
     }
     private static func parse(_ source: String) -> [SubtitleCue] {
@@ -501,6 +512,11 @@ struct CinemaPlayerScreen: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                         .zIndex(12)
                 }
+                if settingsOpen {
+                    settingsOverlay
+                        .transition(.opacity)
+                        .zIndex(13)
+                }
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
@@ -603,6 +619,9 @@ struct CinemaPlayerScreen: View {
             quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
             Button {
                 withAnimation(.easeOut(duration: 0.18)) {
+                    if !visibleSettingsTabs.contains(settingsTab) {
+                        settingsTab = visibleSettingsTabs[0]
+                    }
                     settingsOpen.toggle()
                     quickMenu = nil
                     volumePopoverOpen = false
@@ -621,7 +640,6 @@ struct CinemaPlayerScreen: View {
             .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
             }
             if let quickMenu { quickMenuPanel(quickMenu) }
-            if settingsOpen { settingsPanel }
         }
     }
 
@@ -651,6 +669,13 @@ struct CinemaPlayerScreen: View {
 
     private var playbackRateLabel: String {
         playback.playbackRate == 1 ? "1x" : "\(formatRate(playback.playbackRate))x"
+    }
+
+    private var visibleSettingsTabs: [SettingsTab] {
+        // TV videos are the only player that exposes subtitle customization.
+        // Audio, display and speed already have dedicated controls outside
+        // this drawer, so they should not be duplicated in Settings.
+        subtitleCustomizationEnabled ? [.subtitle, .general] : [.general]
     }
 
     private func formatRate(_ rate: Float) -> String {
@@ -748,7 +773,26 @@ struct CinemaPlayerScreen: View {
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
     }
 
-    private var settingsPanel: some View {
+    private var settingsOverlay: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.58)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }
+                        scheduleHide()
+                    }
+                settingsPanel(width: min(410, max(300, proxy.size.width - 28)))
+                    .padding(.top, max(14, proxy.safeAreaInsets.top + 8))
+                    .padding(.trailing, max(14, proxy.safeAreaInsets.trailing + 10))
+                    .padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 8))
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func settingsPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 9) {
                 Image(systemName: "gearshape.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
@@ -762,18 +806,19 @@ struct CinemaPlayerScreen: View {
             Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
             settingsTabContent
         }
-        .padding(13)
-        .frame(width: 350, alignment: .topLeading)
-        .frame(minHeight: 335, maxHeight: 500, alignment: .top)
-        .background(.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.42), radius: 22, y: 10)
-        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+        .padding(18)
+        .frame(width: width, maxHeight: .infinity, alignment: .topLeading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.48), radius: 28, x: -8, y: 12)
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onTapGesture { }
     }
 
     private var settingsTabs: some View {
         HStack(spacing: 4) {
-            ForEach(SettingsTab.allCases) { tab in
+            ForEach(visibleSettingsTabs) { tab in
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) { settingsTab = tab }
                 } label: {
