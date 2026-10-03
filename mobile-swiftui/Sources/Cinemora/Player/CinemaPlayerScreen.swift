@@ -578,8 +578,10 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: subtitlePreferences) { _, value in
                 guard subtitleCustomizationEnabled else { return }
-                store.playbackDefaults.subtitlePreferences = value
-                store.savePlaybackDefaults()
+                DispatchQueue.main.async {
+                    store.playbackDefaults.subtitlePreferences = value
+                    store.savePlaybackDefaults()
+                }
                 subtitles.update(time: playback.currentTime, bilingual: false)
             }
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
@@ -807,18 +809,23 @@ struct CinemaPlayerScreen: View {
     }
 
     private func subtitleText(_ text: String) -> some View {
-        Text(text)
-            .font(subtitlePreferences.font)
-            .foregroundStyle(subtitlePreferences.textColor)
-            .multilineTextAlignment(subtitlePreferences.textAlignment)
-            .padding(.horizontal, 24)
-            .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
-            .background(subtitlePreferences.backgroundEnabled ? subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
-            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
-            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
-            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
-            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+        ZStack {
+            if subtitlePreferences.backgroundEnabled {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.safeBackgroundOpacity))
+            }
+            Text(text)
+                .font(subtitlePreferences.font)
+                .foregroundStyle(subtitlePreferences.textColor)
+                .multilineTextAlignment(subtitlePreferences.textAlignment)
+                .padding(.horizontal, 24)
+                .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+                .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
+                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+        }
     }
 
     private var settingsOverlay: some View {
@@ -951,21 +958,26 @@ struct CinemaPlayerScreen: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(height: 92)
-                Text("Đây là phụ đề xem trước")
-                    .font(subtitlePreferences.font)
-                    .foregroundStyle(subtitlePreferences.textColor)
-                    .multilineTextAlignment(subtitlePreferences.textAlignment)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, subtitlePreferences.backgroundEnabled ? 4 : 0)
-                    .background(subtitlePreferences.backgroundEnabled ? subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
-                    // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
-                    // chiều với subtitle thật khi đổi khoảng cách phía dưới.
-                    .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
-                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
-                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
-                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
-                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+                ZStack {
+                    if subtitlePreferences.backgroundEnabled {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.safeBackgroundOpacity))
+                    }
+                    Text("Đây là phụ đề xem trước")
+                        .font(subtitlePreferences.font)
+                        .foregroundStyle(subtitlePreferences.textColor)
+                        .multilineTextAlignment(subtitlePreferences.textAlignment)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, subtitlePreferences.backgroundEnabled ? 4 : 0)
+                        .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
+                        // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
+                        // chiều với subtitle thật khi đổi khoảng cách phía dưới.
+                        .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }

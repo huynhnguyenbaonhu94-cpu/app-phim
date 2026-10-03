@@ -1,11 +1,5 @@
 import SwiftUI
 
-private struct SubtitleBackgroundChoice: Identifiable {
-    let name: String
-    let hex: String
-    var id: String { hex }
-}
-
 struct SubtitlePreferencesEditor: View {
     @Binding var preferences: SubtitlePreferences
     var compact = false
@@ -55,9 +49,7 @@ struct SubtitlePreferencesEditor: View {
             Toggle("", isOn: $preferences.backgroundEnabled).labelsHidden().tint(Color.cinemaAccent)
         }
         if preferences.backgroundEnabled {
-            colorRow(title: "Màu nền", value: preferences.backgroundColorHex) {
-                backgroundColorMenu
-            }
+            colorRow(title: "Màu nền", value: preferences.backgroundColorHex) { backgroundColorButton }
             sliderRow(title: "Độ trong nền", value: $preferences.backgroundOpacity, range: 0.1...1, suffix: "")
         }
         resetButton
@@ -94,19 +86,11 @@ struct SubtitlePreferencesEditor: View {
         )
     }
 
-    private var backgroundColorMenu: some View {
-        Menu {
-            ForEach([
-                SubtitleBackgroundChoice(name: "Đen", hex: "#000000"),
-                SubtitleBackgroundChoice(name: "Xám đậm", hex: "#20242A"),
-                SubtitleBackgroundChoice(name: "Xanh đậm", hex: "#102A43"),
-                SubtitleBackgroundChoice(name: "Nâu đậm", hex: "#3A2418"),
-                SubtitleBackgroundChoice(name: "Trắng", hex: "#FFFFFF")
-            ]) { choice in
-                Button { preferences.backgroundColorHex = choice.hex } label: {
-                    Label(choice.name, systemImage: preferences.backgroundColorHex == choice.hex ? "checkmark.circle.fill" : "circle.fill")
-                }
-            }
+    private var backgroundColorButton: some View {
+        Button {
+            let choices = ["#000000", "#20242A", "#102A43", "#3A2418", "#FFFFFF"]
+            let current = choices.firstIndex(of: preferences.backgroundColorHex) ?? 0
+            preferences.backgroundColorHex = choices[(current + 1) % choices.count]
         } label: {
             Circle()
                 .fill(preferences.backgroundColor)
@@ -114,6 +98,7 @@ struct SubtitlePreferencesEditor: View {
                 .overlay(Circle().strokeBorder(.white.opacity(0.65), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Đổi màu nền phụ đề")
     }
 
     private var resetButton: some View {
@@ -148,20 +133,23 @@ struct SubtitlePreferencesEditor: View {
     }
 
     private var subtitleSample: some View {
-        VStack(spacing: 3) {
+        ZStack {
+            if preferences.backgroundEnabled {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(preferences.backgroundColor.opacity(preferences.safeBackgroundOpacity))
+            }
             Text("Đây là phụ đề xem trước")
+                .font(preferences.font)
+                .foregroundStyle(preferences.textColor)
+                .multilineTextAlignment(preferences.textAlignment)
+                .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
+                .padding(.horizontal, 12)
+                .padding(.vertical, preferences.backgroundEnabled ? 5 : 0)
+                .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
+                .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)
+                .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: preferences.outlineWidth)
+                .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: -preferences.outlineWidth)
         }
-        .font(preferences.font)
-        .foregroundStyle(preferences.textColor)
-        .multilineTextAlignment(preferences.textAlignment)
-        .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
-        .padding(.horizontal, 12)
-        .padding(.vertical, preferences.backgroundEnabled ? 5 : 0)
-        .background(preferences.backgroundEnabled ? preferences.backgroundColor.opacity(preferences.backgroundOpacity) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
-        .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)
-        .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: preferences.outlineWidth)
-        .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: -preferences.outlineWidth)
     }
 
     private func row<Content: View>(title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
@@ -220,8 +208,12 @@ struct SubtitlePreferencesScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear { preferences = store.playbackDefaults.subtitlePreferences }
         .onChange(of: preferences) { _, value in
-            store.playbackDefaults.subtitlePreferences = value
-            store.savePlaybackDefaults()
+            // Đợi SwiftUI hoàn tất transaction của Toggle/Slider rồi mới
+            // cập nhật EnvironmentObject, tránh lỗi văng khi bật nền.
+            DispatchQueue.main.async {
+                store.playbackDefaults.subtitlePreferences = value
+                store.savePlaybackDefaults()
+            }
         }
     }
 }

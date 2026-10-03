@@ -20,6 +20,7 @@ struct SubtitlePreferences: Codable, Equatable {
     var textColor: Color { Color(hex: textColorHex) }
     var outlineColor: Color { Color(hex: outlineColorHex) }
     var backgroundColor: Color { Color(hex: backgroundColorHex) }
+    var safeBackgroundOpacity: Double { min(max(backgroundOpacity.isFinite ? backgroundOpacity : 0.65, 0.1), 1) }
     var textAlignment: TextAlignment {
         switch alignment { case "Trái": return .leading; case "Phải": return .trailing; default: return .center }
     }
@@ -57,9 +58,9 @@ struct SubtitlePreferences: Codable, Equatable {
 
 extension Color {
     init(hex: String) {
-        let cleaned = hex.replacingOccurrences(of: "#", with: "")
-        var value: UInt64 = 0
-        Scanner(string: cleaned).scanHexInt64(&value)
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        let normalized = cleaned.count == 6 ? cleaned : "000000"
+        let value = UInt64(normalized, radix: 16) ?? 0
         self.init(.sRGB, red: Double((value >> 16) & 0xff) / 255, green: Double((value >> 8) & 0xff) / 255, blue: Double(value & 0xff) / 255)
     }
     var hexString: String {
