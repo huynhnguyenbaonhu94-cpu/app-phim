@@ -9,6 +9,7 @@ private final class TVPlaybackController: ObservableObject {
     private let separateAudioPlayer = AVPlayer()
     @Published private(set) var isPlaying = false
     @Published private(set) var isLoading = false
+    @Published private(set) var currentTime: Double = 0
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
     private var currentURL: URL?
@@ -38,9 +39,10 @@ private final class TVPlaybackController: ObservableObject {
                 Task { @MainActor in self?.handlePlayerFailure(note) }
             }
         ]
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self else { return }
             Task { @MainActor in
+                if time.seconds.isFinite { self.currentTime = time.seconds }
                 self.isPlaying = self.player.rate > 0.01 && (!self.hasSeparateAudio || self.separateAudioPlayer.rate > 0.01)
                 self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 self.correctSeparateAudioDriftIfNeeded()
@@ -60,6 +62,7 @@ private final class TVPlaybackController: ObservableObject {
         separateAudioPlayer.pause()
         isPlaying = false
         isLoading = true
+        currentTime = 0
         player.isMuted = hasSeparateAudio
         let item = AVPlayerItem(url: url)
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -125,6 +128,11 @@ private final class TVPlaybackController: ObservableObject {
             if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
             isPlaying = true
         }
+    }
+
+    func pause() {
+        userPaused = true
+        player.pause(); separateAudioPlayer.pause(); isPlaying = false
     }
 
     func setVolume(_ value: Double) {
@@ -696,75 +704,107 @@ private struct TVVideoFullscreenPlayer: View {
     @Binding var isMuted: Bool
     @Binding var volume: Double
     @Binding var isPresented: Bool
+    @StateObject private var subtitles = SubtitleController()
+    @State private var subtitlePreferences = SubtitlePreferences()
     @State private var controlsVisible = true
     @State private var locked = false
     @State private var fit: TVVideoFit = .fit
     @State private var qualityIndex = 0
+    @State private var settingsOpen = false
+    @State private var advancedSettings = false
+    @State private var autoNext = true
+    @State private var stopTimer: TVStopTimer = .off
+    @State private var stopAtEpisode = false
+    @State private var stopAtEpisodeIndex = 0
+    @State private var stopTask: Task<Void, Never>?
     @State private var hideTask: Task<Void, Never>?
 
+    private enum TVStopTimer: String, CaseIterable, Identifiable {
+        case off = "Tắt", fifteen = "15 phút", thirty = "30 phút", sixty = "60 phút"
+        var id: String { rawValue }
+        var seconds: Double? { switch self { case .off: return nil; case .fifteen: return 900; case .thirty: return 1800; case .sixty: return 3600 } }
+    }
     private var episode: TvVideoEpisode? { video.episodes.indices.contains(episodeIndex) ? video.episodes[episodeIndex] : nil }
+    private var quality: TvVideoQuality? {
+        guard let episode, episode.qualities.indices.contains(qualityIndex) else { return nil }
+        return episode.qualities[qualityIndex]
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             TVNativeVideoSurface(player: playback.player, fit: fit, pipCoordinator: pipCoordinator).ignoresSafeArea()
-            Color.clear.contentShape(Rectangle()).onTapGesture { guard !locked else { return }; withAnimation { controlsVisible.toggle() }; if controlsVisible { scheduleHide() } }
-            if controlsVisible {
-                VStack(spacing: 0) {
-                    HStack {
-                        Button { isPresented = false } label: { Image(systemName: "chevron.down").frame(width: 42, height: 42) }.buttonStyle(.plain)
-                        VStack(alignment: .leading) { Text(video.name).font(.system(size: 13, weight: .bold)); Text(episode?.name ?? "Video").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)) }
-                        Spacer()
-                        if video.episodes.count > 1 {
-                            Menu {
-                                ForEach(video.episodes.indices, id: \.self) { index in
-                                    Button {
-                                        episodeIndex = index
-                                        scheduleHide()
-                                    } label: {
-                                        Label(video.episodes[index].name, systemImage: index == episodeIndex ? "checkmark.circle.fill" : "circle")
-                                    }
-                                }
-                            } label: {
-                                Label("Tập \(episodeIndex + 1)", systemImage: "list.number")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 11).frame(height: 38)
-                                    .background(.black.opacity(0.42), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Chọn tập")
-                        }
-                        if let episode, episode.qualities.count > 1 { Menu { ForEach(episode.qualities.indices, id: \.self) { index in Button(episode.qualities[index].label) { qualityIndex = index; loadCurrent() } } } label: { Text(episode.qualities.indices.contains(qualityIndex) ? episode.qualities[qualityIndex].label : "Chất lượng").font(.system(size: 11, weight: .bold)).padding(10).background(.black.opacity(0.4), in: Capsule()) }.buttonStyle(.plain) }
-                        Button { fit = fit == .fit ? .cover : fit == .cover ? .fill : .fit; scheduleHide() } label: { Image(systemName: "rectangle.on.rectangle").frame(width: 42, height: 42) }.buttonStyle(.plain)
-                        if pipCoordinator.isSupported { Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start() } label: { Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter").frame(width: 42, height: 42) }.buttonStyle(.plain) }
-                        Button { locked = true; controlsVisible = false } label: { Image(systemName: "lock.open").frame(width: 42, height: 42) }.buttonStyle(.plain)
-                    }
-                    .foregroundStyle(.white).padding(.horizontal, 14).padding(.top, 12)
-                    Spacer()
-                    if playback.isLoading { ProgressView().tint(.white) }
-                    HStack(spacing: 28) {
-                        Button { skip(-10) } label: { Image(systemName: "gobackward.10").font(.system(size: 22)) }.buttonStyle(.plain)
-                        Button { playback.togglePlayback(); scheduleHide() } label: { Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).frame(width: 68, height: 68).background(Color.cinemaAccent, in: Circle()).foregroundStyle(Color.cinemaInk) }.buttonStyle(.plain)
-                        Button { skip(10) } label: { Image(systemName: "goforward.10").font(.system(size: 22)) }.buttonStyle(.plain)
-                    }.foregroundStyle(.white)
-                    Spacer()
-                    HStack {
-                        if video.episodes.count > 1 { Button { moveEpisode(-1) } label: { Label("Tập trước", systemImage: "backward.end") }.buttonStyle(.plain); Spacer(); Button { moveEpisode(1) } label: { Label("Tập tiếp", systemImage: "forward.end") }.buttonStyle(.plain) }
-                    }.font(.system(size: 11, weight: .bold)).foregroundStyle(.white).padding(.horizontal, 16).padding(.bottom, 18)
-                }.background(LinearGradient(colors: [.black.opacity(0.68), .clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            if subtitlePreferences.enabled, let text = subtitles.currentText {
+                VStack { Spacer(); Text(text).font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 24).padding(.vertical, 6).background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 7)).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).padding(.bottom, 36) }.allowsHitTesting(false)
             }
+            Color.clear.contentShape(Rectangle()).onTapGesture { guard !locked, !settingsOpen else { return }; withAnimation { controlsVisible.toggle() }; if controlsVisible { scheduleHide() } }
+            if controlsVisible && !settingsOpen { playerControls }
             if locked { VStack { Spacer(); HStack { Spacer(); Button { locked = false; controlsVisible = true; scheduleHide() } label: { Image(systemName: "lock.fill").frame(width: 48, height: 48).background(.black.opacity(0.48), in: Circle()) }.buttonStyle(.plain).foregroundStyle(.white).padding(22) } }.transition(.opacity) }
+            if settingsOpen { settingsOverlay.transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(10) }
         }
         .preferredColorScheme(.dark).statusBarHidden(true).persistentSystemOverlays(.hidden)
         .onAppear { loadCurrent(); scheduleHide() }
-        .onDisappear { hideTask?.cancel(); playback.shutdown() }
+        .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown() }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in if notification.object as? AVPlayerItem === playback.player.currentItem { moveEpisode(1) } }
+        .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
+        .onChange(of: stopTimer) { _, _ in scheduleStop() }
+        .onChange(of: stopAtEpisode) { _, _ in scheduleStop() }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+            guard notification.object as? AVPlayerItem === playback.player.currentItem else { return }
+            if stopAtEpisode && episodeIndex == stopAtEpisodeIndex { playback.pause() }
+            else if autoNext { moveEpisode(1) } else { playback.pause() }
+        }
     }
 
-    private func loadCurrent() { guard let episode, episode.qualities.indices.contains(qualityIndex), let url = episode.qualities[qualityIndex].streamURL else { return }; playback.load(url); playback.setVolume(volume); playback.setMuted(isMuted) }
-    private func moveEpisode(_ offset: Int) { let next = episodeIndex + offset; guard video.episodes.indices.contains(next) else { return }; episodeIndex = next }
+    private var playerControls: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                Button { isPresented = false } label: { Image(systemName: "chevron.down").frame(width: 42, height: 42) }.buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 3) { Text(video.name).font(.system(size: 13, weight: .bold)); Text(episode?.name ?? "Video").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)) }.lineLimit(1)
+                Spacer()
+                Button { withAnimation { settingsOpen = true }; hideTask?.cancel() } label: { Image(systemName: "gearshape.fill").frame(width: 42, height: 42) }.buttonStyle(.plain).foregroundStyle(Color.cinemaInk).background(Color.cinemaAccent, in: Circle()).accessibilityLabel("Cài đặt video")
+                Button { locked = true; controlsVisible = false } label: { Image(systemName: "lock.open").frame(width: 42, height: 42) }.buttonStyle(.plain)
+            }.foregroundStyle(.white).padding(.horizontal, 14).padding(.top, 12)
+            Spacer()
+            if playback.isLoading { ProgressView().tint(.white) }
+            HStack(spacing: 28) {
+                Button { skip(-10) } label: { Image(systemName: "gobackward.10").font(.system(size: 22)) }.buttonStyle(.plain)
+                Button { playback.togglePlayback(); scheduleHide() } label: { Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).frame(width: 68, height: 68).background(Color.cinemaAccent, in: Circle()).foregroundStyle(Color.cinemaInk) }.buttonStyle(.plain)
+                Button { skip(10) } label: { Image(systemName: "goforward.10").font(.system(size: 22)) }.buttonStyle(.plain)
+            }.foregroundStyle(.white)
+            Spacer()
+            HStack { if video.episodes.count > 1 { Button { moveEpisode(-1) } label: { Label("Tập trước", systemImage: "backward.end") }.buttonStyle(.plain); Spacer(); Button { moveEpisode(1) } label: { Label("Tập tiếp", systemImage: "forward.end") }.buttonStyle(.plain) } }.font(.system(size: 11, weight: .bold)).foregroundStyle(.white).padding(.horizontal, 16).padding(.bottom, 18)
+        }.background(LinearGradient(colors: [.black.opacity(0.68), .clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+    }
+
+    private var settingsOverlay: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { withAnimation { settingsOpen = false } }
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack { Image(systemName: "gearshape.fill").foregroundStyle(Color.cinemaAccent); Text("Cài đặt video").font(.system(size: 18, weight: .black, design: .rounded)); Spacer(); Button { withAnimation { settingsOpen = false } } label: { Image(systemName: "xmark").frame(width: 30, height: 30).background(.white.opacity(0.08), in: Circle()) }.buttonStyle(.plain) }
+                    Text("QUICK CONTROLS").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1).foregroundStyle(Color.cinemaAccent)
+                    Toggle(isOn: $subtitlePreferences.enabled) { Label("Phụ đề", systemImage: "captions.bubble.fill") }.tint(Color.cinemaAccent)
+                    Toggle(isOn: $autoNext) { Label("Tự động chuyển tập", systemImage: "forward.end.fill") }.tint(Color.cinemaAccent)
+                    Toggle(isOn: $stopAtEpisode) { Label("Dừng ở tập đã chọn", systemImage: "stop.circle.fill") }.tint(Color.cinemaAccent)
+                    if stopAtEpisode { Picker("Tập dừng", selection: $stopAtEpisodeIndex) { ForEach(video.episodes.indices, id: \.self) { index in Text(video.episodes[index].name).tag(index) } }.pickerStyle(.menu).tint(Color.cinemaAccent) }
+                    HStack { Label("Tự dừng phát", systemImage: "moon.zzz.fill"); Spacer(); Picker("Tự dừng", selection: $stopTimer) { ForEach(TVStopTimer.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent) }
+                    Divider().overlay(.white.opacity(0.15))
+                    Button { withAnimation { advancedSettings.toggle() } } label: { HStack { Label("Advanced Settings", systemImage: "slider.horizontal.3"); Spacer(); Image(systemName: advancedSettings ? "chevron.up" : "chevron.down") } }.buttonStyle(.plain).foregroundStyle(.white)
+                    if advancedSettings { ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 330) }
+                }.foregroundStyle(.white).padding(18).frame(width: min(380, max(300, proxy.size.width - 24)), maxHeight: .infinity, alignment: .topLeading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous)).background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8)).shadow(color: .black.opacity(0.45), radius: 28, x: -8, y: 12).padding(.top, max(14, proxy.safeAreaInsets.top + 8)).padding(.trailing, max(14, proxy.safeAreaInsets.trailing + 10)).padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 8))
+            }
+        }.ignoresSafeArea()
+    }
+
+    private func loadCurrent() {
+        guard let episode, episode.qualities.indices.contains(qualityIndex), let quality, let url = quality.streamURL else { return }
+        playback.load(url); playback.setVolume(volume); playback.setMuted(isMuted)
+        subtitles.load(url: quality.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
+    }
+    private func moveEpisode(_ offset: Int) { let next = episodeIndex + offset; guard video.episodes.indices.contains(next) else { playback.togglePlayback(); return }; episodeIndex = next }
     private func skip(_ seconds: Double) { let now = playback.player.currentTime().seconds; playback.player.seek(to: CMTime(seconds: max(0, now + seconds), preferredTimescale: 600)) }
+    private func scheduleStop() { stopTask?.cancel(); guard let seconds = stopTimer.seconds else { return }; stopTask = Task { @MainActor in try? await Task.sleep(for: .seconds(seconds)); guard !Task.isCancelled else { return }; playback.pause() } }
     private func scheduleHide() { hideTask?.cancel(); hideTask = Task { @MainActor in try? await Task.sleep(for: .seconds(4)); guard !Task.isCancelled else { return }; withAnimation { controlsVisible = false } } }
 }
 
