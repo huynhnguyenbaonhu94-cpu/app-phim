@@ -538,7 +538,12 @@ private struct TVPlayerView: View {
                 .accessibilityLabel("Đồng bộ về thời gian phát trực tiếp")
                 quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue)
                 pipButton
-                Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+                Button {
+                    // Stop both video and optional separate audio before
+                    // dismissing the cover, so no sound survives the exit.
+                    playback.shutdown()
+                    isFullscreen = false
+                } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                     .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
             }
             if quickMenu != nil { quickMenuPanel }

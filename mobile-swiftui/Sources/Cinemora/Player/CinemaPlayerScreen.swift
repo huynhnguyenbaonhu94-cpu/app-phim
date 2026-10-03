@@ -43,6 +43,10 @@ final class PlaybackController: ObservableObject {
         loadTask?.cancel()
         loadTask = nil
         player.pause()
+        player.replaceCurrentItem(with: nil)
+        activeURL = nil
+        isPlaying = false
+        isLoading = false
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
@@ -441,7 +445,15 @@ struct CinemaPlayerScreen: View {
             }
             // Scene transitions must not destroy the player. The controller
             // is cleaned up when this fullscreen screen is actually released.
-            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel(); forcePortrait() }
+            .onDisappear {
+                saveLocalWatchProgress()
+                hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
+                // A real player dismissal happens while the scene is active.
+                // Backgrounding/Control Center is handled by scenePhase and
+                // must not clear the player.
+                if scenePhase == .active { playback.shutdown() }
+                forcePortrait()
+            }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -457,7 +469,7 @@ struct CinemaPlayerScreen: View {
     private var topBar: some View {
         VStack(alignment: .trailing, spacing: 9) {
             HStack(spacing: 10) {
-            Button { dismiss() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
+            Button { exitPlayer() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
                 .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Trở lại")
             VStack(alignment: .leading, spacing: 3) {
                 Text(movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
@@ -885,7 +897,7 @@ struct CinemaPlayerScreen: View {
             Image(systemName: "wifi.exclamationmark").font(.system(size: 22)).foregroundStyle(Color.cinemaAccent)
             Text("Không thể phát video").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
             Text(message).font(.system(size: 10)).foregroundStyle(.white.opacity(0.66)).multilineTextAlignment(.center).lineLimit(3)
-            Button("Trở lại") { dismiss() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
+            Button("Trở lại") { exitPlayer() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
         }
         .padding(18).frame(maxWidth: 340).cinemaGlass(in: RoundedRectangle(cornerRadius: 24), tint: .black.opacity(0.54))
     }
@@ -1148,6 +1160,12 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    private func exitPlayer() {
+        saveLocalWatchProgress()
+        playback.shutdown()
+        forcePortrait()
+        dismiss()
+    }
     private func formatTime(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
