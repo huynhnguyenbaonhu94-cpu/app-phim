@@ -106,6 +106,15 @@ final class PlaybackController: ObservableObject {
         if player.timeControlStatus == .playing { player.pause(); isPlaying = false }
         else { player.play(); isPlaying = true }
     }
+    func recoverAfterForeground() {
+        guard activeURL != nil, errorMessage == nil else { return }
+        if player.currentItem?.status == .failed {
+            errorMessage = "Nguồn phát bị gián đoạn. Hãy chọn thử lại nguồn này."
+            return
+        }
+        player.play()
+        isPlaying = true
+    }
 
     func pause() {
         player.pause()
@@ -208,6 +217,7 @@ struct CinemaPlayerScreen: View {
     let resumeTime: Double?
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = PlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
     @State private var serverIndex = 0
@@ -383,9 +393,14 @@ struct CinemaPlayerScreen: View {
                         .zIndex(12)
                 }
             }
+            // Do not use a zero-distance gesture across the whole player:
+            // a Control Center swipe starts at the top edge and used to be
+            // interpreted as our brightness/volume gesture.
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in handleAdjustmentDrag(value, width: proxy.size.width) }
+                DragGesture(minimumDistance: 12, coordinateSpace: .local)
+                    .onChanged { value in
+                        handleAdjustmentDrag(value, width: proxy.size.width, height: proxy.size.height)
+                    }
                     .onEnded { _ in finishAdjustmentGesture() }
             )
             .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
@@ -405,6 +420,18 @@ struct CinemaPlayerScreen: View {
                 scheduleStopTimer()
             }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
+            .onChange(of: scenePhase) { _, phase in
+                // A system overlay (Control Center, notification shade, etc.)
+                // must never leave a pending adjustment gesture or stale HUD.
+                if phase != .active {
+                    finishAdjustmentGesture()
+                    adjustmentHideTask?.cancel()
+                    adjustmentKind = nil
+                    adjustmentPulse = false
+                } else {
+                    playback.recoverAfterForeground()
+                }
+            }
             .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
             .task {
                 await store.loadHome()
@@ -412,7 +439,9 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel(); playback.shutdown(); forcePortrait() }
+            // Scene transitions must not destroy the player. The controller
+            // is cleaned up when this fullscreen screen is actually released.
+            .onDisappear { saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel(); forcePortrait() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -761,8 +790,12 @@ struct CinemaPlayerScreen: View {
         }
     }
 
-    private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat) {
+    private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat, height: CGFloat) {
         guard !controlsLocked, picker == nil, !settingsOpen, !relatedRecommendationsVisible else { return }
+        // Keep the top 22% reserved for iOS system gestures. The previous
+        // implementation accepted any vertical drag, so opening Control
+        // Center also changed the app volume/brightness HUD.
+        guard value.startLocation.y > height * 0.22 else { return }
         if !isAdjustmentGestureActive {
             guard abs(value.translation.height) > max(8, abs(value.translation.width) * 0.75) else { return }
             isAdjustmentGestureActive = true
