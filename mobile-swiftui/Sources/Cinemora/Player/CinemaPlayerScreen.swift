@@ -348,6 +348,7 @@ struct CinemaPlayerScreen: View {
     let initialEpisode: Int
     let resumeTime: Double?
     let subtitleCustomizationEnabled: Bool
+    let onOpenRelated: ((Movie) -> Void)?
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -450,13 +451,14 @@ struct CinemaPlayerScreen: View {
             .lowercased()
     }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
         self.resumeTime = resumeTime
         self.subtitleCustomizationEnabled = subtitleCustomizationEnabled
+        self.onOpenRelated = onOpenRelated
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
         _serverIndex = State(initialValue: server)
@@ -612,10 +614,10 @@ struct CinemaPlayerScreen: View {
         }
         .persistentSystemOverlays(.hidden)
         .fullScreenCover(item: $selectedRelatedMovie, onDismiss: {
-            // Phim B được trình bày trên player A. Khi đóng B, thoát luôn A.
+            // Khi đóng trang chi tiết phim liên quan, thoát luôn player A.
             dismiss()
         }) { related in
-            RelatedMoviePlayerHost(movie: related)
+            MovieDetailScreen(slug: related.slug, autoPlayOnLoad: true)
             .environmentObject(store)
             .preferredColorScheme(.dark)
         }
@@ -1264,6 +1266,12 @@ struct CinemaPlayerScreen: View {
         withAnimation(.easeOut(duration: 0.2)) {
             relatedRecommendationsVisible = false
         }
+        if let onOpenRelated {
+            // MovieDetailScreen thay player A bằng trang phim B. B tự mở
+            // player, nên khi đóng có thể trở về đúng trang chi tiết B.
+            onOpenRelated(related)
+            return
+        }
         selectedRelatedMovie = related
     }
 
@@ -1469,69 +1477,6 @@ struct CinemaPlayerScreen: View {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
-    }
-}
-
-@MainActor
-private struct RelatedMoviePlayerHost: View {
-    let movie: Movie
-    @State private var loadedMovie: Movie?
-    @State private var isLoading = false
-    @State private var loadError: String?
-
-    private var playableMovie: Movie? {
-        loadedMovie ?? (movie.availableServers.isEmpty ? nil : movie)
-    }
-
-    var body: some View {
-        Group {
-            if let playableMovie, !playableMovie.availableServers.isEmpty {
-                CinemaPlayerScreen(
-                    movie: playableMovie,
-                    servers: playableMovie.availableServers,
-                    initialServer: 0,
-                    initialEpisode: 0,
-                    subtitleCustomizationEnabled: true
-                )
-            } else if isLoading {
-                ZStack {
-                    Color.black.ignoresSafeArea()
-                    ProgressView("Đang tải video…")
-                        .tint(Color.cinemaAccent)
-                        .foregroundStyle(.white)
-                }
-            } else {
-                ZStack {
-                    Color.black.ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        Image(systemName: "wifi.exclamationmark")
-                            .font(.system(size: 24))
-                            .foregroundStyle(Color.cinemaAccent)
-                        Text("Không thể mở video này")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text(loadError ?? "Video chưa có nguồn phát")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.65))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 28)
-                    }
-                }
-            }
-        }
-        .task(id: movie.slug) {
-            guard movie.availableServers.isEmpty else { return }
-            isLoading = true
-            defer { isLoading = false }
-            do {
-                let detail = try await CinemaAPI.shared.detail(slug: movie.slug)
-                guard !Task.isCancelled else { return }
-                loadedMovie = detail
-            } catch {
-                guard !Task.isCancelled else { return }
-                loadError = error.localizedDescription
-            }
-        }
     }
 }
 

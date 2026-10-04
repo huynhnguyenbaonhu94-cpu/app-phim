@@ -2,12 +2,20 @@ import SwiftUI
 
 struct MovieDetailScreen: View {
     let slug: String
+    private let autoPlayOnLoad: Bool
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var showPlayer = false
+    @State private var relatedMovieRoute: Movie?
+    @State private var didAutoStartPlayback = false
     @State private var edgeBackProgress: CGFloat = 0
+
+    init(slug: String, autoPlayOnLoad: Bool = false) {
+        self.slug = slug
+        self.autoPlayOnLoad = autoPlayOnLoad
+    }
 
     private var movie: Movie? { store.detailMovie }
     private var servers: [MovieServer] { movie?.availableServers ?? [] }
@@ -79,12 +87,43 @@ struct MovieDetailScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: slug) { store.loadDetail(slug: slug) }
         .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
+        .onChange(of: store.detailMovie?.slug) { _, loadedSlug in
+            guard autoPlayOnLoad,
+                  !didAutoStartPlayback,
+                  loadedSlug == slug,
+                  let loadedMovie = store.detailMovie else { return }
+            didAutoStartPlayback = true
+            guard let playableServerIndex = loadedMovie.availableServers.firstIndex(where: { !$0.episodes.isEmpty }) else { return }
+            selectedServer = playableServerIndex
+            selectedEpisode = 0
+            let playableEpisode = loadedMovie.availableServers[playableServerIndex].episodes[0]
+            store.recordLocalHistory(movie: loadedMovie, episode: playableEpisode, serverName: loadedMovie.availableServers[playableServerIndex].name)
+            showPlayer = true
+        }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let movie, episode != nil {
-                CinemaPlayerScreen(movie: movie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode)
+        .fullScreenCover(isPresented: $showPlayer, onDismiss: {
+            if relatedMovieRoute != nil {
+                relatedMovieRoute = nil
+                // Khi đóng chi tiết B, bỏ luôn player/phim A bên dưới để
+                // người dùng trở về màn hình app, không quay lại A.
+                dismiss()
+            }
+        }) {
+            if let relatedMovieRoute {
+                MovieDetailScreen(slug: relatedMovieRoute.slug, autoPlayOnLoad: true)
+                    .environmentObject(store)
+                    .preferredColorScheme(.dark)
+            } else if let movie, episode != nil {
+                CinemaPlayerScreen(
+                    movie: movie,
+                    servers: servers,
+                    initialServer: selectedServer,
+                    initialEpisode: selectedEpisode,
+                    onOpenRelated: { related in relatedMovieRoute = related }
+                )
                     .preferredColorScheme(.dark)
             }
+            .id(relatedMovieRoute?.id ?? "cinemora-player-\(slug)")
         }
     }
 
