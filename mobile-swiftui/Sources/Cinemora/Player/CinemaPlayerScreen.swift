@@ -476,7 +476,7 @@ struct CinemaPlayerScreen: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
-                } else if let embed = episode?.embedURL {
+                } else if let embed = episode?.embedURL, selectedRelatedMovie == nil {
                     EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
@@ -611,7 +611,10 @@ struct CinemaPlayerScreen: View {
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
-        .fullScreenCover(item: $selectedRelatedMovie) { related in
+        .fullScreenCover(item: $selectedRelatedMovie, onDismiss: {
+            // Phim B được trình bày trên player A. Khi đóng B, thoát luôn A.
+            dismiss()
+        }) { related in
             RelatedMoviePlayerHost(movie: related)
             .environmentObject(store)
             .preferredColorScheme(.dark)
@@ -1222,9 +1225,7 @@ struct CinemaPlayerScreen: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 16)], spacing: 18) {
                             ForEach(relatedMovies) { related in
                                 Button {
-                                    withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = false }
-                                    selectedRelatedMovie = related
-                                    hideTask?.cancel()
+                                    openRelatedMovie(related)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 7) {
                                         PosterArt(url: related.posterURL)
@@ -1251,6 +1252,19 @@ struct CinemaPlayerScreen: View {
             .padding(.vertical, 22)
             .frame(maxWidth: 980, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+
+    private func openRelatedMovie(_ related: Movie) {
+        // Stop the current item before presenting another player so its audio
+        // cannot continue underneath the related movie.
+        saveLocalWatchProgress()
+        playback.shutdown()
+        subtitles.load(url: nil)
+        hideTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) {
+            relatedRecommendationsVisible = false
+        }
+        selectedRelatedMovie = related
     }
 
     private func pickerOverlay(_ kind: PickerKind) -> some View {
@@ -1461,8 +1475,9 @@ struct CinemaPlayerScreen: View {
 @MainActor
 private struct RelatedMoviePlayerHost: View {
     let movie: Movie
-    @EnvironmentObject private var store: CinemaStore
     @State private var loadedMovie: Movie?
+    @State private var isLoading = false
+    @State private var loadError: String?
 
     private var playableMovie: Movie? {
         loadedMovie ?? (movie.availableServers.isEmpty ? nil : movie)
@@ -1478,7 +1493,7 @@ private struct RelatedMoviePlayerHost: View {
                     initialEpisode: 0,
                     subtitleCustomizationEnabled: true
                 )
-            } else if store.detailLoading {
+            } else if isLoading {
                 ZStack {
                     Color.black.ignoresSafeArea()
                     ProgressView("Đang tải video…")
@@ -1495,7 +1510,7 @@ private struct RelatedMoviePlayerHost: View {
                         Text("Không thể mở video này")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text(store.detailError ?? "Video chưa có nguồn phát")
+                        Text(loadError ?? "Video chưa có nguồn phát")
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.65))
                             .multilineTextAlignment(.center)
@@ -1506,11 +1521,16 @@ private struct RelatedMoviePlayerHost: View {
         }
         .task(id: movie.slug) {
             guard movie.availableServers.isEmpty else { return }
-            store.loadDetail(slug: movie.slug)
-        }
-        .onChange(of: store.detailMovie?.slug) { _, slug in
-            guard slug == movie.slug else { return }
-            loadedMovie = store.detailMovie
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                let detail = try await CinemaAPI.shared.detail(slug: movie.slug)
+                guard !Task.isCancelled else { return }
+                loadedMovie = detail
+            } catch {
+                guard !Task.isCancelled else { return }
+                loadError = error.localizedDescription
+            }
         }
     }
 }
@@ -1527,6 +1547,11 @@ private struct EmbedWebPlayer: UIViewRepresentable {
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {
         if uiView.url != url { uiView.load(URLRequest(url: url)) }
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
+        uiView.stopLoading()
+        uiView.evaluateJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); window.stop();", completionHandler: nil)
     }
 }
 
