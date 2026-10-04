@@ -285,7 +285,9 @@ struct TVScreen: View {
     @StateObject private var playback = TVPlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
     @State private var selectedStreamID: Int?
+    @State private var selectedStreamSnapshot: TvStream?
     @State private var selectedVideoID: Int?
+    @State private var selectedVideoMovieSnapshot: Movie?
     @State private var selectedVideoEpisode = 0
     @State private var relatedMovieRoute: Movie?
     @State private var isMuted = false
@@ -293,6 +295,7 @@ struct TVScreen: View {
     @State private var isPlayerPresented = false
 
     private var selectedStream: TvStream? {
+        if let selectedStreamSnapshot { return selectedStreamSnapshot }
         guard let selectedStreamID else { return nil }
         return store.tvStreams.first { $0.id == selectedStreamID }
     }
@@ -307,7 +310,7 @@ struct TVScreen: View {
     /// episode list. This keeps the player UI and playback behavior in one
     /// place instead of maintaining a second, less capable video player.
     private var selectedVideoMovie: Movie? {
-        selectedVideo?.asPlayerMovie
+        selectedVideoMovieSnapshot ?? selectedVideo?.asPlayerMovie
     }
 
     var body: some View {
@@ -326,6 +329,10 @@ struct TVScreen: View {
                             ForEach(store.tvStreams) { stream in
                                 TVStreamRow(stream: stream, isSelected: stream.id == selectedStream?.id) {
                                     selectedStreamID = stream.id
+                                    selectedStreamSnapshot = stream
+                                    selectedVideoID = nil
+                                    selectedVideoMovieSnapshot = nil
+                                    relatedMovieRoute = nil
                                     isPlayerPresented = true
                                 }
                             }
@@ -337,8 +344,11 @@ struct TVScreen: View {
                             ForEach(store.tvVideos) { video in
                                 TVVideoRow(video: video) {
                                     selectedVideoID = video.id
+                                    selectedVideoMovieSnapshot = video.asPlayerMovie
                                     selectedVideoEpisode = 0
                                     selectedStreamID = nil
+                                    selectedStreamSnapshot = nil
+                                    relatedMovieRoute = nil
                                     isPlayerPresented = true
                                 }
                             }
@@ -355,8 +365,17 @@ struct TVScreen: View {
             if phase == .active { Task { await store.refreshTvStreams() } }
         }
         .onChange(of: store.tvStreams) { _, streams in
-            if selectedStreamID == nil { selectedStreamID = streams.first?.id }
-            else if !streams.contains(where: { $0.id == selectedStreamID }) { selectedStreamID = streams.first?.id }
+            // During playback, keep the selected media snapshot stable. A
+            // foreground refresh must not replace it or pick another channel.
+            guard !isPlayerPresented else { return }
+            // Video đã đăng cũng đặt selectedStreamID = nil. Không tự chọn
+            // kênh live khi danh sách được refresh (ví dụ app quay lại từ
+            // Control Center), nếu không fullScreenCover sẽ đổi player giữa chừng.
+            if selectedStreamID == nil {
+                if selectedVideoID == nil { selectedStreamID = streams.first?.id }
+            } else if !streams.contains(where: { $0.id == selectedStreamID }) {
+                selectedStreamID = streams.first?.id
+            }
         }
         .onChange(of: isPlayerPresented) { _, presented in
             if !presented {
@@ -368,7 +387,12 @@ struct TVScreen: View {
         .fullScreenCover(isPresented: $isPlayerPresented, onDismiss: {
             if relatedMovieRoute != nil {
                 relatedMovieRoute = nil
-                selectedVideoID = nil
+            }
+            selectedVideoID = nil
+            selectedVideoMovieSnapshot = nil
+            selectedStreamSnapshot = nil
+            if selectedStreamID == nil || !store.tvStreams.contains(where: { $0.id == selectedStreamID }) {
+                selectedStreamID = store.tvStreams.first?.id
             }
         }) {
             Group {
