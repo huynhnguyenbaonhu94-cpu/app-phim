@@ -617,9 +617,13 @@ struct CinemaPlayerScreen: View {
             // Khi đóng trang chi tiết phim liên quan, thoát luôn player A.
             dismiss()
         }) { related in
-            MovieDetailScreen(slug: related.slug, autoPlayOnLoad: true)
-            .environmentObject(store)
-            .preferredColorScheme(.dark)
+            MovieDetailScreen(
+                slug: related.slug,
+                autoPlayOnLoad: true,
+                onExitRelated: { selectedRelatedMovie = nil }
+            )
+                .environmentObject(store)
+                .preferredColorScheme(.dark)
         }
     }
 

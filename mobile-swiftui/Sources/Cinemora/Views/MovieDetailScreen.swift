@@ -3,6 +3,7 @@ import SwiftUI
 struct MovieDetailScreen: View {
     let slug: String
     private let autoPlayOnLoad: Bool
+    private let onExitRelated: (() -> Void)?
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
@@ -12,9 +13,10 @@ struct MovieDetailScreen: View {
     @State private var didAutoStartPlayback = false
     @State private var edgeBackProgress: CGFloat = 0
 
-    init(slug: String, autoPlayOnLoad: Bool = false) {
+    init(slug: String, autoPlayOnLoad: Bool = false, onExitRelated: (() -> Void)? = nil) {
         self.slug = slug
         self.autoPlayOnLoad = autoPlayOnLoad
+        self.onExitRelated = onExitRelated
     }
 
     private var movie: Movie? { store.detailMovie }
@@ -52,7 +54,7 @@ struct MovieDetailScreen: View {
                 .scrollIndicators(.hidden)
             }
             .overlay(alignment: .topLeading) {
-                Button { dismiss() } label: {
+                Button { dismissDetail() } label: {
                     Label("Trở lại", systemImage: "chevron.left")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
@@ -79,7 +81,7 @@ struct MovieDetailScreen: View {
                         let vertical = abs(value.translation.height)
                         let shouldDismiss = value.startLocation.x <= 36 && horizontal >= 90 && horizontal > vertical * 1.25
                         edgeBackProgress = 0
-                        if shouldDismiss { dismiss() }
+                        if shouldDismiss { dismissDetail() }
                     }
             )
             .offset(x: edgeBackProgress * 18)
@@ -111,7 +113,11 @@ struct MovieDetailScreen: View {
         }) {
             Group {
                 if let relatedMovieRoute {
-                    MovieDetailScreen(slug: relatedMovieRoute.slug, autoPlayOnLoad: true)
+                    MovieDetailScreen(
+                        slug: relatedMovieRoute.slug,
+                        autoPlayOnLoad: true,
+                        onExitRelated: { showPlayer = false }
+                    )
                         .environmentObject(store)
                         .preferredColorScheme(.dark)
                 } else if let movie, episode != nil {
@@ -126,6 +132,14 @@ struct MovieDetailScreen: View {
                 }
             }
             .id(relatedMovieRoute?.id ?? "cinemora-player-\(slug)")
+        }
+    }
+
+    private func dismissDetail() {
+        if let onExitRelated {
+            onExitRelated()
+        } else {
+            dismiss()
         }
     }
 
