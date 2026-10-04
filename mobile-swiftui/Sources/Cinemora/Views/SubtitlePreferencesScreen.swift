@@ -45,12 +45,6 @@ struct SubtitlePreferencesEditor: View {
             ColorPicker("", selection: colorBinding(for: \.outlineColorHex)).labelsHidden()
         }
         sliderRow(title: "Độ dày viền chữ", value: $preferences.outlineWidth, range: 0...5, suffix: "px")
-        row(title: "Nền phụ đề", detail: preferences.backgroundEnabled ? "Đang bật" : "Đang tắt") {
-            Toggle("", isOn: $preferences.backgroundEnabled).labelsHidden().tint(Color.cinemaAccent)
-        }
-        if preferences.backgroundEnabled {
-            sliderRow(title: "Độ trong nền", value: $preferences.backgroundOpacity, range: 0.1...1, suffix: "")
-        }
         resetButton
     }
 
@@ -117,23 +111,16 @@ struct SubtitlePreferencesEditor: View {
     }
 
     private var subtitleSample: some View {
-        ZStack {
-            if preferences.backgroundEnabled {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.black.opacity(preferences.safeBackgroundOpacity))
-            }
-            Text("Đây là phụ đề xem trước")
-                .font(preferences.font)
-                .foregroundStyle(preferences.textColor)
-                .multilineTextAlignment(preferences.textAlignment)
-                .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
-                .padding(.horizontal, 12)
-                .padding(.vertical, preferences.backgroundEnabled ? 5 : 0)
-                .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
-                .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)
-                .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: preferences.outlineWidth)
-                .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: -preferences.outlineWidth)
-        }
+        Text("Đây là phụ đề xem trước")
+            .font(preferences.font)
+            .foregroundStyle(preferences.textColor)
+            .multilineTextAlignment(preferences.textAlignment)
+            .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
+            .padding(.horizontal, 12)
+            .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
+            .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)
+            .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: preferences.outlineWidth)
+            .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: -preferences.outlineWidth)
     }
 
     private func row<Content: View>(title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {

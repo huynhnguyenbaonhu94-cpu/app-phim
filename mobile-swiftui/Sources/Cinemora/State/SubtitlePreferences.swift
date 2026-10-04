@@ -11,16 +11,11 @@ struct SubtitlePreferences: Codable, Equatable {
     var textColorHex = "#FFFFFF"
     var outlineColorHex = "#000000"
     var outlineWidth: Double = 2
-    var backgroundEnabled = false
-    var backgroundColorHex = "#000000"
-    var backgroundOpacity: Double = 0.65
     var bilingual = false
 
     static let `default` = SubtitlePreferences()
     var textColor: Color { Color(hex: textColorHex) }
     var outlineColor: Color { Color(hex: outlineColorHex) }
-    var backgroundColor: Color { Color(hex: backgroundColorHex) }
-    var safeBackgroundOpacity: Double { min(max(backgroundOpacity.isFinite ? backgroundOpacity : 0.65, 0.1), 1) }
     var textAlignment: TextAlignment {
         switch alignment { case "Trái": return .leading; case "Phải": return .trailing; default: return .center }
     }
@@ -34,7 +29,7 @@ struct SubtitlePreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case enabled, fontName, bold, fontSize, bottomSpacing, alignment
         case textColorHex, outlineColorHex, outlineWidth
-        case backgroundEnabled, backgroundColorHex, backgroundOpacity, bilingual
+        case bilingual
     }
     init() {}
     init(from decoder: Decoder) throws {
@@ -48,9 +43,6 @@ struct SubtitlePreferences: Codable, Equatable {
         textColorHex = try container.decodeIfPresent(String.self, forKey: .textColorHex) ?? "#FFFFFF"
         outlineColorHex = try container.decodeIfPresent(String.self, forKey: .outlineColorHex) ?? "#000000"
         outlineWidth = try container.decodeIfPresent(Double.self, forKey: .outlineWidth) ?? 2
-        backgroundEnabled = try container.decodeIfPresent(Bool.self, forKey: .backgroundEnabled) ?? false
-        backgroundColorHex = try container.decodeIfPresent(String.self, forKey: .backgroundColorHex) ?? "#000000"
-        backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 0.65
         bilingual = try container.decodeIfPresent(Bool.self, forKey: .bilingual) ?? false
     }
     mutating func reset() { self = .default }

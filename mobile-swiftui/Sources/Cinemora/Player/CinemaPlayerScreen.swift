@@ -611,10 +611,8 @@ struct CinemaPlayerScreen: View {
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
-        .sheet(item: $selectedRelatedMovie) { related in
-            NavigationStack {
-                MovieDetailScreen(slug: related.slug)
-            }
+        .fullScreenCover(item: $selectedRelatedMovie) { related in
+            RelatedMoviePlayerHost(movie: related)
             .environmentObject(store)
             .preferredColorScheme(.dark)
         }
@@ -809,23 +807,16 @@ struct CinemaPlayerScreen: View {
     }
 
     private func subtitleText(_ text: String) -> some View {
-        ZStack {
-            if subtitlePreferences.backgroundEnabled {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.black.opacity(subtitlePreferences.safeBackgroundOpacity))
-            }
-            Text(text)
-                .font(subtitlePreferences.font)
-                .foregroundStyle(subtitlePreferences.textColor)
-                .multilineTextAlignment(subtitlePreferences.textAlignment)
-                .padding(.horizontal, 24)
-                .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
-                .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
-                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
-                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
-                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
-                .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
-        }
+        Text(text)
+            .font(subtitlePreferences.font)
+            .foregroundStyle(subtitlePreferences.textColor)
+            .multilineTextAlignment(subtitlePreferences.textAlignment)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+            .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
     }
 
     private var settingsOverlay: some View {
@@ -958,26 +949,19 @@ struct CinemaPlayerScreen: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(height: 92)
-                ZStack {
-                    if subtitlePreferences.backgroundEnabled {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.black.opacity(subtitlePreferences.safeBackgroundOpacity))
-                    }
-                    Text("Đây là phụ đề xem trước")
-                        .font(subtitlePreferences.font)
-                        .foregroundStyle(subtitlePreferences.textColor)
-                        .multilineTextAlignment(subtitlePreferences.textAlignment)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, subtitlePreferences.backgroundEnabled ? 4 : 0)
-                        .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
-                        // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
-                        // chiều với subtitle thật khi đổi khoảng cách phía dưới.
-                        .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
-                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
-                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
-                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
-                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
-                }
+                Text("Đây là phụ đề xem trước")
+                    .font(subtitlePreferences.font)
+                    .foregroundStyle(subtitlePreferences.textColor)
+                    .multilineTextAlignment(subtitlePreferences.textAlignment)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
+                    // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
+                    // chiều với subtitle thật khi đổi khoảng cách phía dưới.
+                    .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
             }
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
@@ -1240,6 +1224,7 @@ struct CinemaPlayerScreen: View {
                                 Button {
                                     withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = false }
                                     selectedRelatedMovie = related
+                                    hideTask?.cancel()
                                 } label: {
                                     VStack(alignment: .leading, spacing: 7) {
                                         PosterArt(url: related.posterURL)
@@ -1470,6 +1455,63 @@ struct CinemaPlayerScreen: View {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
+    }
+}
+
+@MainActor
+private struct RelatedMoviePlayerHost: View {
+    let movie: Movie
+    @EnvironmentObject private var store: CinemaStore
+    @State private var loadedMovie: Movie?
+
+    private var playableMovie: Movie? {
+        loadedMovie ?? (movie.availableServers.isEmpty ? nil : movie)
+    }
+
+    var body: some View {
+        Group {
+            if let playableMovie, !playableMovie.availableServers.isEmpty {
+                CinemaPlayerScreen(
+                    movie: playableMovie,
+                    servers: playableMovie.availableServers,
+                    initialServer: 0,
+                    initialEpisode: 0,
+                    subtitleCustomizationEnabled: true
+                )
+            } else if store.detailLoading {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    ProgressView("Đang tải video…")
+                        .tint(Color.cinemaAccent)
+                        .foregroundStyle(.white)
+                }
+            } else {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Color.cinemaAccent)
+                        Text("Không thể mở video này")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(store.detailError ?? "Video chưa có nguồn phát")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
+                    }
+                }
+            }
+        }
+        .task(id: movie.slug) {
+            guard movie.availableServers.isEmpty else { return }
+            store.loadDetail(slug: movie.slug)
+        }
+        .onChange(of: store.detailMovie?.slug) { _, slug in
+            guard slug == movie.slug else { return }
+            loadedMovie = store.detailMovie
+        }
     }
 }
 
