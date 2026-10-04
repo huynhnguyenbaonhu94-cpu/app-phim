@@ -45,9 +45,19 @@ struct TvVideoEpisode: Decodable, Identifiable, Hashable {
     let name: String
     let subtitleUrl: String?
     let bilingualSubtitleUrl: String?
+    let subtitles: [TvVideoSubtitle]?
     let qualities: [TvVideoQuality]
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
+}
+
+struct TvVideoSubtitle: Decodable, Identifiable, Hashable {
+    let id: Int
+    let episodeId: Int
+    let language: String
+    let subtitleUrl: String
+    let isDefault: Bool
+    var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
 }
 
 struct TvVideoQuality: Decodable, Identifiable, Hashable {

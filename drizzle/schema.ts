@@ -100,6 +100,15 @@ export const tvVideoQualities = mysqlTable("tv_video_qualities", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ episodeIndex: index("tv_video_qualities_episode_idx").on(table.episodeId) }));
 
+export const tvVideoSubtitles = mysqlTable("tv_video_subtitles", {
+  id: int("id").autoincrement().primaryKey(),
+  episodeId: int("episodeId").notNull(),
+  language: varchar("language", { length: 40 }).notNull(),
+  subtitleUrl: text("subtitleUrl").notNull(),
+  isDefault: boolean("isDefault").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ episodeIndex: index("tv_video_subtitles_episode_idx").on(table.episodeId) }));
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
@@ -109,3 +118,4 @@ export type InsertTvStream = typeof tvStreams.$inferInsert;
 export type TvVideo = typeof tvVideos.$inferSelect;
 export type TvVideoEpisode = typeof tvVideoEpisodes.$inferSelect;
 export type TvVideoQuality = typeof tvVideoQualities.$inferSelect;
+export type TvVideoSubtitle = typeof tvVideoSubtitles.$inferSelect;
