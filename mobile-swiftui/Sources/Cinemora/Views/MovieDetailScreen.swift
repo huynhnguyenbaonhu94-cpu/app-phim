@@ -109,19 +109,21 @@ struct MovieDetailScreen: View {
                 dismiss()
             }
         }) {
-            if let relatedMovieRoute {
-                MovieDetailScreen(slug: relatedMovieRoute.slug, autoPlayOnLoad: true)
-                    .environmentObject(store)
-                    .preferredColorScheme(.dark)
-            } else if let movie, episode != nil {
-                CinemaPlayerScreen(
-                    movie: movie,
-                    servers: servers,
-                    initialServer: selectedServer,
-                    initialEpisode: selectedEpisode,
-                    onOpenRelated: { related in relatedMovieRoute = related }
-                )
-                    .preferredColorScheme(.dark)
+            Group {
+                if let relatedMovieRoute {
+                    MovieDetailScreen(slug: relatedMovieRoute.slug, autoPlayOnLoad: true)
+                        .environmentObject(store)
+                        .preferredColorScheme(.dark)
+                } else if let movie, episode != nil {
+                    CinemaPlayerScreen(
+                        movie: movie,
+                        servers: servers,
+                        initialServer: selectedServer,
+                        initialEpisode: selectedEpisode,
+                        onOpenRelated: { related in relatedMovieRoute = related }
+                    )
+                        .preferredColorScheme(.dark)
+                }
             }
             .id(relatedMovieRoute?.id ?? "cinemora-player-\(slug)")
         }

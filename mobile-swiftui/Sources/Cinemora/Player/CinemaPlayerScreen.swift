@@ -1347,7 +1347,7 @@ struct CinemaPlayerScreen: View {
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
         if subtitleCustomizationEnabled {
-            var defaults = store.playbackDefaults.subtitlePreferences
+            let defaults = store.playbackDefaults.subtitlePreferences
             subtitlePreferences = defaults
         } else {
             subtitlePreferences = SubtitlePreferences()
