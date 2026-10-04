@@ -3,7 +3,7 @@ import { Film, Plus, Save, Trash2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 type Quality = { label: string; streamUrl: string; subtitleUrl: string };
-type SubtitleTrack = { language: string; subtitleUrl: string; isDefault: boolean };
+type SubtitleTrack = { language: string; subtitleUrl: string };
 type Episode = { episodeNumber: number; name: string; subtitles: SubtitleTrack[]; qualities: Quality[] };
 type VideoForm = { id?: number; name: string; logoUrl: string; description: string; sortOrder: string; isActive: boolean; allowPip: boolean; episodes: Episode[] };
 const blankQuality = (): Quality => ({ label: "1080p", streamUrl: "", subtitleUrl: "" });
@@ -64,7 +64,7 @@ export function AdminTvVideos() {
   }
 
   function edit(video: any) {
-    setForm({ id: video.id, name: video.name, logoUrl: video.logoUrl || "", description: video.description || "", sortOrder: String(video.sortOrder), isActive: video.isActive, allowPip: video.allowPip !== false, episodes: video.episodes.map((episode: any) => ({ episodeNumber: episode.episodeNumber, name: episode.name, subtitles: (episode.subtitles || []).map((track: any) => ({ language: track.language, subtitleUrl: track.subtitleUrl || "", isDefault: track.isDefault === true })), qualities: episode.qualities.map((quality: any) => ({ label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl || "" })) })) });
+    setForm({ id: video.id, name: video.name, logoUrl: video.logoUrl || "", description: video.description || "", sortOrder: String(video.sortOrder), isActive: video.isActive, allowPip: video.allowPip !== false, episodes: video.episodes.map((episode: any) => ({ episodeNumber: episode.episodeNumber, name: episode.name, subtitles: (episode.subtitles || []).filter((track: any) => track.language !== "Tiếng Việt").map((track: any) => ({ language: track.language, subtitleUrl: track.subtitleUrl || "" })), qualities: episode.qualities.map((quality: any) => ({ label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl || "" })) })) });
     requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -95,12 +95,11 @@ export function AdminTvVideos() {
       <div className="admin-video-episodes"><div className="admin-video-subtitle"><strong>Các tập và chất lượng</strong><button type="button" className="button button-ghost" onClick={() => set("episodes", [...form.episodes, blankEpisode(form.episodes.length + 1)])}><Plus size={14} /> Thêm tập</button></div>
         {form.episodes.map((episode, episodeIndex) => <div className="admin-video-episode" key={episodeIndex}>
           <div className="admin-tv-grid"><div className="admin-video-field" style={{ display: "flex", flexDirection: "column", gap: 9 }}><span>Số tập</span><input style={videoFieldStyle} type="number" min="1" value={episode.episodeNumber} onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, episodeNumber: Number(event.target.value) } : item))} /></div><div className="admin-video-field" style={{ display: "flex", flexDirection: "column", gap: 9 }}><span>Tên tập</span><input style={videoFieldStyle} value={episode.name} onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, name: event.target.value } : item))} /></div></div>
-          <div className="admin-video-subtitle"><strong>Phụ đề theo ngôn ngữ</strong><button type="button" className="button button-muted" onClick={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: [...item.subtitles, { language: "English", subtitleUrl: "", isDefault: item.subtitles.length === 0 }] } : item))}><Plus size={13} /> Thêm ngôn ngữ sub</button></div>
+          <div className="admin-video-subtitle"><strong>Phụ đề thêm theo ngôn ngữ (không mặc định)</strong><button type="button" className="button button-muted" onClick={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: [...item.subtitles, { language: "English", subtitleUrl: "" }] } : item))}><Plus size={13} /> Thêm ngôn ngữ sub</button></div>
           {episode.subtitles.map((track, trackIndex) => <div className="admin-video-quality" key={`subtitle-${trackIndex}`}>
             <input value={track.language} aria-label="Ngôn ngữ phụ đề" placeholder="English / 한국어 / 中文" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: item.subtitles.map((sub, subIndex) => subIndex === trackIndex ? { ...sub, language: event.target.value } : sub) } : item))} />
             <input type="url" value={track.subtitleUrl} aria-label={`URL phụ đề ${track.language}`} placeholder="https://.../english.vtt" onChange={event => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: item.subtitles.map((sub, subIndex) => subIndex === trackIndex ? { ...sub, subtitleUrl: event.target.value } : sub) } : item))} />
             <input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label={`Upload phụ đề ${track.language}`} onChange={event => uploadLanguageSubtitle(event.target.files?.[0], episodeIndex, trackIndex)} />
-            <label className="admin-tv-check"><input type="radio" name={`default-subtitle-${episodeIndex}`} checked={track.isDefault} onChange={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: item.subtitles.map((sub, subIndex) => ({ ...sub, isDefault: subIndex === trackIndex })) } : item))} /><span>Mặc định</span></label>
             <button type="button" className="icon-button" onClick={() => set("episodes", form.episodes.map((item, index) => index === episodeIndex ? { ...item, subtitles: item.subtitles.filter((_, subIndex) => subIndex !== trackIndex) } : item))}><Trash2 size={15} /></button>
           </div>)}
           {episode.qualities.map((quality, qualityIndex) => <div className="admin-video-quality" key={qualityIndex}>

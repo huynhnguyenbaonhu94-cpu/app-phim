@@ -4,7 +4,7 @@ import { tvVideos, tvVideoEpisodes, tvVideoQualities, tvVideoSubtitles } from ".
 import { checkStreamHealth, validateOptionalUrl, validateStreamUrl } from "./tvStreams";
 
 export type TvVideoQualityInput = { label: string; streamUrl: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null };
-export type TvVideoSubtitleInput = { language: string; subtitleUrl: string; isDefault?: boolean };
+export type TvVideoSubtitleInput = { language: string; subtitleUrl: string };
 export type TvVideoEpisodeInput = { episodeNumber: number; name?: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null; subtitles?: TvVideoSubtitleInput[]; qualities: TvVideoQualityInput[] };
 export type TvVideoPayload = { name: string; logoUrl?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean; allowPip?: boolean; episodes: TvVideoEpisodeInput[] };
 
@@ -25,11 +25,11 @@ function normalize(input: TvVideoPayload) {
     const additionalSubtitles = (episode.subtitles ?? []).map((subtitle) => {
       const subtitleUrl = validateSubtitleUrl(subtitle.subtitleUrl);
       if (!subtitleUrl) throw new Error(`Tập ${episode.episodeNumber}: URL phụ đề ${subtitle.language} không được để trống.`);
-      return { language: subtitle.language.trim().slice(0, 40) || "原语言", subtitleUrl, isDefault: subtitle.isDefault === true };
+      return { language: subtitle.language.trim().slice(0, 40) || "原语言", subtitleUrl, isDefault: false };
     });
     const subtitles = legacySubtitleUrl
       ? [{ language: "Tiếng Việt", subtitleUrl: legacySubtitleUrl, isDefault: true }, ...additionalSubtitles.filter((subtitle) => subtitle.subtitleUrl !== legacySubtitleUrl).map((subtitle) => ({ ...subtitle, isDefault: false }))]
-      : additionalSubtitles.map((subtitle, index) => ({ ...subtitle, isDefault: subtitle.isDefault || index === 0 }));
+      : additionalSubtitles.map((subtitle) => ({ ...subtitle, isDefault: false }));
     return {
       episodeNumber: Math.max(1, Math.floor(episode.episodeNumber || index + 1)),
       name: clean(episode.name, 180) || `Tập ${episode.episodeNumber || index + 1}`,
@@ -75,7 +75,11 @@ export async function listTvVideos(includeInactive = false) {
   const episodeIds = episodes.map((episode) => episode.id);
   const qualities = episodeIds.length ? await db.select().from(tvVideoQualities).where(inArray(tvVideoQualities.episodeId, episodeIds)).orderBy(asc(tvVideoQualities.id)) : [];
   const subtitles = episodeIds.length ? await db.select().from(tvVideoSubtitles).where(inArray(tvVideoSubtitles.episodeId, episodeIds)).orderBy(asc(tvVideoSubtitles.id)) : [];
-  return videos.map((video) => ({ ...video, episodes: episodes.filter((episode) => episode.videoId === video.id).map((episode) => ({ ...episode, qualities: qualities.filter((quality) => quality.episodeId === episode.id), subtitles: subtitles.filter((subtitle) => subtitle.episodeId === episode.id) })) }));
+  return videos.map((video) => ({ ...video, episodes: episodes.filter((episode) => episode.videoId === video.id).map((episode) => {
+    const episodeQualities = qualities.filter((quality) => quality.episodeId === episode.id);
+    const defaultURL = episode.subtitleUrl || episodeQualities.find((quality) => quality.subtitleUrl)?.subtitleUrl;
+    return { ...episode, qualities: episodeQualities, subtitles: subtitles.filter((subtitle) => subtitle.episodeId === episode.id).map((subtitle) => ({ ...subtitle, isDefault: Boolean(defaultURL && subtitle.subtitleUrl === defaultURL) })) };
+  }) }));
 }
 
 export async function createTvVideo(input: TvVideoPayload) {
@@ -92,7 +96,7 @@ export async function createTvVideo(input: TvVideoPayload) {
       const health = healthByURL.get(quality.streamUrl);
       return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
     }));
-    if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle, index) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault || index === 0 })));
+    if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault })));
   }
   return (await listTvVideos(true)).find((video) => video.id === videoId) || null;
 }
@@ -117,7 +121,7 @@ export async function updateTvVideo(id: number, input: TvVideoPayload) {
       const health = healthByURL.get(quality.streamUrl);
       return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
     }));
-    if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle, index) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault || index === 0 })));
+    if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault })));
   }
   return (await listTvVideos(true)).find((video) => video.id === id) || null;
 }

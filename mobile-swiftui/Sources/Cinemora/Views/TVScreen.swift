@@ -65,8 +65,8 @@ private final class TVPlaybackController: ObservableObject {
         currentTime = 0
         player.isMuted = hasSeparateAudio
         let item = AVPlayerItem(url: url)
-        // Không truy cập mediaSelectionGroup ngay lúc vừa bấm mở player.
-        // Một số HLS có thể tải metadata đồng bộ ở đây và làm nghẽn UI.
+        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
+        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -288,7 +288,7 @@ struct TVScreen: View {
     @State private var selectedStreamID: Int?
     @State private var selectedStreamSnapshot: TvStream?
     @State private var selectedVideoID: Int?
-    @State private var selectedVideoSnapshot: TvVideo?
+    @State private var selectedVideoMovieSnapshot: Movie?
     @State private var selectedVideoEpisode = 0
     @State private var relatedMovieRoute: Movie?
     @State private var isMuted = false
@@ -300,6 +300,17 @@ struct TVScreen: View {
         guard let selectedStreamID else { return nil }
         return store.tvStreams.first { $0.id == selectedStreamID }
     }
+
+    private var selectedVideo: TvVideo? {
+        guard let selectedVideoID else { return nil }
+        return store.tvVideos.first { $0.id == selectedVideoID }
+    }
+
+    /// Posted TV videos use the same movie player as catalog movies. Each
+    /// quality is represented as a source, while all sources expose the same
+    /// episode list. This keeps the player UI and playback behavior in one
+    /// place instead of maintaining a second, less capable video player.
+    private var selectedVideoMovie: Movie? { selectedVideoMovieSnapshot }
 
     var body: some View {
         ZStack {
@@ -319,7 +330,7 @@ struct TVScreen: View {
                                     selectedStreamID = stream.id
                                     selectedStreamSnapshot = stream
                                     selectedVideoID = nil
-                                    selectedVideoSnapshot = nil
+                                    selectedVideoMovieSnapshot = nil
                                     relatedMovieRoute = nil
                                     isPlayerPresented = true
                                 }
@@ -332,14 +343,17 @@ struct TVScreen: View {
                             ForEach(store.tvVideos) { video in
                                 TVVideoRow(video: video) {
                                     selectedVideoID = video.id
-                                    // Giữ nguyên dữ liệu TV để fullscreen xuất hiện ngay;
-                                    // không dựng toàn bộ Movie/Server tree trên main thread.
-                                    selectedVideoSnapshot = video
+                                    selectedVideoMovieSnapshot = nil
                                     selectedVideoEpisode = 0
                                     selectedStreamID = nil
                                     selectedStreamSnapshot = nil
                                     relatedMovieRoute = nil
-                                    isPlayerPresented = true
+                                    Task { @MainActor in
+                                        let snapshot = await Task.detached(priority: .userInitiated) { video.asPlayerMovie }.value
+                                        guard selectedVideoID == video.id else { return }
+                                        selectedVideoMovieSnapshot = snapshot
+                                        isPlayerPresented = true
+                                    }
                                 }
                             }
                         }
@@ -379,7 +393,7 @@ struct TVScreen: View {
                 relatedMovieRoute = nil
             }
             selectedVideoID = nil
-            selectedVideoSnapshot = nil
+            selectedVideoMovieSnapshot = nil
             selectedStreamSnapshot = nil
             if selectedStreamID == nil || !store.tvStreams.contains(where: { $0.id == selectedStreamID }) {
                 selectedStreamID = store.tvStreams.first?.id
@@ -396,15 +410,17 @@ struct TVScreen: View {
                         .preferredColorScheme(.dark)
                 } else if let selectedStream {
                     TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
-                } else if let selectedVideoSnapshot {
-                    TVVideoFullscreenPlayer(
-                        video: selectedVideoSnapshot,
-                        episodeIndex: $selectedVideoEpisode,
-                        playback: playback,
-                        pipCoordinator: pipCoordinator,
-                        isMuted: $isMuted,
-                        volume: $volume,
-                        isPresented: $isPlayerPresented
+                } else if let selectedVideoMovie {
+                    // Tránh dựng TvVideo -> Movie hai lần trong cùng một lần mở
+                    // fullscreen, vốn gây cảm giác đứng hình với video nhiều tập.
+                    let servers = selectedVideoMovie.availableServers
+                    CinemaPlayerScreen(
+                        movie: selectedVideoMovie,
+                        servers: servers,
+                        initialServer: 0,
+                        initialEpisode: selectedVideoEpisode,
+                        subtitleCustomizationEnabled: true,
+                        onOpenRelated: { related in relatedMovieRoute = related }
                     )
                 }
             }
@@ -419,6 +435,66 @@ struct TVScreen: View {
         playback.setMuted(isMuted)
     }
 
+}
+
+private extension TvVideo {
+    /// Convert the TV API shape into the shared player shape. URLs are
+    /// resolved through tvStreamURL so protected TV hosts receive the same
+    /// proxy treatment as live TV streams.
+    var asPlayerMovie: Movie {
+        var qualityLabels: [String] = []
+        for quality in episodes.flatMap(\.qualities) where !qualityLabels.contains(quality.label) {
+            qualityLabels.append(quality.label)
+        }
+        let servers = qualityLabels.compactMap { label -> MovieServer? in
+            let qualityEpisodes = episodes.compactMap { tvEpisode -> MovieEpisode? in
+                guard let quality = tvEpisode.qualities.first(where: { $0.label == label }),
+                      let streamURL = quality.streamURL else { return nil }
+                return MovieEpisode(
+                    name: tvEpisode.name,
+                    slug: "tv-\(id)-episode-\(tvEpisode.id)-quality-\(quality.id)",
+                    filename: "",
+                    embedUrl: nil,
+                    streamUrl: streamURL.absoluteString,
+                    subtitleUrl: (quality.subtitleURL ?? tvEpisode.subtitleURL)?.absoluteString,
+                    bilingualSubtitleUrl: (quality.bilingualSubtitleURL ?? tvEpisode.bilingualSubtitleURL)?.absoluteString
+                )
+            }
+            guard !qualityEpisodes.isEmpty else { return nil }
+            return MovieServer(name: label, isAi: false, episodes: qualityEpisodes)
+        }
+        return Movie(
+            apiID: "tv-video-\(id)",
+            slug: "tv-video-\(id)",
+            name: name,
+            originName: nil,
+            poster: logoUrl,
+            backdrop: logoUrl,
+            year: nil,
+            quality: nil,
+            episodeCurrent: episodes.count > 1 ? "\(episodes.count) tập" : "Tập 1",
+            episodeTotal: episodes.count,
+            time: nil,
+            lang: nil,
+            description: description,
+            rating: nil,
+            categories: nil,
+            countries: nil,
+            actors: nil,
+            actorProfiles: nil,
+            directors: nil,
+            views: nil,
+            alternativeNames: nil,
+            status: nil,
+            tmdbId: nil,
+            imdbId: nil,
+            createdAt: nil,
+            updatedAt: nil,
+            servers: servers,
+            allowPip: allowPip,
+            episodeGroups: nil
+        )
+    }
 }
 
 private enum TVVideoFit: String, CaseIterable, Identifiable {
@@ -715,7 +791,6 @@ private struct TVVideoFullscreenPlayer: View {
     @State private var locked = false
     @State private var fit: TVVideoFit = .fit
     @State private var qualityIndex = 0
-    @State private var selectedSubtitleID: Int?
     @State private var settingsOpen = false
     @State private var advancedSettings = false
     @State private var autoNext = true
@@ -749,11 +824,11 @@ private struct TVVideoFullscreenPlayer: View {
             if settingsOpen { settingsOverlay.transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))).zIndex(10) }
         }
         .preferredColorScheme(.dark).statusBarHidden(true).persistentSystemOverlays(.hidden)
-        .onAppear { loadCurrent(); scheduleHide(); forceLandscape() }
+        .onAppear { loadCurrent(); scheduleHide() }
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: settingsOpen)
         .animation(.easeOut(duration: 0.24), value: advancedSettings)
-        .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown(); forcePortrait() }
-        .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; selectedSubtitleID = nil; loadCurrent() }
+        .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown() }
+        .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
         .onChange(of: stopTimer) { _, _ in scheduleStop() }
         .onChange(of: stopAtEpisode) { _, _ in scheduleStop() }
@@ -793,7 +868,6 @@ private struct TVVideoFullscreenPlayer: View {
                     HStack { Image(systemName: "gearshape.fill").foregroundStyle(Color.cinemaAccent); Text("Cài đặt video").font(.system(size: 18, weight: .black, design: .rounded)); Spacer(); Button { withAnimation { settingsOpen = false } } label: { Image(systemName: "xmark").frame(width: 30, height: 30).background(.white.opacity(0.08), in: Circle()) }.buttonStyle(.plain) }
                     Text("QUICK CONTROLS").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1).foregroundStyle(Color.cinemaAccent)
                     Toggle(isOn: $subtitlePreferences.enabled) { Label("Phụ đề", systemImage: "captions.bubble.fill") }.tint(Color.cinemaAccent)
-                    subtitleLanguagePicker
                     Toggle(isOn: $autoNext) { Label("Tự động chuyển tập", systemImage: "forward.end.fill") }.tint(Color.cinemaAccent)
                     Toggle(isOn: $stopAtEpisode) { Label("Dừng ở tập đã chọn", systemImage: "stop.circle.fill") }.tint(Color.cinemaAccent)
                     if stopAtEpisode { Picker("Tập dừng", selection: $stopAtEpisodeIndex) { ForEach(video.episodes.indices, id: \.self) { index in Text(video.episodes[index].name).tag(index) } }.pickerStyle(.menu).tint(Color.cinemaAccent) }
@@ -824,47 +898,12 @@ private struct TVVideoFullscreenPlayer: View {
     private func loadCurrent() {
         guard let episode, episode.qualities.indices.contains(qualityIndex), let quality, let url = quality.streamURL else { return }
         playback.load(url); playback.setVolume(volume); playback.setMuted(isMuted)
-        let tracks = episode.subtitles ?? []
-        let selected = tracks.first(where: { $0.id == selectedSubtitleID }) ?? tracks.first(where: { $0.isDefault })
-        selectedSubtitleID = selected?.id
-        subtitles.load(url: selected?.subtitleURL ?? quality.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
-    }
-    private var subtitleLanguagePicker: some View {
-        let tracks = episode?.subtitles ?? []
-        return Group {
-            if !tracks.isEmpty {
-                Picker("Ngôn ngữ phụ đề", selection: Binding(get: { selectedSubtitleID ?? tracks.first(where: { $0.isDefault })?.id ?? tracks[0].id }, set: { newID in
-                    selectedSubtitleID = newID
-                    let now = playback.player.currentTime().seconds
-                    let track = tracks.first(where: { $0.id == newID })
-                    subtitles.load(url: track?.subtitleURL)
-                    subtitles.update(time: now, bilingual: false)
-                })) {
-                    ForEach(tracks) { track in Text(track.language).tag(track.id) }
-                }.pickerStyle(.menu).tint(Color.cinemaAccent)
-            }
-        }
+        subtitles.load(url: quality.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
     }
     private func moveEpisode(_ offset: Int) { let next = episodeIndex + offset; guard video.episodes.indices.contains(next) else { playback.togglePlayback(); return }; episodeIndex = next }
     private func skip(_ seconds: Double) { let now = playback.player.currentTime().seconds; playback.player.seek(to: CMTime(seconds: max(0, now + seconds), preferredTimescale: 600)) }
     private func scheduleStop() { stopTask?.cancel(); guard let seconds = stopTimer.seconds else { return }; stopTask = Task { @MainActor in try? await Task.sleep(for: .seconds(seconds)); guard !Task.isCancelled else { return }; playback.pause() } }
     private func scheduleHide() { hideTask?.cancel(); hideTask = Task { @MainActor in try? await Task.sleep(for: .seconds(4)); guard !Task.isCancelled else { return }; withAnimation { controlsVisible = false } } }
-
-    private func forceLandscape() { forceOrientation(.landscapeRight) }
-    private func forcePortrait() { forceOrientation(.portrait) }
-    private func forceOrientation(_ orientation: UIInterfaceOrientation) {
-        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
-        CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        if let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }),
-           #available(iOS 16.0, *) {
-            let mask: UIInterfaceOrientationMask = isLandscape ? .landscape : .portrait
-            windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
-            windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        }
-    }
 }
 
 private struct TVStreamRow: View {

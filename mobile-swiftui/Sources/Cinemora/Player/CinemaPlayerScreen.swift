@@ -102,8 +102,8 @@ final class PlaybackController: ObservableObject {
         activeURL = url
         isLoading = true
         let item = AVPlayerItem(url: url)
-        // Không truy cập mediaSelectionGroup ngay khi vừa bấm mở player.
-        // Một số HLS tải metadata đồng bộ ở đây và làm nghẽn main thread.
+        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
+        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
         item.preferredForwardBufferDuration = 8
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -111,8 +111,7 @@ final class PlaybackController: ObservableObject {
                 guard self.activeRequestID == requestID else { return }
                 switch item.status {
                 case .readyToPlay:
-                    // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng;
-                    // subtitle tùy chỉnh được render bởi SubtitleController.
+                    // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng.
                     if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
                         item.select(nil, in: group)
                     }
@@ -217,8 +216,6 @@ final class SubtitleController: ObservableObject {
     private var cues: [SubtitleCue] = []
     private var bilingualCues: [SubtitleCue] = []
     private var loadTask: Task<Void, Never>?
-    private var lastTime: Double = 0
-    private var lastBilingual = false
     func load(url: URL?, bilingualURL: URL? = nil) {
         loadTask?.cancel(); cues = []; bilingualCues = []; currentText = nil
         guard url != nil || bilingualURL != nil else { return }
@@ -237,7 +234,6 @@ final class SubtitleController: ObservableObject {
                Self.normalizedTrack(text) != Self.normalizedTrack(primary ?? "") {
                 self.bilingualCues = Self.parse(text)
             }
-            self.update(time: self.lastTime, bilingual: self.lastBilingual)
         }
     }
     private static func fetchText(_ url: URL?) async -> String? {
@@ -250,8 +246,6 @@ final class SubtitleController: ObservableObject {
     }
     func update(time: Double, bilingual: Bool) {
         guard time.isFinite else { return }
-        lastTime = time
-        lastBilingual = bilingual
         let primary = cues.last(where: { time >= $0.start && time < $0.end })
         let secondary = bilingual ? bilingualCues.last(where: { time >= $0.start && time < $0.end }) : nil
         var seen = Set<String>()
