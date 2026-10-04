@@ -287,6 +287,7 @@ struct TVScreen: View {
     @State private var selectedStreamID: Int?
     @State private var selectedVideoID: Int?
     @State private var selectedVideoEpisode = 0
+    @State private var relatedMovieRoute: Movie?
     @State private var isMuted = false
     @State private var volume = 1.0
     @State private var isPlayerPresented = false
@@ -364,15 +365,38 @@ struct TVScreen: View {
             }
         }
         .onDisappear { playback.shutdown(); store.stopTvLiveUpdates() }
-        .fullScreenCover(isPresented: $isPlayerPresented) {
-            if let selectedStream {
-                TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
-            } else if let selectedVideoMovie {
-                // Tránh dựng TvVideo -> Movie hai lần trong cùng một lần mở
-                // fullscreen, vốn gây cảm giác đứng hình với video nhiều tập.
-                let servers = selectedVideoMovie.availableServers
-                CinemaPlayerScreen(movie: selectedVideoMovie, servers: servers, initialServer: 0, initialEpisode: selectedVideoEpisode, subtitleCustomizationEnabled: true)
+        .fullScreenCover(isPresented: $isPlayerPresented, onDismiss: {
+            if relatedMovieRoute != nil {
+                relatedMovieRoute = nil
+                selectedVideoID = nil
             }
+        }) {
+            Group {
+                if let relatedMovieRoute {
+                    MovieDetailScreen(
+                        slug: relatedMovieRoute.slug,
+                        autoPlayOnLoad: true,
+                        onExitRelated: { isPlayerPresented = false }
+                    )
+                        .environmentObject(store)
+                        .preferredColorScheme(.dark)
+                } else if let selectedStream {
+                    TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
+                } else if let selectedVideoMovie {
+                    // Tránh dựng TvVideo -> Movie hai lần trong cùng một lần mở
+                    // fullscreen, vốn gây cảm giác đứng hình với video nhiều tập.
+                    let servers = selectedVideoMovie.availableServers
+                    CinemaPlayerScreen(
+                        movie: selectedVideoMovie,
+                        servers: servers,
+                        initialServer: 0,
+                        initialEpisode: selectedVideoEpisode,
+                        subtitleCustomizationEnabled: true,
+                        onOpenRelated: { related in relatedMovieRoute = related }
+                    )
+                }
+            }
+            .id(relatedMovieRoute?.id ?? "tv-player-\(selectedVideoID ?? selectedStreamID ?? 0)")
         }
     }
 

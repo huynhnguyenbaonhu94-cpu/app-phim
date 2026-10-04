@@ -108,7 +108,7 @@ struct MovieDetailScreen: View {
                 relatedMovieRoute = nil
                 // Khi đóng chi tiết B, bỏ luôn player/phim A bên dưới để
                 // người dùng trở về màn hình app, không quay lại A.
-                dismiss()
+                dismissDetail()
             }
         }) {
             Group {
