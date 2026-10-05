@@ -49,7 +49,7 @@ export function AuthDialog({ open, onClose }: AuthDialogProps) {
         {error && <div className="auth-error" role="alert">{error}</div>}
         <button className="button button-primary auth-submit" type="submit" disabled={pending}>{pending ? "Đang xử lý..." : mode === "login" ? "Đăng nhập" : "Tạo tài khoản"}</button>
       </form>
-      <small className="auth-security-note">Mật khẩu được mã hóa an toàn và không bao giờ hiển thị trong trình duyệt.</small>
+      <small className="auth-security-note">Mật khẩu được băm một chiều ở máy chủ; không lưu dưới dạng văn bản thuần trong trình duyệt.</small>
     </section>
   </div>;
 }

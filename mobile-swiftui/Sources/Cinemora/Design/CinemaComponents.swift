@@ -52,10 +52,8 @@ private final class PosterImageCache {
 
 struct PosterArt: View {
     let url: URL?
-    @Environment(\.scenePhase) private var scenePhase
     @State private var image: UIImage?
     @State private var isLoading = false
-    @State private var reloadID = 0
 
     var body: some View {
         GeometryReader { proxy in
@@ -74,14 +72,9 @@ struct PosterArt: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
-            .task(id: "\(url?.absoluteString ?? "")-\(reloadID)") {
+            .task(id: url) {
                 await loadImage()
             }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { reloadID += 1 }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { reloadID += 1 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -102,12 +95,12 @@ struct PosterArt: View {
         image = nil
         isLoading = true
         defer { isLoading = false }
-        // Hosting Node.js có thể mất vài giây để storage proxy sẵn sàng sau restart.
-        let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(700), .seconds(1.5), .seconds(3), .seconds(5)]
+        let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(700), .seconds(1.5)]
         for attempt in 0..<retryDelays.count {
             do {
-                var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
-                request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+                var request = URLRequest(url: url)
+                request.cachePolicy = .returnCacheDataElseLoad
+                request.timeoutInterval = 20
                 let (data, response) = try await PosterImageCache.session.data(for: request)
                 guard !Task.isCancelled,
                       let http = response as? HTTPURLResponse,
@@ -123,10 +116,6 @@ struct PosterArt: View {
                 try? await Task.sleep(for: retryDelays[attempt])
             }
         }
-        // Đừng giữ fallback vĩnh viễn nếu server vừa cold-start; cho phép task tự thử lại.
-        guard !Task.isCancelled else { return }
-        try? await Task.sleep(for: .seconds(3))
-        if !Task.isCancelled { reloadID += 1 }
     }
 
     private var fallback: some View {

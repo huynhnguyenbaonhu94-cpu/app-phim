@@ -173,20 +173,23 @@ struct FavoritesScreen: View {
 }
 
 struct SavedHubScreen: View {
+    @EnvironmentObject private var store: CinemaStore
+
     var body: some View {
         ZStack {
             CinemaBackground()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 7) {
-                        SectionEyebrow(text: "LƯU TRÊN THIẾT BỊ")
+                        SectionEyebrow(text: store.accountUser == nil ? "LƯU TRÊN THIẾT BỊ" : "ĐỒNG BỘ TÀI KHOẢN")
                         Text("Lịch sử & Yêu thích")
                             .font(.system(size: 29, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("Quản lý phim đang xem, phim yêu thích và gửi yêu cầu phim mới.")
+                        Text("Đăng nhập để đồng bộ lịch sử, yêu thích và cài đặt trên mọi thiết bị.")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.62))
                     }
+                    savedDestination(icon: "person.crop.circle", title: "Tài khoản Cinemora", detail: store.accountUser?.email ?? "Đăng nhập, quản lý thiết bị và mật khẩu", destination: AccountManagementScreen())
                     savedDestination(icon: "clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục những bộ phim bạn đang xem", destination: WatchHistoryScreen())
                     savedDestination(icon: "heart.fill", title: "Yêu thích", detail: "Danh sách phim đã lưu", destination: FavoritesScreen())
                     savedDestination(icon: "slider.horizontal.3", title: "Cài đặt mặc định", detail: "Thiết lập cách phát video mỗi khi mở phim", destination: PlaybackDefaultsScreen())

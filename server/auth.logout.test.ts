@@ -27,6 +27,7 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
 
   const ctx: TrpcContext = {
     user,
+    sessionId: null,
     req: {
       protocol: "https",
       headers: {},
@@ -58,5 +59,16 @@ describe("auth.logout", () => {
       httpOnly: true,
       path: "/",
     });
+  });
+});
+
+describe("auth.me", () => {
+  it("returns only public account fields", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller({ ...ctx, user: { ...ctx.user!, passwordHash: "secret-hash" } });
+    const result = await caller.auth.me();
+    expect(result).toEqual({ id: 1, name: "Sample User", email: "sample@example.com", role: "user" });
+    expect(result).not.toHaveProperty("passwordHash");
+    expect(result).not.toHaveProperty("openId");
   });
 });

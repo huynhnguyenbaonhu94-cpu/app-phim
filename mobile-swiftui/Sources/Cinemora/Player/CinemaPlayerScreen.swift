@@ -112,11 +112,9 @@ final class PlaybackController: ObservableObject {
                 switch item.status {
                 case .readyToPlay:
                     // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng.
-                    do {
-                        if let group = try await item.asset.loadMediaSelectionGroup(for: .legible) {
-                            item.select(nil, in: group)
-                        }
-                    } catch { /* Subtitle metadata is optional. */ }
+                    if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+                        item.select(nil, in: group)
+                    }
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                     if let startAt, startAt > 0, startAt.isFinite {
                         let duration = item.duration.seconds

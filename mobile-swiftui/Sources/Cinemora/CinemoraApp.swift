@@ -52,6 +52,8 @@ private struct LaunchLoader: View {
 @MainActor
 struct CinemoraTabShell: View {
     @EnvironmentObject private var connectivity: ConnectivityMonitor
+    @EnvironmentObject private var store: CinemaStore
+    @State private var showReLogin = false
     @State private var showLaunchLoader = true
 
     var body: some View {
@@ -93,11 +95,28 @@ struct CinemoraTabShell: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if showLaunchLoader { LaunchLoader().transition(.opacity) }
+            if store.requiresRelogin {
+                VStack(spacing: 16) {
+                    Image(systemName: "iphone.slash").font(.system(size: 42, weight: .bold)).foregroundStyle(Color.cinemaAccent)
+                    Text("ĐÃ ĐĂNG XUẤT THIẾT BỊ").font(.system(size: 20, weight: .black, design: .rounded)).foregroundStyle(.white)
+                    Text(store.reloginMessage).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.65)).multilineTextAlignment(.center)
+                    Button("Đăng nhập lại") { showReLogin = true }
+                        .font(.system(size: 13, weight: .black)).foregroundStyle(Color.cinemaInk)
+                        .padding(.horizontal, 28).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
+                }
+                .padding(28).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.cinemaInk.opacity(0.98).ignoresSafeArea()).zIndex(200)
+            }
         }
         .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
         .task {
+            await store.refreshAccount()
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
+        }
+        .sheet(isPresented: $showReLogin) {
+            NavigationStack { AccountManagementScreen() }
+                .environmentObject(store)
+                .preferredColorScheme(.dark)
         }
     }
 

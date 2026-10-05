@@ -1,11 +1,15 @@
-import { Film, Heart, Home, Layers, List, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
+import { Film, Heart, Home, Layers, List, LogIn, LogOut, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { CINEMORA_LOGO_URL } from "@/const";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { AuthDialog } from "@/components/AuthDialog";
 
 export function SiteHeader() {
   const [location, navigate] = useLocation();
+  const auth = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const [value, setValue] = useState(location.startsWith("/search") ? new URLSearchParams(window.location.search).get("q") || "" : "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
@@ -26,6 +30,14 @@ export function SiteHeader() {
   ];
 
   useEffect(() => { setMenuOpen(false); setDesktopMenuOpen(false); setMobileSearchOpen(false); }, [location]);
+  useEffect(() => {
+    const onExpired = () => {
+      window.alert("Phiên đăng nhập này đã bị đăng xuất từ một thiết bị khác. Vui lòng đăng nhập lại.");
+      setAuthOpen(true);
+    };
+    window.addEventListener("cinemora-session-expired", onExpired);
+    return () => window.removeEventListener("cinemora-session-expired", onExpired);
+  }, []);
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -87,6 +99,16 @@ export function SiteHeader() {
             <Heart size={15} fill={location.startsWith("/account") ? "currentColor" : "none"} />
             <span>Thư viện</span>
           </Link>
+
+          <div className="account-actions">
+            {auth.loading ? <div className="account-loading" /> : auth.user ? <>
+              <Link href="/account" className="account-pill" aria-label="Mở tài khoản">
+                <span className="account-avatar">{(auth.user.name || auth.user.email || "C").slice(0, 1).toUpperCase()}</span>
+                <span className="account-name">{auth.user.name || auth.user.email}</span>
+              </Link>
+              <button type="button" className="logout-button" aria-label="Đăng xuất" title="Đăng xuất" onClick={() => { void auth.logout(); }}><LogOut size={13} /></button>
+            </> : <button type="button" className="login-button" onClick={() => setAuthOpen(true)}><LogIn size={14} /> Đăng nhập</button>}
+          </div>
 
           {/* Mobile search trigger — intentionally outside the hamburger menu */}
           <button
@@ -168,6 +190,7 @@ export function SiteHeader() {
           })}
         </nav>
       </div>
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </>
   );
 }

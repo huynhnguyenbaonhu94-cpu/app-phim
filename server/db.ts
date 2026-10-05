@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { AccountSession, InsertUser, accountPreferences, accountSessions, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
+import { accountPreferences, authSessions, InsertUser, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -23,11 +23,16 @@ export async function getDb() {
 
 async function ensureDefaultAdmin(db: ReturnType<typeof drizzle>) {
   const email = (process.env.ADMIN_EMAIL || "admin@cungcapicloud.id.vn").trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || "Cinemora@2026!";
+  const password = process.env.ADMIN_PASSWORD;
   const name = process.env.ADMIN_NAME || "Cinemora Admin";
-  if (!email || password.length < 8) throw new Error("ADMIN_EMAIL/ADMIN_PASSWORD không hợp lệ.");
+  if (!email) throw new Error("ADMIN_EMAIL không hợp lệ.");
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing.length > 0) return;
+  if (!password) {
+    console.warn("[Database] ADMIN_PASSWORD chưa được cấu hình; bỏ qua việc tạo tài khoản quản trị mặc định.");
+    return;
+  }
+  if (password.length < 12) throw new Error("ADMIN_PASSWORD phải có ít nhất 12 ký tự.");
   const { hashPassword } = await import("./localAuth");
   await db.insert(users).values({
     openId: `local_admin_${randomUUID()}`,
@@ -92,9 +97,9 @@ export async function ensureTvVideosCompatibility(db: ReturnType<typeof drizzle>
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* column already exists */ } }
 }
 
-export async function ensureAccountCompatibility(db: ReturnType<typeof drizzle>) {
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_sessions (id varchar(64) NOT NULL PRIMARY KEY, userId int NOT NULL, tokenHash varchar(128) NOT NULL UNIQUE, deviceId varchar(160) NOT NULL, deviceName varchar(120) NOT NULL, deviceModel varchar(160) NULL, ipAddress varchar(64) NULL, userAgent text NULL, lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, revokedAt timestamp NULL, revokeReason varchar(40) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY account_sessions_user_device_idx (userId, deviceId), KEY account_sessions_user_active_idx (userId, revokedAt)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_preferences (userId int NOT NULL PRIMARY KEY, playbackDefaults text NULL, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+async function ensureAccountTables(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS auth_sessions (id varchar(36) NOT NULL PRIMARY KEY, userId int NOT NULL, deviceName varchar(120) NOT NULL, deviceModel varchar(120) NULL, platform varchar(40) NOT NULL, ipAddress varchar(64) NULL, userAgent varchar(500) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, revokedAt timestamp NULL, revokeReason varchar(40) NULL, KEY auth_sessions_user_active_idx (userId, revokedAt), KEY auth_sessions_last_seen_idx (lastSeenAt)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_preferences (userId int NOT NULL PRIMARY KEY, preferences json NOT NULL, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`));
 }
 
 export async function initializeDatabase() {
@@ -111,7 +116,7 @@ export async function initializeDatabase() {
     }
     await ensureTvStreamsCompatibility(db);
     await ensureTvVideosCompatibility(db);
-    await ensureAccountCompatibility(db);
+    await ensureAccountTables(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -147,13 +152,6 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
-export async function getUserById(id: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
-  return result[0];
-}
-
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
@@ -167,12 +165,6 @@ export async function createLocalUser(input: { name: string; email: string; pass
   const openId = `local_${randomUUID()}`;
   await db.insert(users).values({ openId, name: input.name, email: input.email, passwordHash: input.passwordHash, loginMethod: "email" });
   return getUserByOpenId(openId);
-}
-
-export async function updateUserPassword(userId: number, passwordHash: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
 export async function listFavorites(userId: number) {
@@ -235,4 +227,91 @@ export async function listWatchHistory(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(movieWatchHistory).where(eq(movieWatchHistory.userId, userId)).orderBy(desc(movieWatchHistory.lastWatchedAt)).limit(100);
+}
+
+export async function removeWatchHistory(userId: number, movieSlug?: string, episodeSlug?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const filters = [eq(movieWatchHistory.userId, userId)];
+  if (movieSlug) filters.push(eq(movieWatchHistory.movieSlug, movieSlug));
+  if (episodeSlug) filters.push(eq(movieWatchHistory.episodeSlug, episodeSlug));
+  await db.delete(movieWatchHistory).where(and(...filters));
+  return { success: true } as const;
+}
+
+export async function createAuthSession(input: {
+  id: string; userId: number; deviceName: string; deviceModel?: string | null; platform: string;
+  ipAddress?: string | null; userAgent?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  return db.transaction(async (tx) => {
+    // Lock the owner row so two simultaneous sign-ins cannot both exceed the five-device cap.
+    const owner = await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId)).for("update").limit(1);
+    if (!owner.length) throw new Error("Tài khoản không còn tồn tại.");
+    const active = await tx.select({ id: authSessions.id }).from(authSessions).where(and(eq(authSessions.userId, input.userId), sql`${authSessions.revokedAt} IS NULL`, sql`${authSessions.createdAt} > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 365 DAY)`));
+    if (active.length >= 5) throw new Error("Tài khoản đã đăng nhập đủ 5 thiết bị. Hãy đăng xuất một thiết bị cũ rồi thử lại.");
+    await tx.insert(authSessions).values({
+      id: input.id, userId: input.userId, deviceName: input.deviceName,
+      deviceModel: input.deviceModel || null, platform: input.platform,
+      ipAddress: input.ipAddress || null, userAgent: input.userAgent || null,
+    });
+    return true;
+  });
+}
+
+export async function getAuthSession(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(authSessions).where(eq(authSessions.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function touchAuthSession(id: string) {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(authSessions).set({ lastSeenAt: new Date() }).where(and(eq(authSessions.id, id), sql`${authSessions.revokedAt} IS NULL`, sql`${authSessions.lastSeenAt} < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 15 SECOND)`));
+  const current = await db.select({ revokedAt: authSessions.revokedAt }).from(authSessions).where(eq(authSessions.id, id)).limit(1);
+  return Boolean(current[0] && !current[0].revokedAt);
+}
+
+export async function listAuthSessions(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(authSessions).where(and(eq(authSessions.userId, userId), sql`${authSessions.revokedAt} IS NULL`, sql`${authSessions.createdAt} > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 365 DAY)`)).orderBy(desc(authSessions.lastSeenAt));
+}
+
+export async function revokeAuthSession(userId: number, sessionId: string, reason = "kicked") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: reason })
+    .where(and(eq(authSessions.userId, userId), eq(authSessions.id, sessionId), sql`${authSessions.revokedAt} IS NULL`));
+  return Number((rows as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) > 0;
+}
+
+export async function revokeAllAuthSessions(userId: number, reason = "logout_all") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(authSessions).set({ revokedAt: new Date(), revokeReason: reason })
+    .where(and(eq(authSessions.userId, userId), sql`${authSessions.revokedAt} IS NULL`));
+}
+
+export async function changeUserPassword(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+}
+
+export async function getAccountPreferences(userId: number) {
+  const db = await getDb();
+  if (!db) return {};
+  const rows = await db.select({ preferences: accountPreferences.preferences }).from(accountPreferences).where(eq(accountPreferences.userId, userId)).limit(1);
+  return rows[0]?.preferences ?? {};
+}
+
+export async function saveAccountPreferences(userId: number, preferences: Record<string, unknown>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.insert(accountPreferences).values({ userId, preferences }).onDuplicateKeyUpdate({ set: { preferences, updatedAt: new Date() } });
+  return preferences;
 }

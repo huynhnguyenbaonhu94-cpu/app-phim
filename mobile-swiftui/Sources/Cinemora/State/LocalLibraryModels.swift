@@ -44,6 +44,16 @@ struct LocalMovieRecord: Codable, Identifiable, Hashable {
         self.quality = movie.quality
         self.savedAt = savedAt
     }
+
+    init(slug: String, name: String, originName: String?, poster: String?, year: Int?, quality: String? = nil, savedAt: Date = Date()) {
+        self.slug = slug
+        self.name = name
+        self.originName = originName
+        self.poster = poster
+        self.year = year
+        self.quality = quality
+        self.savedAt = savedAt
+    }
 }
 
 struct LocalWatchRecord: Codable, Identifiable, Hashable {

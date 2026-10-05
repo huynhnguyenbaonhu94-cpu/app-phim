@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 struct HomeSection: Identifiable {
     let id: String
@@ -31,12 +32,10 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var localHistory: [LocalWatchRecord] = []
     @Published var playbackDefaults = PlaybackDefaults()
     @Published private(set) var accountUser: AccountUser?
-    @Published private(set) var accountDevices: [AccountDevice] = []
-    @Published private(set) var accountError: String?
-    @Published var requiresLoginMessage: String?
-    @Published private(set) var accountBusy = false
-    @Published private(set) var accountSyncing = false
-    @Published private(set) var accountSyncPending = false
+    @Published private(set) var accountIsBusy = false
+    @Published private(set) var accountSyncMessage: String?
+    @Published var requiresRelogin = false
+    @Published var reloginMessage = "Thiết bị này đã bị đăng xuất khỏi tài khoản. Vui lòng đăng nhập lại."
     @Published private(set) var tvStreams: [TvStream] = []
     @Published private(set) var tvVideos: [TvVideo] = []
     @Published private(set) var tvLoading = false
@@ -56,6 +55,9 @@ final class CinemaStore: ObservableObject {
     private var searchRequestID = 0
     private var tvEventsTask: Task<Void, Never>?
     private var tvVideoRefreshTask: Task<Void, Never>?
+    private var accountHeartbeatTask: Task<Void, Never>?
+    private var historyCloudSyncTask: Task<Void, Never>?
+    private var preferencesCloudSyncTask: Task<Void, Never>?
     private var lastHomeRefreshAt: Date?
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
@@ -85,7 +87,152 @@ final class CinemaStore: ObservableObject {
         }
     }
 
-    deinit { tvEventsTask?.cancel(); tvVideoRefreshTask?.cancel() }
+    deinit { tvEventsTask?.cancel(); tvVideoRefreshTask?.cancel(); accountHeartbeatTask?.cancel(); historyCloudSyncTask?.cancel(); preferencesCloudSyncTask?.cancel() }
+
+    func refreshAccount() async {
+        guard AccountTokenStore.read() != nil else { return }
+        do {
+            guard let user = try await api.accountMe() else {
+                clearAccountLocally(kicked: true)
+                return
+            }
+            accountUser = user
+            startAccountHeartbeat()
+            await synchronizeAccount()
+        } catch {
+            accountSyncMessage = "Chưa kiểm tra được phiên đăng nhập: \(error.localizedDescription)"
+        }
+    }
+
+    func loginAccount(email: String, password: String) async throws {
+        accountIsBusy = true
+        defer { accountIsBusy = false }
+        let response = try await api.loginAccount(email: email, password: password, deviceName: UIDevice.current.name, deviceModel: UIDevice.current.model)
+        try acceptAuthentication(response)
+        await synchronizeAccount()
+    }
+
+    func registerAccount(name: String, email: String, password: String) async throws {
+        accountIsBusy = true
+        defer { accountIsBusy = false }
+        let response = try await api.registerAccount(name: name, email: email, password: password, deviceName: UIDevice.current.name, deviceModel: UIDevice.current.model)
+        try acceptAuthentication(response)
+        await synchronizeAccount()
+    }
+
+    private func acceptAuthentication(_ response: AccountAuthResponse) throws {
+        guard let token = response.token, !token.isEmpty else { throw APIError.server("Máy chủ chưa trả về token cho ứng dụng. Hãy cập nhật backend rồi thử lại.") }
+        AccountTokenStore.save(token)
+        accountUser = response.user
+        requiresRelogin = false
+        accountSyncMessage = nil
+        startAccountHeartbeat()
+    }
+
+    private func startAccountHeartbeat() {
+        accountHeartbeatTask?.cancel()
+        accountHeartbeatTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(25))
+                guard !Task.isCancelled, AccountTokenStore.read() != nil else { return }
+                do {
+                    guard let user = try await self.api.accountMe() else {
+                        self.clearAccountLocally(kicked: true)
+                        return
+                    }
+                    self.accountUser = user
+                } catch let error as APIError {
+                    if case .http(let status) = error, status == 401 {
+                        self.clearAccountLocally(kicked: true)
+                        return
+                    }
+                } catch { }
+            }
+        }
+    }
+
+    private func synchronizeAccount() async {
+        guard accountUser != nil else { return }
+        do {
+            async let remoteFavoritesTask = api.cloudFavorites()
+            async let remoteHistoryTask = api.cloudHistory()
+            let remoteFavorites = try await remoteFavoritesTask
+            let remoteHistory = try await remoteHistoryTask
+
+            var mergedFavorites = Dictionary(uniqueKeysWithValues: remoteFavorites.map { item in
+                (item.movieSlug, LocalMovieRecord(slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, year: item.year, savedAt: parseAccountDate(item.addedAt) ?? .distantPast))
+            })
+            for local in localFavorites {
+                if mergedFavorites[local.slug].map({ $0.savedAt < local.savedAt }) ?? true { mergedFavorites[local.slug] = local }
+            }
+            localFavorites = Array(mergedFavorites.values.sorted { $0.savedAt > $1.savedAt }.prefix(100))
+
+            var mergedHistory: [String: LocalWatchRecord] = [:]
+            for item in remoteHistory {
+                let movie = LocalMovieRecord(slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, year: item.year)
+                let record = LocalWatchRecord(movie: movie, episodeName: item.episodeName, episodeSlug: item.episodeSlug, serverName: nil, streamURL: nil, embedURL: nil, watchedSeconds: Double(item.watchedSeconds), durationSeconds: Double(item.durationSeconds), watchedAt: parseAccountDate(item.lastWatchedAt) ?? .distantPast)
+                if mergedHistory[item.movieSlug].map({ $0.watchedAt < record.watchedAt }) ?? true { mergedHistory[item.movieSlug] = record }
+            }
+            for local in localHistory {
+                if mergedHistory[local.movie.slug].map({ $0.watchedAt < local.watchedAt }) ?? true { mergedHistory[local.movie.slug] = local }
+            }
+            localHistory = Array(mergedHistory.values.sorted { $0.watchedAt > $1.watchedAt }.prefix(100))
+            persistLocalLibrary()
+
+            // Upload any pre-account local library once it has been merged with cloud data.
+            for item in localFavorites { try? await api.addCloudFavorite(item) }
+            for item in localHistory { try? await api.recordCloudHistory(item) }
+
+            if let remoteDefaults = try await api.cloudPlaybackDefaults() {
+                playbackDefaults = remoteDefaults
+                persistPlaybackDefaults()
+            } else {
+                try await api.saveCloudPlaybackDefaults(playbackDefaults)
+            }
+            accountSyncMessage = "Đã đồng bộ lịch sử, yêu thích và cài đặt với tài khoản."
+        } catch {
+            accountSyncMessage = "Đăng nhập được nhưng đồng bộ chưa hoàn tất: \(error.localizedDescription)"
+        }
+    }
+
+    func listAccountDevices() async throws -> [AccountDevice] { try await api.accountDevices() }
+
+    func kickAccountDevice(_ device: AccountDevice) async throws {
+        _ = try await api.kickDevice(device.id)
+        if device.current { clearAccountLocally(kicked: true) }
+    }
+
+    func changeAccountPassword(current: String, new: String, confirm: String) async throws {
+        _ = try await api.changePassword(current: current, new: new, confirm: confirm)
+    }
+
+    func logoutAllAccountDevices() async throws {
+        _ = try await api.logoutAllDevices()
+        clearAccountLocally(kicked: true, message: "Bạn đã đăng xuất khỏi tất cả thiết bị. Hãy đăng nhập lại nếu muốn tiếp tục.")
+    }
+
+    func logoutAccount() async {
+        do { _ = try await api.logoutCurrent() }
+        catch { accountSyncMessage = "Đã xóa phiên trên máy này; máy chủ có thể chưa nhận được yêu cầu đăng xuất." }
+        clearAccountLocally(kicked: false)
+    }
+
+    private func clearAccountLocally(kicked: Bool, message: String? = nil) {
+        accountHeartbeatTask?.cancel()
+        historyCloudSyncTask?.cancel()
+        preferencesCloudSyncTask?.cancel()
+        AccountTokenStore.clear()
+        accountUser = nil
+        localFavorites = []
+        localHistory = []
+        localDefaults.removeObject(forKey: favoritesKey)
+        localDefaults.removeObject(forKey: historyKey)
+        playbackDefaults = PlaybackDefaults()
+        persistPlaybackDefaults()
+        requiresRelogin = kicked
+        if let message { reloginMessage = message }
+    }
 
     func startTvLiveUpdates() async {
         guard tvEventsTask == nil else { return }
@@ -170,15 +317,19 @@ final class CinemaStore: ObservableObject {
     func toggleFavorite(_ movie: Movie) {
         if let index = localFavorites.firstIndex(where: { $0.slug == movie.slug }) {
             localFavorites.remove(at: index)
+            if accountUser != nil { Task { try? await api.removeCloudFavorite(movie.slug) } }
         } else {
-            localFavorites.insert(LocalMovieRecord(movie: movie), at: 0)
+            let record = LocalMovieRecord(movie: movie)
+            localFavorites.insert(record, at: 0)
             localFavorites = Array(localFavorites.prefix(100))
+            if accountUser != nil { Task { try? await api.addCloudFavorite(record) } }
         }
         persistLocalLibrary()
     }
 
     func removeFavorite(_ record: LocalMovieRecord) {
         localFavorites.removeAll { $0.slug == record.slug }
+        if accountUser != nil { Task { try? await api.removeCloudFavorite(record.slug) } }
         persistLocalLibrary()
     }
 
@@ -188,88 +339,53 @@ final class CinemaStore: ObservableObject {
         localHistory.insert(record, at: 0)
         localHistory = Array(localHistory.prefix(100))
         persistLocalLibrary()
+        scheduleCloudHistorySync(record)
     }
 
     func removeHistory(_ record: LocalWatchRecord) {
         localHistory.removeAll { $0.id == record.id }
+        if accountUser != nil { Task { try? await api.deleteCloudHistory(record) } }
         persistLocalLibrary()
     }
 
     func clearFavorites() {
+        if accountUser != nil {
+            let old = localFavorites
+            Task { for item in old { try? await api.removeCloudFavorite(item.slug) } }
+        }
         localFavorites.removeAll()
         persistLocalLibrary()
     }
 
     func clearHistory() {
         localHistory.removeAll()
+        if accountUser != nil { Task { try? await api.clearCloudHistory() } }
         persistLocalLibrary()
     }
 
     func savePlaybackDefaults() {
-        let encoder = JSONEncoder()
-        if let data = try? encoder.encode(playbackDefaults) {
-            localDefaults.set(data, forKey: playbackDefaultsKey)
+        persistPlaybackDefaults()
+        guard accountUser != nil else { return }
+        preferencesCloudSyncTask?.cancel()
+        preferencesCloudSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled, self.accountUser != nil else { return }
+            try? await self.api.saveCloudPlaybackDefaults(self.playbackDefaults)
         }
     }
 
-    func login(email: String, password: String) async {
-        accountBusy = true; accountSyncPending = true
-        defer { accountBusy = false; accountSyncPending = false }
-        do { accountUser = try await api.login(email: email, password: password); try await syncAccount(); accountError = nil }
-        catch { accountError = error.localizedDescription }
+    private func persistPlaybackDefaults() {
+        if let data = try? JSONEncoder().encode(playbackDefaults) { localDefaults.set(data, forKey: playbackDefaultsKey) }
     }
 
-    func register(name: String, email: String, password: String) async {
-        accountBusy = true; accountSyncPending = true
-        defer { accountBusy = false; accountSyncPending = false }
-        do { accountUser = try await api.register(name: name, email: email, password: password); try await syncAccount(); accountError = nil }
-        catch { accountError = error.localizedDescription }
-    }
-
-    func logout() async { accountBusy = true; defer { accountBusy = false }; try? await api.logout(); accountUser = nil; accountDevices = [] }
-    func refreshAccountDevices() async { do { accountDevices = try await api.devices() } catch { accountError = error.localizedDescription } }
-    func kickDevice(_ device: AccountDevice) async { accountBusy = true; defer { accountBusy = false }; do { try await api.kickDevice(sessionId: device.id); await refreshAccountDevices() } catch { accountError = error.localizedDescription } }
-    func logoutAllDevices() async { accountBusy = true; defer { accountBusy = false }; do { try await api.logoutAllDevices(); accountUser = nil; accountDevices = [] } catch { accountError = error.localizedDescription } }
-    func syncAccountData() async {
-        guard accountUser != nil else {
-            requiresLoginMessage = "Vui lòng đăng nhập để đồng bộ dữ liệu tài khoản."
-            return
+    private func scheduleCloudHistorySync(_ record: LocalWatchRecord) {
+        guard accountUser != nil else { return }
+        historyCloudSyncTask?.cancel()
+        historyCloudSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !Task.isCancelled, self.accountUser != nil else { return }
+            try? await self.api.recordCloudHistory(record)
         }
-        accountBusy = true
-        accountSyncPending = true
-        defer { accountBusy = false; accountSyncPending = false }
-        do {
-            try await syncAccount()
-            requiresLoginMessage = nil
-            accountError = nil
-        } catch {
-            accountError = error.localizedDescription
-            requiresLoginMessage = error.localizedDescription
-        }
-    }
-    func changePassword(current: String, new: String, confirm: String, logoutAll: Bool) async -> Bool {
-        accountBusy = true; defer { accountBusy = false }
-        do { let result = try await api.changePassword(current: current, new: new, confirm: confirm, logoutAll: logoutAll); if result.loggedOutCurrent { accountUser = nil }; return result.success }
-        catch { accountError = error.localizedDescription; return false }
-    }
-
-    private func syncAccount() async throws {
-        accountSyncing = true
-        defer { accountSyncing = false }
-        async let favorites = api.favorites()
-        async let history = api.history()
-        async let preferences = api.preferences()
-        let (cloudFavorites, cloudHistory, cloudPreferences) = try await (favorites, history, preferences)
-        localFavorites = cloudFavorites.map { item in LocalMovieRecord(movie: Movie(apiID: nil, slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, backdrop: item.posterUrl, year: item.year, quality: nil, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil, allowPip: nil, episodeGroups: nil)) }
-        localHistory = cloudHistory.map { item in LocalWatchRecord(movie: LocalMovieRecord(movie: Movie(apiID: nil, slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, backdrop: item.posterUrl, year: item.year, quality: nil, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil, allowPip: nil, episodeGroups: nil)), episodeName: item.episodeName, episodeSlug: item.episodeSlug, serverName: nil, streamURL: nil, embedURL: nil, watchedSeconds: Double(item.watchedSeconds), durationSeconds: Double(item.durationSeconds), watchedAt: ISO8601DateFormatter().date(from: item.lastWatchedAt) ?? Date()) }
-        if let cloudPreferences {
-            playbackDefaults.autoAdvanceEpisodes = cloudPreferences.autoAdvanceEpisodes
-            playbackDefaults.stopTimer = cloudPreferences.stopTimer
-            playbackDefaults.pictureInPicture = cloudPreferences.pictureInPicture
-            playbackDefaults.subtitlePreferences = cloudPreferences.subtitlePreferences
-            savePlaybackDefaults()
-        }
-        await refreshAccountDevices()
     }
 
     private func persistLocalLibrary() {

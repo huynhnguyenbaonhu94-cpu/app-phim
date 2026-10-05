@@ -4,8 +4,8 @@ import { Link, useLocation } from "wouter";
 import { CinemaPlayer } from "@/components/CinemaPlayer";
 import { PageShell, SkeletonCard } from "@/components/CinemaChrome";
 import { trpc } from "@/lib/trpc";
-import { isFavorite, listHistory, saveHistory, toggleFavorite } from "@/lib/localLibrary";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { isFavorite, listHistory, saveHistory, saveWebAutoNextPreference, subscribeLibrary, toggleFavorite } from "@/lib/localLibrary";
 
 type Episode = { name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null };
 type MovieDetail = { slug: string; name: string; originName: string; poster: string | null; backdrop: string | null; year: number | null; quality: string; episodeCurrent: string; episodeTotal: number | null; time: string; lang: string; type: string; description: string; rating: number | null; categories: Array<{ name: string; slug: string }>; countries: Array<{ name: string; slug: string }>; alternativeNames: string[]; actors: string[]; actorProfiles?: Array<{ name: string; image: string | null }>; directors: string[]; status: string; views: number | null; isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null; createdAt: string | null; updatedAt: string | null; servers: Array<{ name: string; isAi: boolean; episodes: Episode[] }> };
@@ -108,25 +108,29 @@ function ActorGallery({ actors }: { actors: ActorProfile[] }) {
 
 export default function DetailPage({ slug }: { slug: string }) {
   const [, navigate] = useLocation();
+  const auth = useAuth();
   const query = trpc.cinema.detail.useQuery({ slug }, { staleTime: 60_000 });
-  const { user } = useAuth();
-  const cloudFavorite = trpc.account.isFavorite.useQuery({ movieSlug: slug }, { enabled: Boolean(user) });
-  const cloudHistory = trpc.account.history.useQuery(undefined, { enabled: Boolean(user) });
-  const addCloudFavorite = trpc.account.addFavorite.useMutation({ onSuccess: () => void cloudFavorite.refetch() });
-  const removeCloudFavorite = trpc.account.removeFavorite.useMutation({ onSuccess: () => void cloudFavorite.refetch() });
-  const recordCloudHistory = trpc.account.recordHistory.useMutation();
   const movie = query.data as MovieDetail | undefined;
   const [serverIndex, setServerIndex] = useState(0);
   const [episodeIndex, setEpisodeIndex] = useState(0);
   const [favorite, setFavorite] = useState(() => isFavorite(slug));
+  const [, setLibraryRevision] = useState(0);
   const [adLocked, setAdLocked] = useState(false);
   const [autoNext, setAutoNext] = useState(() => {
     try { return localStorage.getItem("cinemora_autonext") !== "off"; } catch { return true; }
   });
 
   useEffect(() => { setServerIndex(0); setEpisodeIndex(0); }, [slug]);
-  useEffect(() => { setFavorite(user ? Boolean(cloudFavorite.data) : isFavorite(slug)); }, [slug, user, cloudFavorite.data]);
+  useEffect(() => { setFavorite(isFavorite(slug)); }, [slug]);
+  useEffect(() => subscribeLibrary(() => { setFavorite(isFavorite(slug)); setLibraryRevision((revision) => revision + 1); }), [slug]);
   useEffect(() => { setAdLocked(false); }, [slug]);
+  useEffect(() => {
+    const refreshPreference = () => {
+      try { setAutoNext(localStorage.getItem("cinemora_autonext") !== "off"); } catch { setAutoNext(true); }
+    };
+    window.addEventListener("cinemora-account-preferences", refreshPreference);
+    return () => window.removeEventListener("cinemora-account-preferences", refreshPreference);
+  }, []);
 
   const server = movie?.servers?.[serverIndex];
   const episode = server?.episodes?.[episodeIndex];
@@ -134,14 +138,14 @@ export default function DetailPage({ slug }: { slug: string }) {
 
   // Look up saved progress for this episode
   const savedProgress = episode
-    ? (user ? cloudHistory.data?.find((h) => h.movieSlug === slug && h.episodeSlug === episode.slug) : listHistory().find((h) => h.slug === slug && h.episodeSlug === episode.slug))
+    ? listHistory().find((h) => h.slug === slug && h.episodeSlug === episode.slug)
     : undefined;
   const startAt = savedProgress && savedProgress.watchedSeconds > 10 ? savedProgress.watchedSeconds : undefined;
 
   // onProgress callback - receives real currentTime & duration from the player
   const handleProgress = useCallback((currentTime: number, duration: number) => {
     if (!movie || !episode) return;
-    const payload = {
+    saveHistory({
       id: movie.slug,
       slug: movie.slug,
       name: movie.name,
@@ -156,15 +160,13 @@ export default function DetailPage({ slug }: { slug: string }) {
       episodeName: episode.name,
       watchedSeconds: Math.floor(currentTime),
       durationSeconds: Math.floor(duration),
-    };
-    if (user) recordCloudHistory.mutate({ movieSlug: movie.slug, movieName: movie.name, originName: movie.originName, posterUrl: movie.poster, year: movie.year, episodeSlug: episode.slug, episodeName: episode.name, watchedSeconds: Math.floor(currentTime), durationSeconds: Math.floor(duration) });
-    else saveHistory(payload);
-  }, [episode, movie, user, recordCloudHistory]);
+    });
+  }, [episode, movie]);
 
   // Save initial history entry when episode changes
   useEffect(() => {
     if (!movie || !episode) return;
-    const payload = {
+    saveHistory({
       id: movie.slug,
       slug: movie.slug,
       name: movie.name,
@@ -179,11 +181,10 @@ export default function DetailPage({ slug }: { slug: string }) {
       episodeName: episode.name,
       watchedSeconds: savedProgress?.watchedSeconds ?? 0,
       durationSeconds: savedProgress?.durationSeconds ?? 0,
-    };
-    if (!user) saveHistory(payload);
+    });
   // Only run when episode changes, not on every savedProgress update
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episode?.slug, movie?.slug, user]);
+  }, [episode?.slug, movie?.slug]);
 
   function selectEpisode(nextServerIndex: number, nextEpisodeIndex: number) {
     if (adLocked) return;
@@ -213,18 +214,14 @@ export default function DetailPage({ slug }: { slug: string }) {
   function toggleAutoNext() {
     setAutoNext((v) => {
       const next = !v;
-      try { localStorage.setItem("cinemora_autonext", next ? "on" : "off"); } catch {}
+      saveWebAutoNextPreference(next);
       return next;
     });
   }
 
   function handleFavorite() {
     if (!movie) return;
-    if (user) {
-      if (favorite) removeCloudFavorite.mutate({ movieSlug: movie.slug });
-      else addCloudFavorite.mutate({ movieSlug: movie.slug, movieName: movie.name, originName: movie.originName, posterUrl: movie.poster, year: movie.year });
-      setFavorite(!favorite);
-    } else setFavorite(toggleFavorite({ id: movie.slug, slug: movie.slug, name: movie.name, originName: movie.originName, poster: movie.poster, year: movie.year, quality: movie.quality, episodeCurrent: movie.episodeCurrent, rating: movie.rating, categories: movie.categories }));
+    setFavorite(toggleFavorite({ id: movie.slug, slug: movie.slug, name: movie.name, originName: movie.originName, poster: movie.poster, year: movie.year, quality: movie.quality, episodeCurrent: movie.episodeCurrent, rating: movie.rating, categories: movie.categories }));
   }
 
   if (query.isLoading) return <PageShell><main className="content-wrap inner-page detail-loading"><div className="detail-backdrop-skeleton skeleton" /><div className="detail-loading-grid"><SkeletonCard /><div><div className="skeleton skeleton-line wide" /><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line wide" /></div></div></main></PageShell>;
@@ -232,8 +229,8 @@ export default function DetailPage({ slug }: { slug: string }) {
 
   const totalEpisodes = movie.servers.reduce((total, item) => total + item.episodes.length, 0);
 
-  return <PageShell><main className="detail-page"><section className="detail-hero"><div className="detail-backdrop" style={movie.backdrop ? { backgroundImage: `url(${movie.backdrop})` } : undefined} /><div className="detail-overlay" /><div className="detail-inner content-wrap"><Link href="/" className="back-link detail-back"><ArrowLeft size={15} /> Trở về khám phá</Link><div className="detail-copy"><div className="detail-poster">{movie.poster ? <img src={movie.poster} alt={movie.name} /> : <Film size={40} />}</div><div className="detail-info"><span className="hero-kicker">CINEMORA FEATURE</span><h1>{movie.name}</h1><p className="detail-origin">{movie.originName}</p><div className="hero-tags"><span>{movie.year || "—"}</span><span>{movie.quality}</span><span>{movie.lang}</span><span>{movie.time || "Full"}</span><span>{movie.status || "Đang cập nhật"}</span>{movie.isTheatrical && <span>Chiếu rạp</span>}</div><p className="detail-description">{movie.description}</p><div className="detail-actions">{canPlayEpisode ? <a className="button button-primary" href="#watch"><Play size={16} fill="currentColor" /> Xem ngay</a> : <span className="button button-muted"><Clock3 size={16} /> Chưa có nguồn phát</span>}<button className={`button ${favorite ? "button-favorite-active" : "button-ghost"}`} onClick={handleFavorite}><Heart size={16} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Đã yêu thích" : "Yêu thích"}</button>{movie.trailerUrl && <a className="button button-ghost" href={movie.trailerUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Trailer</a>}</div><span className="auth-hint">Yêu thích và lịch sử được lưu trên thiết bị này.</span></div></div></div></section>
-    <section className="content-wrap detail-body"><div className="detail-main"><div id="watch" className="watch-card">{canPlayEpisode ? <CinemaPlayer streamUrl={episode?.streamUrl || undefined} fallbackEmbedUrl={episode?.embedUrl || undefined} title={`${movie.name} - ${episode?.name || "Tập phim"}`} posterUrl={movie.poster || undefined} startAt={startAt} onProgress={handleProgress} onEnded={handleEnded} onAdStateChange={setAdLocked} onNextEpisode={nextEpisode ? handleNextEpisode : undefined} nextEpisodeLabel={nextEpisodeLabel} autoNextEnabled={autoNext} onAutoNextToggle={toggleAutoNext} /> : <div className="player-empty"><Play size={32} /><strong>Nguồn phim đang được cập nhật</strong><span>Hãy quay lại sau nhé.</span></div>}</div>{movie.servers.length > 0 && <div className="episode-panel"><div className="episode-head"><div><span className="eyebrow">CHỌN TẬP</span><h2>Tất cả tập phim</h2></div><span>{totalEpisodes} tập · {movie.servers.length} nguồn</span></div>{movie.servers.map((serverItem, currentServerIndex) => {
+  return <PageShell><main className="detail-page"><section className="detail-hero"><div className="detail-backdrop" style={movie.backdrop ? { backgroundImage: `url(${movie.backdrop})` } : undefined} /><div className="detail-overlay" /><div className="detail-inner content-wrap"><Link href="/" className="back-link detail-back"><ArrowLeft size={15} /> Trở về khám phá</Link><div className="detail-copy"><div className="detail-poster">{movie.poster ? <img src={movie.poster} alt={movie.name} /> : <Film size={40} />}</div><div className="detail-info"><span className="hero-kicker">CINEMORA FEATURE</span><h1>{movie.name}</h1><p className="detail-origin">{movie.originName}</p><div className="hero-tags"><span>{movie.year || "—"}</span><span>{movie.quality}</span><span>{movie.lang}</span><span>{movie.time || "Full"}</span><span>{movie.status || "Đang cập nhật"}</span>{movie.isTheatrical && <span>Chiếu rạp</span>}</div><p className="detail-description">{movie.description}</p><div className="detail-actions">{canPlayEpisode ? <a className="button button-primary" href="#watch"><Play size={16} fill="currentColor" /> Xem ngay</a> : <span className="button button-muted"><Clock3 size={16} /> Chưa có nguồn phát</span>}<button className={`button ${favorite ? "button-favorite-active" : "button-ghost"}`} onClick={handleFavorite}><Heart size={16} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Đã yêu thích" : "Yêu thích"}</button>{movie.trailerUrl && <a className="button button-ghost" href={movie.trailerUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Trailer</a>}</div><span className="auth-hint">{auth.user ? "Yêu thích và tiến độ xem được đồng bộ với tài khoản." : "Yêu thích và lịch sử được lưu trên thiết bị này; đăng nhập để đồng bộ."}</span></div></div></div></section>
+      <section className="content-wrap detail-body"><div className="detail-main"><div id="watch" className="watch-card">{canPlayEpisode ? <CinemaPlayer streamUrl={episode?.streamUrl || undefined} fallbackEmbedUrl={episode?.embedUrl || undefined} title={`${movie.name} - ${episode?.name || "Tập phim"}`} posterUrl={movie.poster || undefined} startAt={startAt} onProgress={handleProgress} onEnded={handleEnded} onAdStateChange={setAdLocked} onNextEpisode={nextEpisode ? handleNextEpisode : undefined} nextEpisodeLabel={nextEpisodeLabel} autoNextEnabled={autoNext} onAutoNextToggle={toggleAutoNext} /> : <div className="player-empty"><Play size={32} /><strong>Nguồn phim đang được cập nhật</strong><span>Hãy quay lại sau nhé.</span></div>}</div>{movie.servers.length > 0 && <div className="episode-panel"><div className="episode-head"><div><span className="eyebrow">CHỌN TẬP</span><h2>Tất cả tập phim</h2></div><span>{totalEpisodes} tập · {movie.servers.length} nguồn</span></div>{movie.servers.map((serverItem, currentServerIndex) => {
           return <div className="episode-server" key={`${serverItem.name}-${currentServerIndex}`}>
             <div className="episode-server-heading"><strong>{serverItem.name}</strong>{serverItem.isAi && <span>AI Vietsub</span>}</div>
             <div className="episode-list">{serverItem.episodes.map((item, idx) => <button disabled={adLocked} key={`${item.slug}-${idx}`} className={`${currentServerIndex === serverIndex && idx === episodeIndex ? "active" : ""}${adLocked ? " ad-locked" : ""}`} onClick={() => selectEpisode(currentServerIndex, idx)}><span>{currentServerIndex === serverIndex && idx === episodeIndex ? <Check size={13} /> : null}</span>{item.name}</button>)}</div>

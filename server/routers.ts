@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, updateUserPassword } from "./db";
+import { addFavorite, changeUserPassword, createLocalUser, getAccountPreferences, getUserByEmail, isFavorite, listAuthSessions, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, revokeAllAuthSessions, revokeAuthSession, saveAccountPreferences } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
-import { getAccountPreferences, listAccountSessions, revokeAccountSession, revokeAllAccountSessions, saveAccountPreferences } from "./accountSessions";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
@@ -23,7 +22,25 @@ const movieSnapshot = z.object({
 });
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
+const deviceInput = z.object({ deviceName: z.string().trim().min(1).max(120).optional(), deviceModel: z.string().trim().max(120).optional(), platform: z.enum(["ios", "web", "android"]).optional() });
+const publicUser = (user: NonNullable<import("../drizzle/schema").User> | null) => user ? ({ id: user.id, name: user.name, email: user.email, role: user.role }) : null;
 const movieRequestCooldown = new Map<string, number>();
+const authRateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function consumeAuthRateLimit(key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  if (authRateBuckets.size > 5_000) {
+    authRateBuckets.forEach((bucket, bucketKey) => { if (bucket.resetAt <= now) authRateBuckets.delete(bucketKey); });
+  }
+  const bucket = authRateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    authRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+  if (bucket.count >= max) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Bạn thao tác quá nhiều lần. Hãy thử lại sau ít phút." });
+  bucket.count += 1;
+}
+
 const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((value) => {
   if (!value) return true;
   if (value.startsWith("/uploads/tv-posters/") || value.startsWith("uploads/tv-posters/")) return true;
@@ -34,41 +51,50 @@ function setSessionCookie(ctx: { req: Parameters<typeof getSessionCookieOptions>
   ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
 }
 
-function sessionMetadata(req: { headers: Record<string, string | string[] | undefined>; ip?: string }) {
-  const header = (name: string) => { const value = req.headers[name.toLowerCase()]; return Array.isArray(value) ? value[0] : value; };
-  const userAgent = header("user-agent") || "Unknown browser";
-  return {
-    deviceId: header("x-device-id") || `web:${userAgent.slice(0, 120)}`,
-    deviceName: header("x-device-name") || "Trình duyệt web",
-    ...(header("x-device-model") ? { deviceModel: header("x-device-model") } : {}),
-    ...(req.ip ? { ipAddress: req.ip } : {}),
-    userAgent,
-  };
-}
-
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput })).mutation(async ({ ctx, input }) => {
+    me: publicProcedure.query(opts => publicUser(opts.ctx.user)),
+    current: publicProcedure.query(opts => ({ user: publicUser(opts.ctx.user) })),
+    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput }).extend(deviceInput.shape)).mutation(async ({ ctx, input }) => {
+      consumeAuthRateLimit(`register:${ctx.req.ip || "unknown"}`, 5, 60 * 60 * 1000);
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Email này đã được đăng ký" });
       const user = await createLocalUser({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) });
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Không thể tạo tài khoản" });
-      setSessionCookie(ctx, await createLocalSession(user, sessionMetadata(ctx.req)));
-      return { user };
+      const session = await createLocalSession(user, ctx.req, input);
+      setSessionCookie(ctx, session.token);
+      return { user: publicUser(user), ...(input.platform && input.platform !== "web" ? { token: session.token } : {}) };
     }),
-    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128) })).mutation(async ({ ctx, input }) => {
+    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128) }).extend(deviceInput.shape)).mutation(async ({ ctx, input }) => {
+      consumeAuthRateLimit(`login:${ctx.req.ip || "unknown"}:${input.email}`, 10, 15 * 60 * 1000);
       const user = await getUserByEmail(input.email);
       if (!user || !(await verifyPassword(input.password, user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email hoặc mật khẩu không đúng" });
-      try { setSessionCookie(ctx, await createLocalSession(user, sessionMetadata(ctx.req))); }
-      catch (error) { throw new TRPCError({ code: "FORBIDDEN", message: error instanceof Error ? error.message : "Không thể tạo phiên đăng nhập" }); }
-      return { user };
+      let session: Awaited<ReturnType<typeof createLocalSession>>;
+      try { session = await createLocalSession(user, ctx.req, input); }
+      catch (error) {
+        if (error instanceof Error && error.message.includes("5 thiết bị")) throw new TRPCError({ code: "FORBIDDEN", message: error.message });
+        throw error;
+      }
+      setSessionCookie(ctx, session.token);
+      return { user: publicUser(user), ...(input.platform && input.platform !== "web" ? { token: session.token } : {}) };
     }),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      if (ctx.session) void revokeAccountSession(ctx.session.id, "logout");
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      if (ctx.user && ctx.sessionId) await revokeAuthSession(ctx.user.id, ctx.sessionId, "logout");
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+    changePassword: protectedProcedure.input(z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordInput, confirmPassword: z.string().min(1).max(128), logoutAll: z.boolean() })).mutation(async ({ ctx, input }) => {
+      if (input.newPassword !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Hai mật khẩu mới không khớp." });
+      if (!(await verifyPassword(input.currentPassword, ctx.user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Mật khẩu cũ không đúng." });
+      if (input.currentPassword === input.newPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Mật khẩu mới phải khác mật khẩu cũ." });
+      await changeUserPassword(ctx.user.id, await hashPassword(input.newPassword));
+      if (input.logoutAll) {
+        await revokeAllAuthSessions(ctx.user.id, "password_changed");
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      }
+      return { success: true, loggedOut: input.logoutAll } as const;
     }),
   }),
   cinema: router({
@@ -159,41 +185,47 @@ export const appRouter = router({
   account: router({
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     isFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).query(({ ctx, input }) => isFavorite(ctx.user.id, input.movieSlug)),
-    addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
-    removeFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).mutation(({ ctx, input }) => removeFavorite(ctx.user.id, input.movieSlug)),
+    addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => { await addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) }); return { success: true } as const; }),
+    removeFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).mutation(async ({ ctx, input }) => { await removeFavorite(ctx.user.id, input.movieSlug); return { success: true } as const; }),
     history: protectedProcedure.query(async ({ ctx }) => (await listWatchHistory(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     recordHistory: protectedProcedure.input(movieSnapshot.extend({
       episodeSlug: z.string().trim().max(140).optional(),
       episodeName: z.string().trim().max(255).optional(),
       watchedSeconds: z.number().int().min(0).max(86_400).optional(),
       durationSeconds: z.number().int().min(0).max(86_400).optional(),
-    })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
+    })).mutation(async ({ ctx, input }) => { await recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) }); return { success: true } as const; }),
+    deleteHistory: protectedProcedure.input(z.object({ movieSlug: slugInput, episodeSlug: z.string().trim().max(140).optional() })).mutation(({ ctx, input }) => removeWatchHistory(ctx.user.id, input.movieSlug, input.episodeSlug)),
+    clearHistory: protectedProcedure.input(z.object({})).mutation(({ ctx }) => removeWatchHistory(ctx.user.id)),
     devices: protectedProcedure.query(async ({ ctx }) => {
-      const now = Date.now();
-      return (await listAccountSessions(ctx.user.id)).map((device) => ({
-        id: device.id, deviceName: device.deviceName, deviceModel: device.deviceModel, ipAddress: device.ipAddress,
-        userAgent: device.userAgent, createdAt: device.createdAt, lastSeenAt: device.lastSeenAt,
-        online: !device.revokedAt && now - new Date(device.lastSeenAt).getTime() < 90_000,
-        current: device.id === ctx.session?.id, revoked: Boolean(device.revokedAt), revokeReason: device.revokeReason,
+      const sessions = await listAuthSessions(ctx.user.id);
+      const onlineCutoff = Date.now() - 90_000;
+      return sessions.map((session) => ({
+        id: session.id, deviceName: session.deviceName, deviceModel: session.deviceModel,
+        platform: session.platform, ipAddress: session.ipAddress,
+        createdAt: session.createdAt.toISOString(), lastSeenAt: session.lastSeenAt.toISOString(),
+        online: session.lastSeenAt.getTime() >= onlineCutoff,
+        current: session.id === ctx.sessionId,
       }));
     }),
-    heartbeat: protectedProcedure.mutation(async ({ ctx }) => ({ success: Boolean(ctx.session) })),
-    kickDevice: protectedProcedure.input(z.object({ sessionId: z.string().min(16).max(64) })).mutation(async ({ ctx, input }) => {
-      const target = (await listAccountSessions(ctx.user.id)).find((item) => item.id === input.sessionId);
-      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Không tìm thấy thiết bị." });
-      await revokeAccountSession(target.id, "kicked");
+    kickDevice: protectedProcedure.input(z.object({ sessionId: z.string().min(1).max(36) })).mutation(async ({ ctx, input }) => ({ success: await revokeAuthSession(ctx.user.id, input.sessionId, "kicked") })),
+    logoutCurrent: protectedProcedure.input(z.object({})).mutation(async ({ ctx }) => {
+      if (ctx.sessionId) await revokeAuthSession(ctx.user.id, ctx.sessionId, "logout");
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
-    logoutAllDevices: protectedProcedure.mutation(async ({ ctx }) => { await revokeAllAccountSessions(ctx.user.id, undefined, "logout_all"); return { success: true } as const; }),
-    changePassword: protectedProcedure.input(z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordInput, confirmPassword: passwordInput, logoutAll: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
-      if (input.newPassword !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Hai mật khẩu mới không khớp." });
-      if (!(await verifyPassword(input.currentPassword, ctx.user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Mật khẩu hiện tại không đúng." });
-      await updateUserPassword(ctx.user.id, await hashPassword(input.newPassword));
-      if (input.logoutAll) await revokeAllAccountSessions(ctx.user.id, undefined, "password_changed");
-      return { success: true, loggedOutCurrent: input.logoutAll } as const;
+    logoutAllDevices: protectedProcedure.input(z.object({})).mutation(async ({ ctx }) => {
+      await revokeAllAuthSessions(ctx.user.id, "logout_all");
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return { success: true } as const;
     }),
-    preferences: protectedProcedure.query(async ({ ctx }) => { const row = await getAccountPreferences(ctx.user.id); return row?.playbackDefaults ? JSON.parse(row.playbackDefaults) : null; }),
-    savePreferences: protectedProcedure.input(z.object({ playbackDefaults: z.record(z.string(), z.unknown()) })).mutation(async ({ ctx, input }) => { await saveAccountPreferences(ctx.user.id, JSON.stringify(input.playbackDefaults)); return { success: true } as const; }),
+    preferences: protectedProcedure.query(({ ctx }) => getAccountPreferences(ctx.user.id)),
+    savePreferences: protectedProcedure.input(z.object({ preferences: z.record(z.string(), z.unknown()) })).mutation(async ({ ctx, input }) => {
+      const merged = { ...(await getAccountPreferences(ctx.user.id)), ...input.preferences };
+      if (JSON.stringify(merged).length > 16_000) throw new TRPCError({ code: "BAD_REQUEST", message: "Dữ liệu cài đặt quá lớn." });
+      return saveAccountPreferences(ctx.user.id, merged);
+    }),
   }),
 });
 

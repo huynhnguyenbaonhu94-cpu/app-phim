@@ -1,4 +1,4 @@
-import { boolean, int, index, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, index, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -15,28 +15,26 @@ export const users = mysqlTable("users", {
   emailUnique: uniqueIndex("users_email_unique").on(table.email),
 }));
 
-export const accountSessions = mysqlTable("account_sessions", {
-  id: varchar("id", { length: 64 }).primaryKey(),
+export const authSessions = mysqlTable("auth_sessions", {
+  id: varchar("id", { length: 36 }).primaryKey(),
   userId: int("userId").notNull(),
-  tokenHash: varchar("tokenHash", { length: 128 }).notNull(),
-  deviceId: varchar("deviceId", { length: 160 }).notNull(),
   deviceName: varchar("deviceName", { length: 120 }).notNull(),
-  deviceModel: varchar("deviceModel", { length: 160 }),
+  deviceModel: varchar("deviceModel", { length: 120 }),
+  platform: varchar("platform", { length: 40 }).notNull(),
   ipAddress: varchar("ipAddress", { length: 64 }),
-  userAgent: text("userAgent"),
+  userAgent: varchar("userAgent", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
   lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
   revokedAt: timestamp("revokedAt"),
   revokeReason: varchar("revokeReason", { length: 40 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
-  userActiveIndex: index("account_sessions_user_active_idx").on(table.userId, table.revokedAt),
-  userDeviceIndex: index("account_sessions_user_device_idx").on(table.userId, table.deviceId),
-  tokenHashIndex: uniqueIndex("account_sessions_token_hash_idx").on(table.tokenHash),
+  userActiveIndex: index("auth_sessions_user_active_idx").on(table.userId, table.revokedAt),
+  heartbeatIndex: index("auth_sessions_last_seen_idx").on(table.lastSeenAt),
 }));
 
 export const accountPreferences = mysqlTable("account_preferences", {
   userId: int("userId").primaryKey(),
-  playbackDefaults: text("playbackDefaults"),
+  preferences: json("preferences").$type<Record<string, unknown>>().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
@@ -139,7 +137,6 @@ export const tvVideoSubtitles = mysqlTable("tv_video_subtitles", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-export type AccountSession = typeof accountSessions.$inferSelect;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
