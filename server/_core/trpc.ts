@@ -14,7 +14,7 @@ const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
 
   if (!ctx.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+    throw new TRPCError({ code: "UNAUTHORIZED", message: ctx.sessionInvalid ? "Phiên đăng nhập đã bị kết thúc. Vui lòng đăng nhập lại." : UNAUTHED_ERR_MSG });
   }
 
   return next({
@@ -26,6 +26,15 @@ const requireUser = t.middleware(async opts => {
 });
 
 export const protectedProcedure = t.procedure.use(requireUser);
+
+export const sessionProtectedProcedure = protectedProcedure.use(
+  t.middleware(async opts => {
+    if (!opts.ctx.sessionId) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Vui lòng đăng nhập lại để kích hoạt phiên thiết bị có thể quản lý." });
+    }
+    return opts.next();
+  }),
+);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {

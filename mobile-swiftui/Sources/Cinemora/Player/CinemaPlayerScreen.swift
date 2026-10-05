@@ -1358,7 +1358,8 @@ struct CinemaPlayerScreen: View {
 
     private func saveLocalWatchProgress() {
         guard let episode else { return }
-        store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
+        let completed = playback.duration > 0 && playback.currentTime >= playback.duration - 0.75
+        store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration, isCompleted: completed)
         lastHistorySaveAt = Date()
     }
 
@@ -1387,6 +1388,7 @@ struct CinemaPlayerScreen: View {
         }
         guard playback.duration > 0, playback.currentTime >= playback.duration - 0.75, !didHandleEpisodeEnd else { return }
         didHandleEpisodeEnd = true
+        saveLocalWatchProgress()
         let isTargetEpisode = stopAtEpisodeEnabled && episode.map { stopEpisodeKey($0) } == stopAtEpisodeID
         if stopTimer == .endOfEpisode || isTargetEpisode || !autoAdvanceEpisodes || episodeIndex + 1 >= episodes.count {
             playback.pause()

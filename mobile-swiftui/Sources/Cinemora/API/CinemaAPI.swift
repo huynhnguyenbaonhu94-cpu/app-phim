@@ -1,4 +1,6 @@
 import Foundation
+import Darwin
+import UIKit
 
 struct CinemaAPI {
     static let shared = CinemaAPI()
@@ -67,6 +69,44 @@ struct CinemaAPI {
         try await query("tv.videos", input: ["refresh": Int(Date().timeIntervalSince1970 * 1000)])
     }
 
+    private static func deviceDetails() -> [String: String] {
+        let key = "cinemora.account.device-id.v1"
+        let defaults = UserDefaults.standard
+        let deviceID: String
+        if let existing = defaults.string(forKey: key), !existing.isEmpty { deviceID = existing }
+        else { deviceID = UUID().uuidString.lowercased(); defaults.set(deviceID, forKey: key) }
+        var system = utsname(); uname(&system)
+        let model = withUnsafePointer(to: &system.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
+        }
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        return ["deviceId": deviceID, "name": "\(UIDevice.current.model) · \(model)", "model": model,
+                "osVersion": UIDevice.current.systemVersion, "appVersion": appVersion]
+    }
+
+    func registerAccount(name: String, email: String, password: String) async throws -> AccountAuthResponse {
+        try await mutate("auth.register", input: ["name": name, "email": email, "password": password, "device": Self.deviceDetails()])
+    }
+
+    func loginAccount(email: String, password: String) async throws -> AccountAuthResponse {
+        try await mutate("auth.login", input: ["email": email, "password": password, "device": Self.deviceDetails()])
+    }
+
+    func accountDevices() async throws -> [AccountDevice] { try await query("account.devices", input: nil) }
+    func currentAccount() async throws -> AccountUser { try await query("account.current", input: nil) }
+    func accountHeartbeat() async throws -> AccountHeartbeatResponse { try await mutate("account.heartbeat", input: [:]) }
+    func kickAccountDevice(sessionId: String) async throws { let _: AccountSuccessResponse = try await mutate("account.kickDevice", input: ["sessionId": sessionId]) }
+    func logoutAllAccountDevices() async throws -> AccountLogoutAllResponse { try await mutate("account.logoutAll", input: [:]) }
+    func changeAccountPassword(current: String, new: String) async throws { let _: AccountSuccessResponse = try await mutate("account.changePassword", input: ["currentPassword": current, "newPassword": new]) }
+    func logoutAccount(usingToken token: String? = nil) async throws { let _: AccountSuccessResponse = try await mutate("auth.logout", input: [:], authorizationToken: token) }
+
+    func syncAccount(favorites: [[String: Any]], history: [[String: Any]], removedFavorites: [[String: String]], removedHistory: [[String: String]], preferences: [String: Any]?, preferencesUpdatedAt: String?) async throws -> AccountSyncResponse {
+        var input: [String: Any] = ["favorites": favorites, "history": history, "removedFavorites": removedFavorites, "removedHistory": removedHistory]
+        if let preferences { input["preferences"] = preferences }
+        if let preferencesUpdatedAt { input["preferencesUpdatedAt"] = preferencesUpdatedAt }
+        return try await mutate("account.sync", input: input)
+    }
+
     func tvEventBytes() async throws -> URLSession.AsyncBytes {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/tv/events"
@@ -103,6 +143,7 @@ struct CinemaAPI {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        if let token = AccountCredentialStore.shared.readToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -122,7 +163,7 @@ struct CinemaAPI {
         catch { throw APIError.decoding(error.localizedDescription) }
     }
 
-    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
+    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any], authorizationToken: String? = nil) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
         guard let url = components.url else { throw APIError.invalidURL }
@@ -130,6 +171,7 @@ struct CinemaAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = authorizationToken ?? AccountCredentialStore.shared.readToken() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 25
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)
