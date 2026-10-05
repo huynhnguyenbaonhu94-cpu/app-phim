@@ -7,14 +7,6 @@ struct CinemaAPI {
 
     init(session: URLSession = .shared) { self.session = session }
 
-    private var deviceHeaders: [String: String] {
-        let key = "cinemora.device.id"
-        let defaults = UserDefaults.standard
-        let id = defaults.string(forKey: key) ?? UUID().uuidString
-        defaults.set(id, forKey: key)
-        return ["X-Device-Id": "ios:\(id)", "X-Device-Name": "Cinemora iOS", "X-Device-Model": "iPhone/iPad", "Accept": "application/json"]
-    }
-
     static func absoluteURL(_ value: String?) -> URL? {
         guard let value, !value.isEmpty else { return nil }
         return URL(string: value, relativeTo: baseURL)?.absoluteURL
@@ -100,21 +92,6 @@ struct CinemaAPI {
         let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
-    func login(email: String, password: String) async throws -> AccountUser { (try await mutate("auth.login", input: ["email": email, "password": password]) as AuthResult).user }
-    func register(name: String, email: String, password: String) async throws -> AccountUser { (try await mutate("auth.register", input: ["name": name, "email": email, "password": password]) as AuthResult).user }
-    func logout() async throws { let _: SuccessResponse = try await mutate("auth.logout", input: [:]) }
-    func devices() async throws -> [AccountDevice] { try await query("account.devices", input: nil) }
-    func favorites() async throws -> [CloudFavorite] { try await query("account.favorites", input: nil) }
-    func history() async throws -> [CloudHistory] { try await query("account.history", input: nil) }
-    func preferences() async throws -> AccountPlaybackPreferences? { try await query("account.preferences", input: nil) }
-    func kickDevice(sessionId: String) async throws { let _: SuccessResponse = try await mutate("account.kickDevice", input: ["sessionId": sessionId]) }
-    func logoutAllDevices() async throws { let _: SuccessResponse = try await mutate("account.logoutAllDevices", input: [:]) }
-    func changePassword(current: String, new: String, confirm: String, logoutAll: Bool) async throws -> PasswordChangeResult { try await mutate("account.changePassword", input: ["currentPassword": current, "newPassword": new, "confirmPassword": confirm, "logoutAll": logoutAll]) }
-    func savePreferences(_ preferences: AccountPlaybackPreferences) async throws {
-        let object = (try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as? [String: Any]) ?? [:]
-        let _: SuccessResponse = try await mutate("account.savePreferences", input: ["playbackDefaults": object])
-    }
-
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
@@ -124,7 +101,6 @@ struct CinemaAPI {
         }
         guard let url = components.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
-        deviceHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let (data, response) = try await session.data(for: request)
@@ -152,7 +128,6 @@ struct CinemaAPI {
         guard let url = components.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        deviceHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 25
@@ -199,10 +174,6 @@ struct CinemaAPI {
 private struct MovieRequestResponse: Decodable {
     let success: Bool
 }
-
-private struct AuthResult: Decodable { let user: AccountUser }
-private struct SuccessResponse: Decodable { let success: Bool }
-struct PasswordChangeResult: Decodable { let success: Bool; let loggedOutCurrent: Bool }
 
 enum APIError: LocalizedError {
     case invalidURL, invalidResponse

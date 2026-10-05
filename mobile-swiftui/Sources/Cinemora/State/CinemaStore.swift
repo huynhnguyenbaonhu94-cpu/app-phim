@@ -30,9 +30,6 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var localFavorites: [LocalMovieRecord] = []
     @Published private(set) var localHistory: [LocalWatchRecord] = []
     @Published var playbackDefaults = PlaybackDefaults()
-    @Published private(set) var accountUser: AccountUser?
-    @Published private(set) var accountDevices: [AccountDevice] = []
-    @Published private(set) var accountError: String?
     @Published private(set) var tvStreams: [TvStream] = []
     @Published private(set) var tvVideos: [TvVideo] = []
     @Published private(set) var tvLoading = false
@@ -206,36 +203,6 @@ final class CinemaStore: ObservableObject {
         if let data = try? encoder.encode(playbackDefaults) {
             localDefaults.set(data, forKey: playbackDefaultsKey)
         }
-    }
-
-    func login(email: String, password: String) async {
-        do { accountUser = try await api.login(email: email, password: password); try await syncAccount(); accountError = nil }
-        catch { accountError = error.localizedDescription }
-    }
-
-    func register(name: String, email: String, password: String) async {
-        do { accountUser = try await api.register(name: name, email: email, password: password); try await syncAccount(); accountError = nil }
-        catch { accountError = error.localizedDescription }
-    }
-
-    func logout() async { try? await api.logout(); accountUser = nil; accountDevices = [] }
-    func refreshAccountDevices() async { do { accountDevices = try await api.devices() } catch { accountError = error.localizedDescription } }
-    func kickDevice(_ device: AccountDevice) async { do { try await api.kickDevice(sessionId: device.id); await refreshAccountDevices() } catch { accountError = error.localizedDescription } }
-    func logoutAllDevices() async { do { try await api.logoutAllDevices(); accountUser = nil; accountDevices = [] } catch { accountError = error.localizedDescription } }
-    func changePassword(current: String, new: String, confirm: String, logoutAll: Bool) async -> Bool {
-        do { let result = try await api.changePassword(current: current, new: new, confirm: confirm, logoutAll: logoutAll); if result.loggedOutCurrent { accountUser = nil }; return result.success }
-        catch { accountError = error.localizedDescription; return false }
-    }
-
-    private func syncAccount() async throws {
-        async let favorites = api.favorites()
-        async let history = api.history()
-        async let preferences = api.preferences()
-        let (cloudFavorites, cloudHistory, cloudPreferences) = try await (favorites, history, preferences)
-        localFavorites = cloudFavorites.map { item in LocalMovieRecord(movie: Movie(apiID: nil, slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, backdrop: item.posterUrl, year: item.year, quality: nil, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil, allowPip: nil, episodeGroups: nil)) }
-        localHistory = cloudHistory.map { item in LocalWatchRecord(movie: LocalMovieRecord(movie: Movie(apiID: nil, slug: item.movieSlug, name: item.movieName, originName: item.originName, poster: item.posterUrl, backdrop: item.posterUrl, year: item.year, quality: nil, episodeCurrent: nil, episodeTotal: nil, time: nil, lang: nil, description: nil, rating: nil, categories: nil, countries: nil, actors: nil, actorProfiles: nil, directors: nil, views: nil, alternativeNames: nil, status: nil, tmdbId: nil, imdbId: nil, createdAt: nil, updatedAt: nil, servers: nil, allowPip: nil, episodeGroups: nil)), episodeName: item.episodeName, episodeSlug: item.episodeSlug, serverName: nil, streamURL: nil, embedURL: nil, watchedSeconds: Double(item.watchedSeconds), durationSeconds: Double(item.durationSeconds), watchedAt: ISO8601DateFormatter().date(from: item.lastWatchedAt) ?? Date()) }
-        if let cloudPreferences { playbackDefaults = PlaybackDefaults(); savePlaybackDefaults() }
-        await refreshAccountDevices()
     }
 
     private func persistLocalLibrary() {

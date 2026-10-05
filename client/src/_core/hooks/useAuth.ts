@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -12,13 +12,6 @@ export function useAuth(options?: UseAuthOptions) {
   const utils = trpc.useUtils();
   const meQuery = trpc.auth.me.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
   const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => { utils.auth.me.setData(undefined, null); } });
-  const heartbeat = trpc.account.heartbeat.useMutation({ onError: () => { utils.auth.me.setData(undefined, null); } });
-
-  useEffect(() => {
-    if (!meQuery.data) return;
-    const timer = window.setInterval(() => heartbeat.mutate(), 25_000);
-    return () => window.clearInterval(timer);
-  }, [meQuery.data, heartbeat]);
 
   const logout = useCallback(async () => {
     try {
