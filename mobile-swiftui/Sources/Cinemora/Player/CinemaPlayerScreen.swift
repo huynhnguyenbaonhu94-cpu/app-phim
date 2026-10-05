@@ -102,8 +102,7 @@ final class PlaybackController: ObservableObject {
         activeURL = url
         isLoading = true
         let item = AVPlayerItem(url: url)
-        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
-        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
+        // Đọc subtitle metadata bất đồng bộ sau khi AVPlayerItem sẵn sàng.
         item.preferredForwardBufferDuration = 8
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -111,15 +110,21 @@ final class PlaybackController: ObservableObject {
                 guard self.activeRequestID == requestID else { return }
                 switch item.status {
                 case .readyToPlay:
-                    // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng.
-                    if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-                        item.select(nil, in: group)
-                    }
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                     if let startAt, startAt > 0, startAt.isFinite {
                         let duration = item.duration.seconds
                         let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
                         self.seek(to: safeStart)
+                    }
+                    // Subtitle metadata không bắt buộc để tiếp tục phát video.
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        do {
+                            if let group = try await item.asset.loadMediaSelectionGroup(for: .legible),
+                               self.activeRequestID == requestID, self.player.currentItem === item {
+                                item.select(nil, in: group)
+                            }
+                        } catch { /* Continue playback when subtitle metadata is unavailable. */ }
                     }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil

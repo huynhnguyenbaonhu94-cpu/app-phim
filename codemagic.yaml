@@ -25,6 +25,9 @@ workflows:
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
           fi
+          if grep -R -n 'mediaSelectionGroup(forMediaCharacteristic:' mobile-swiftui/Sources/Cinemora; then
+            echo 'ERROR: deprecated synchronous AVAsset media-selection API is still present'; exit 1
+          fi
           echo 'SwiftUI build-fix preflight: OK'
 
       - name: Generate and validate native SwiftUI Xcode project

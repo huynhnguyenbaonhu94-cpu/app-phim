@@ -65,14 +65,15 @@ private final class TVPlaybackController: ObservableObject {
         currentTime = 0
         player.isMuted = hasSeparateAudio
         let item = AVPlayerItem(url: url)
-        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
-        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
+        // Chỉ tải subtitle metadata bất đồng bộ sau khi item sẵn sàng.
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self else { return }
                 if item.status == .readyToPlay {
-                    self.disableEmbeddedSubtitles(in: item)
                     self.isLoading = false
+                    Task { @MainActor [weak self] in
+                        await self?.disableEmbeddedSubtitles(in: item)
+                    }
                 }
                 if item.status == .failed { self.isLoading = false }
             }
@@ -90,9 +91,13 @@ private final class TVPlaybackController: ObservableObject {
         isPlaying = true
     }
 
-    private func disableEmbeddedSubtitles(in item: AVPlayerItem) {
-        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-            item.select(nil, in: group)
+    private func disableEmbeddedSubtitles(in item: AVPlayerItem) async {
+        do {
+            if let group = try await item.asset.loadMediaSelectionGroup(for: .legible), player.currentItem === item {
+                item.select(nil, in: group)
+            }
+        } catch {
+            // Không có subtitle metadata thì vẫn phát kênh bình thường.
         }
     }
 
