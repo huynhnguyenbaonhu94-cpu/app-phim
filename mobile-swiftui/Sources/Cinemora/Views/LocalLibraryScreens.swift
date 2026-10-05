@@ -187,7 +187,6 @@ struct SavedHubScreen: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.62))
                     }
-                    savedDestination(icon: "person.crop.circle.fill", title: "Tài khoản", detail: "Đăng nhập, đồng bộ dữ liệu và quản lý thiết bị", destination: AccountScreen())
                     savedDestination(icon: "clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục những bộ phim bạn đang xem", destination: WatchHistoryScreen())
                     savedDestination(icon: "heart.fill", title: "Yêu thích", detail: "Danh sách phim đã lưu", destination: FavoritesScreen())
                     savedDestination(icon: "slider.horizontal.3", title: "Cài đặt mặc định", detail: "Thiết lập cách phát video mỗi khi mở phim", destination: PlaybackDefaultsScreen())

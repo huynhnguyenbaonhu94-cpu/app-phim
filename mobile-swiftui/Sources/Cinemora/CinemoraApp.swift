@@ -51,9 +51,7 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
-    @EnvironmentObject private var store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
-    @Environment(\.scenePhase) private var scenePhase
     @State private var showLaunchLoader = true
 
     var body: some View {
@@ -97,16 +95,9 @@ struct CinemoraTabShell: View {
             if showLaunchLoader { LaunchLoader().transition(.opacity) }
         }
         .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
-        .fullScreenCover(isPresented: Binding(get: { store.requiresLoginMessage != nil }, set: { _ in })) {
-            AccountScreen(forceLogin: true).environmentObject(store).preferredColorScheme(.dark)
-        }
         .task {
-            store.startAccountMonitoring()
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await store.checkAccountSessionOnForeground() } }
         }
     }
 

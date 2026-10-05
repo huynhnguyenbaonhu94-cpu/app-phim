@@ -1,48 +1,40 @@
 import Foundation
 
-struct AccountUser: Codable, Equatable {
+struct AccountUser: Decodable, Identifiable, Hashable {
     let id: Int
     let name: String?
     let email: String?
     let role: String
 }
 
-struct AccountAuthResponse: Decodable {
-    let user: AccountUser
-    let token: String
-    let sessionId: String
-    let expiresAt: String
-}
-
-struct AccountSuccessResponse: Decodable { let success: Bool }
-struct AccountHeartbeatResponse: Decodable { let success: Bool; let serverTime: String }
-struct AccountLogoutAllResponse: Decodable { let success: Bool; let revokedCount: Int }
-
-struct AccountDevice: Decodable, Identifiable, Equatable {
-    let sessionId: String
-    let deviceId: String
-    let name: String
-    let model: String?
-    let osVersion: String?
-    let appVersion: String?
+struct AccountDevice: Decodable, Identifiable, Hashable {
+    let id: String
+    let deviceName: String
+    let deviceModel: String?
     let ipAddress: String?
     let createdAt: String
     let lastSeenAt: String
-    let isCurrent: Bool
-    let isOnline: Bool
-    var id: String { sessionId }
+    let online: Bool
+    let current: Bool
+    let revoked: Bool
+    let revokeReason: String?
 }
 
-struct SyncedFavorite: Decodable {
+struct AccountPlaybackPreferences: Codable, Equatable {
+    var autoAdvanceEpisodes: Bool = true
+    var stopTimer: String = "Tắt"
+    var pictureInPicture: Bool = true
+    var subtitlePreferences = SubtitlePreferences()
+}
+
+struct CloudFavorite: Decodable {
     let movieSlug: String
     let movieName: String
     let originName: String?
     let posterUrl: String?
     let year: Int?
-    let addedAt: String?
 }
-
-struct SyncedHistoryRecord: Decodable {
+struct CloudHistory: Decodable {
     let movieSlug: String
     let movieName: String
     let originName: String?
@@ -50,20 +42,7 @@ struct SyncedHistoryRecord: Decodable {
     let year: Int?
     let episodeSlug: String?
     let episodeName: String?
-    let serverName: String?
     let watchedSeconds: Int
     let durationSeconds: Int
-    let isCompleted: Bool?
     let lastWatchedAt: String
-}
-
-struct SyncedPreferences: Decodable {
-    let preferences: PlaybackDefaults
-    let updatedAt: String
-}
-
-struct AccountSyncResponse: Decodable {
-    let favorites: [SyncedFavorite]
-    let history: [SyncedHistoryRecord]
-    let preferences: SyncedPreferences?
 }

@@ -15,6 +15,31 @@ export const users = mysqlTable("users", {
   emailUnique: uniqueIndex("users_email_unique").on(table.email),
 }));
 
+export const accountSessions = mysqlTable("account_sessions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  userId: int("userId").notNull(),
+  tokenHash: varchar("tokenHash", { length: 128 }).notNull(),
+  deviceId: varchar("deviceId", { length: 160 }).notNull(),
+  deviceName: varchar("deviceName", { length: 120 }).notNull(),
+  deviceModel: varchar("deviceModel", { length: 160 }),
+  ipAddress: varchar("ipAddress", { length: 64 }),
+  userAgent: text("userAgent"),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokeReason: varchar("revokeReason", { length: 40 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userActiveIndex: index("account_sessions_user_active_idx").on(table.userId, table.revokedAt),
+  userDeviceIndex: index("account_sessions_user_device_idx").on(table.userId, table.deviceId),
+  tokenHashIndex: uniqueIndex("account_sessions_token_hash_idx").on(table.tokenHash),
+}));
+
+export const accountPreferences = mysqlTable("account_preferences", {
+  userId: int("userId").primaryKey(),
+  playbackDefaults: text("playbackDefaults"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const movieFavorites = mysqlTable("movie_favorites", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
@@ -39,56 +64,12 @@ export const movieWatchHistory = mysqlTable("movie_watch_history", {
   year: int("year"),
   episodeSlug: varchar("episodeSlug", { length: 140 }),
   episodeName: varchar("episodeName", { length: 255 }),
-  serverName: varchar("serverName", { length: 160 }),
   watchedSeconds: int("watchedSeconds").default(0).notNull(),
   durationSeconds: int("durationSeconds").default(0).notNull(),
-  isCompleted: boolean("isCompleted").default(false).notNull(),
   lastWatchedAt: timestamp("lastWatchedAt").defaultNow().notNull(),
 }, (table) => ({
   userMovieEpisodeUnique: uniqueIndex("movie_history_user_movie_episode_unique").on(table.userId, table.movieSlug, table.episodeSlug),
   userWatchedIndex: index("movie_history_user_watched_idx").on(table.userId, table.lastWatchedAt),
-}));
-
-// Server-authoritative sessions make mobile credentials independently revocable.
-// The existing cookie/JWT account flow uses the same table after a fresh login.
-export const accountSessions = mysqlTable("account_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  sessionId: varchar("sessionId", { length: 64 }).notNull(),
-  deviceId: varchar("deviceId", { length: 128 }).notNull(),
-  deviceName: varchar("deviceName", { length: 160 }).notNull(),
-  deviceModel: varchar("deviceModel", { length: 120 }),
-  osVersion: varchar("osVersion", { length: 80 }),
-  appVersion: varchar("appVersion", { length: 80 }),
-  ipAddress: varchar("ipAddress", { length: 45 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
-  expiresAt: timestamp("expiresAt").notNull(),
-  revokedAt: timestamp("revokedAt"),
-  revokeReason: varchar("revokeReason", { length: 40 }),
-}, (table) => ({
-  sessionUnique: uniqueIndex("account_sessions_session_unique").on(table.sessionId),
-  userActiveIndex: index("account_sessions_user_active_idx").on(table.userId, table.revokedAt, table.expiresAt),
-  deviceIndex: index("account_sessions_user_device_idx").on(table.userId, table.deviceId),
-  lastSeenIndex: index("account_sessions_user_seen_idx").on(table.userId, table.lastSeenAt),
-}));
-
-export const userPlaybackPreferences = mysqlTable("user_playback_preferences", {
-  userId: int("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
-  preferences: text("preferences").notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({ updatedIndex: index("user_playback_preferences_updated_idx").on(table.updatedAt) }));
-
-export const accountSyncTombstones = mysqlTable("account_sync_tombstones", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  recordType: mysqlEnum("recordType", ["favorite", "history"]).notNull(),
-  keyHash: varchar("keyHash", { length: 64 }).notNull(),
-  deletedAt: timestamp("deletedAt").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  recordUnique: uniqueIndex("account_sync_tombstones_record_unique").on(table.userId, table.recordType, table.keyHash),
-  userDeletedIndex: index("account_sync_tombstones_user_deleted_idx").on(table.userId, table.deletedAt),
 }));
 
 export const tvStreams = mysqlTable("tv_streams", {
@@ -158,9 +139,9 @@ export const tvVideoSubtitles = mysqlTable("tv_video_subtitles", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type AccountSession = typeof accountSessions.$inferSelect;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
-export type AccountSession = typeof accountSessions.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
 export type InsertTvStream = typeof tvStreams.$inferInsert;
 export type TvVideo = typeof tvVideos.$inferSelect;

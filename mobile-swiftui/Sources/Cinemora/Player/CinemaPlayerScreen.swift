@@ -34,11 +34,9 @@ final class PlaybackController: ObservableObject {
             }
         ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            // Hop explicitly to the controller's actor instead of asserting
-            // isolation; AVFoundation can deliver teardown callbacks from a
-            // different executor on newer SDKs.
+            let requestID = MainActor.assumeIsolated { self?.activeRequestID }
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, let requestID, self.activeRequestID == requestID else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
@@ -104,7 +102,8 @@ final class PlaybackController: ObservableObject {
         activeURL = url
         isLoading = true
         let item = AVPlayerItem(url: url)
-        // Đọc subtitle metadata bất đồng bộ sau khi AVPlayerItem sẵn sàng.
+        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
+        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
         item.preferredForwardBufferDuration = 8
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -112,21 +111,15 @@ final class PlaybackController: ObservableObject {
                 guard self.activeRequestID == requestID else { return }
                 switch item.status {
                 case .readyToPlay:
+                    // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng.
+                    if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+                        item.select(nil, in: group)
+                    }
                     self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                     if let startAt, startAt > 0, startAt.isFinite {
                         let duration = item.duration.seconds
                         let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
                         self.seek(to: safeStart)
-                    }
-                    // Subtitle metadata không bắt buộc để tiếp tục phát video.
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        do {
-                            if let group = try await item.asset.loadMediaSelectionGroup(for: .legible),
-                               self.activeRequestID == requestID, self.player.currentItem === item {
-                                item.select(nil, in: group)
-                            }
-                        } catch { /* Continue playback when subtitle metadata is unavailable. */ }
                     }
                 case .failed:
                     self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
@@ -1365,8 +1358,7 @@ struct CinemaPlayerScreen: View {
 
     private func saveLocalWatchProgress() {
         guard let episode else { return }
-        let completed = playback.duration > 0 && playback.currentTime >= playback.duration - 0.75
-        store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration, isCompleted: completed)
+        store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
         lastHistorySaveAt = Date()
     }
 
@@ -1395,7 +1387,6 @@ struct CinemaPlayerScreen: View {
         }
         guard playback.duration > 0, playback.currentTime >= playback.duration - 0.75, !didHandleEpisodeEnd else { return }
         didHandleEpisodeEnd = true
-        saveLocalWatchProgress()
         let isTargetEpisode = stopAtEpisodeEnabled && episode.map { stopEpisodeKey($0) } == stopAtEpisodeID
         if stopTimer == .endOfEpisode || isTargetEpisode || !autoAdvanceEpisodes || episodeIndex + 1 >= episodes.count {
             playback.pause()

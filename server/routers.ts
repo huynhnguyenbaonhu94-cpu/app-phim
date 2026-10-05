@@ -1,14 +1,12 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, createDeviceSession, createLocalUser, DeviceLimitError, getPlaybackPreferences, getUserByEmail, isFavorite, listDeviceSessions, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeFavoriteIfOlder, removeWatchHistory, removeWatchHistoryIfOlder, revokeAllDeviceSessions, revokeDeviceSession, savePlaybackPreferences, touchDeviceSession, updatePasswordHash } from "./db";
+import { addFavorite, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, updateUserPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, protectedProcedure, publicProcedure, router, sessionProtectedProcedure } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
-import { randomUUID } from "node:crypto";
-import type { TrpcContext } from "./_core/context";
-import type { User } from "../drizzle/schema";
+import { getAccountPreferences, listAccountSessions, revokeAccountSession, revokeAllAccountSessions, saveAccountPreferences } from "./accountSessions";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
@@ -25,19 +23,7 @@ const movieSnapshot = z.object({
 });
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
-const playbackPreferencesInput = z.record(z.string(), z.unknown()).refine((value) => {
-  try { return JSON.stringify(value).length <= 32_000; } catch { return false; }
-}, "Playback preferences vượt quá dung lượng cho phép.");
-const deviceInput = z.object({
-  deviceId: z.string().trim().min(8).max(128).optional(),
-  name: z.string().trim().min(1).max(160).optional(),
-  model: z.string().trim().max(120).optional(),
-  osVersion: z.string().trim().max(80).optional(),
-  appVersion: z.string().trim().max(80).optional(),
-}).optional();
 const movieRequestCooldown = new Map<string, number>();
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-const passwordChangeAttempts = new Map<string, { count: number; resetAt: number }>();
 const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((value) => {
   if (!value) return true;
   if (value.startsWith("/uploads/tv-posters/") || value.startsWith("uploads/tv-posters/")) return true;
@@ -48,106 +34,38 @@ function setSessionCookie(ctx: { req: Parameters<typeof getSessionCookieOptions>
   ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
 }
 
-function publicUser(user: NonNullable<Parameters<typeof createLocalSession>[0]>) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt };
-}
-
-function trustedClientTimestamp(value: string) {
-  const parsed = new Date(value);
-  return parsed.getTime() > Date.now() + 5 * 60_000 ? new Date() : parsed;
-}
-
-function displayIpAddress(value: string | null) {
-  if (!value) return null;
-  if (value.includes(".")) {
-    const parts = value.split(".");
-    if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.xxx`;
-  }
-  if (value.includes(":")) return `${value.split(":").slice(0, 3).join(":")}::…`;
-  return "Địa chỉ mạng ẩn";
-}
-
-function checkLoginRateLimit(key: string) {
-  const now = Date.now();
-  const current = loginAttempts.get(key);
-  if (current && current.resetAt > now && current.count >= 10) {
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Bạn đã thử đăng nhập quá nhiều lần. Vui lòng thử lại sau 15 phút." });
-  }
-  if (loginAttempts.size > 5000) {
-    Array.from(loginAttempts.entries()).forEach(([entry, value]) => { if (value.resetAt <= now) loginAttempts.delete(entry); });
-  }
-}
-
-function recordLoginFailure(key: string) {
-  const now = Date.now();
-  const current = loginAttempts.get(key);
-  loginAttempts.set(key, current && current.resetAt > now ? { count: current.count + 1, resetAt: current.resetAt } : { count: 1, resetAt: now + 15 * 60_000 });
-}
-
-function checkPasswordChangeRateLimit(key: string) {
-  const entry = passwordChangeAttempts.get(key);
-  if (entry && entry.resetAt > Date.now() && entry.count >= 5) {
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Bạn đã thử đổi mật khẩu quá nhiều lần. Vui lòng thử lại sau 15 phút." });
-  }
-}
-
-function recordPasswordChangeFailure(key: string) {
-  const now = Date.now();
-  const entry = passwordChangeAttempts.get(key);
-  passwordChangeAttempts.set(key, entry && entry.resetAt > now ? { count: entry.count + 1, resetAt: entry.resetAt } : { count: 1, resetAt: now + 15 * 60_000 });
-}
-
-async function issueDeviceSession(ctx: TrpcContext, user: User, details?: z.infer<typeof deviceInput>) {
-  const sessionId = randomUUID();
-  const expiresAt = new Date(Date.now() + ONE_YEAR_MS);
-  const userAgent = String(ctx.req.get("user-agent") || "").slice(0, 160);
-  const metadata = {
-    userId: user.id,
-    sessionId,
-    deviceId: details?.deviceId || `web-${randomUUID()}`,
-    deviceName: details?.name || (userAgent ? `Trình duyệt · ${userAgent.slice(0, 120)}` : "Trình duyệt web"),
-    deviceModel: details?.model || null,
-    osVersion: details?.osVersion || null,
-    appVersion: details?.appVersion || null,
-    ipAddress: String(ctx.req.ip || "").slice(0, 45) || null,
-    expiresAt,
+function sessionMetadata(req: { headers: Record<string, string | string[] | undefined>; ip?: string }) {
+  const header = (name: string) => { const value = req.headers[name.toLowerCase()]; return Array.isArray(value) ? value[0] : value; };
+  const userAgent = header("user-agent") || "Unknown browser";
+  return {
+    deviceId: header("x-device-id") || `web:${userAgent.slice(0, 120)}`,
+    deviceName: header("x-device-name") || "Trình duyệt web",
+    ...(header("x-device-model") ? { deviceModel: header("x-device-model") } : {}),
+    ...(req.ip ? { ipAddress: req.ip } : {}),
+    userAgent,
   };
-  let session: { sessionId: string; expiresAt: Date };
-  try { session = await createDeviceSession(metadata); }
-  catch (error) {
-    if (error instanceof DeviceLimitError) throw new TRPCError({ code: "FORBIDDEN", message: error.message });
-    throw error;
-  }
-  const token = await createLocalSession(user, session.sessionId, session.expiresAt);
-  setSessionCookie(ctx, token);
-  return { ...(details?.deviceId ? { token } : {}), sessionId: session.sessionId, expiresAt: session.expiresAt };
 }
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user ? publicUser(opts.ctx.user) : null),
-    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput, device: deviceInput })).mutation(async ({ ctx, input }) => {
+    me: publicProcedure.query(opts => opts.ctx.user),
+    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput })).mutation(async ({ ctx, input }) => {
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Email này đã được đăng ký" });
       const user = await createLocalUser({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) });
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Không thể tạo tài khoản" });
-      const session = await issueDeviceSession(ctx, user, input.device);
-      return { user: publicUser(user), ...session };
+      setSessionCookie(ctx, await createLocalSession(user, sessionMetadata(ctx.req)));
+      return { user };
     }),
-    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128), device: deviceInput })).mutation(async ({ ctx, input }) => {
-      const rateKey = `${ctx.req.ip || "unknown"}:${input.email}`;
-      checkLoginRateLimit(rateKey);
+    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128) })).mutation(async ({ ctx, input }) => {
       const user = await getUserByEmail(input.email);
-      if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
-        recordLoginFailure(rateKey);
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Email hoặc mật khẩu không đúng" });
-      }
-      loginAttempts.delete(rateKey);
-      const session = await issueDeviceSession(ctx, user, input.device);
-      return { user: publicUser(user), ...session };
+      if (!user || !(await verifyPassword(input.password, user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email hoặc mật khẩu không đúng" });
+      try { setSessionCookie(ctx, await createLocalSession(user, sessionMetadata(ctx.req))); }
+      catch (error) { throw new TRPCError({ code: "FORBIDDEN", message: error instanceof Error ? error.message : "Không thể tạo phiên đăng nhập" }); }
+      return { user };
     }),
-    logout: publicProcedure.input(z.object({}).optional()).mutation(async ({ ctx }) => {
-      if (ctx.user && ctx.sessionId) await revokeDeviceSession(ctx.user.id, ctx.sessionId, "logout");
+    logout: publicProcedure.mutation(({ ctx }) => {
+      if (ctx.session) void revokeAccountSession(ctx.session.id, "logout");
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
@@ -239,43 +157,6 @@ export const appRouter = router({
     removeVideo: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvVideo(input.id)),
   }),
   account: router({
-    current: sessionProtectedProcedure.query(({ ctx }) => publicUser(ctx.user)),
-    devices: sessionProtectedProcedure.query(async ({ ctx }) => {
-      const rows = await listDeviceSessions(ctx.user.id);
-      const onlineCutoff = Date.now() - 2 * 60_000;
-      return rows.map((session) => ({
-        sessionId: session.sessionId, deviceId: session.deviceId, name: session.deviceName,
-        model: session.deviceModel, osVersion: session.osVersion, appVersion: session.appVersion,
-        ipAddress: displayIpAddress(session.ipAddress), createdAt: session.createdAt, lastSeenAt: session.lastSeenAt,
-        isCurrent: session.sessionId === ctx.sessionId,
-        isOnline: session.lastSeenAt.getTime() >= onlineCutoff,
-      }));
-    }),
-    heartbeat: sessionProtectedProcedure.input(z.object({}).optional()).mutation(async ({ ctx }) => {
-      if (!ctx.sessionId || !(await touchDeviceSession(ctx.sessionId, ctx.user.id))) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Phiên đăng nhập đã bị kết thúc. Vui lòng đăng nhập lại." });
-      }
-      return { success: true, serverTime: new Date().toISOString() };
-    }),
-    kickDevice: sessionProtectedProcedure.input(z.object({ sessionId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-      if (input.sessionId === ctx.sessionId) throw new TRPCError({ code: "BAD_REQUEST", message: "Không thể kết thúc thiết bị hiện tại bằng thao tác này." });
-      const success = await revokeDeviceSession(ctx.user.id, input.sessionId);
-      if (!success) throw new TRPCError({ code: "NOT_FOUND", message: "Phiên thiết bị không còn hoạt động." });
-      return { success: true };
-    }),
-    logoutAll: sessionProtectedProcedure.input(z.object({}).optional()).mutation(async ({ ctx }) => ({ success: true, revokedCount: await revokeAllDeviceSessions(ctx.user.id, "logout_all") })),
-    changePassword: sessionProtectedProcedure.input(z.object({ currentPassword: z.string().min(1).max(128), newPassword: z.string().min(10, "Mật khẩu mới phải có ít nhất 10 ký tự").max(128) })).mutation(async ({ ctx, input }) => {
-      const rateKey = `${ctx.req.ip || "unknown"}:${ctx.user.id}`;
-      checkPasswordChangeRateLimit(rateKey);
-      if (!(await verifyPassword(input.currentPassword, ctx.user.passwordHash))) {
-        recordPasswordChangeFailure(rateKey);
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Mật khẩu hiện tại không đúng." });
-      }
-      passwordChangeAttempts.delete(rateKey);
-      if (input.currentPassword === input.newPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Mật khẩu mới phải khác mật khẩu hiện tại." });
-      await updatePasswordHash(ctx.user.id, await hashPassword(input.newPassword));
-      return { success: true };
-    }),
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     isFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).query(({ ctx, input }) => isFavorite(ctx.user.id, input.movieSlug)),
     addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
@@ -284,64 +165,35 @@ export const appRouter = router({
     recordHistory: protectedProcedure.input(movieSnapshot.extend({
       episodeSlug: z.string().trim().max(140).optional(),
       episodeName: z.string().trim().max(255).optional(),
-      serverName: z.string().trim().max(160).nullable().optional(),
       watchedSeconds: z.number().int().min(0).max(86_400).optional(),
       durationSeconds: z.number().int().min(0).max(86_400).optional(),
-      isCompleted: z.boolean().optional(),
-      lastWatchedAt: z.string().datetime().optional(),
-    })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, lastWatchedAt: input.lastWatchedAt ? trustedClientTimestamp(input.lastWatchedAt) : undefined, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
-    savePreferences: sessionProtectedProcedure.input(z.object({ preferences: playbackPreferencesInput, updatedAt: z.string().datetime() })).mutation(async ({ ctx, input }) => {
-      const current = await getPlaybackPreferences(ctx.user.id);
-      const incomingAt = trustedClientTimestamp(input.updatedAt);
-      if (!current || incomingAt >= current.updatedAt) await savePlaybackPreferences(ctx.user.id, input.preferences, incomingAt);
-      return await getPlaybackPreferences(ctx.user.id);
+    })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
+    devices: protectedProcedure.query(async ({ ctx }) => {
+      const now = Date.now();
+      return (await listAccountSessions(ctx.user.id)).map((device) => ({
+        id: device.id, deviceName: device.deviceName, deviceModel: device.deviceModel, ipAddress: device.ipAddress,
+        userAgent: device.userAgent, createdAt: device.createdAt, lastSeenAt: device.lastSeenAt,
+        online: !device.revokedAt && now - new Date(device.lastSeenAt).getTime() < 90_000,
+        current: device.id === ctx.session?.id, revoked: Boolean(device.revokedAt), revokeReason: device.revokeReason,
+      }));
     }),
-    sync: sessionProtectedProcedure.input(z.object({
-      favorites: z.array(movieSnapshot.extend({ addedAt: z.string().datetime().optional() })).max(100),
-      history: z.array(movieSnapshot.extend({
-        episodeSlug: z.string().trim().max(140).optional(), episodeName: z.string().trim().max(255).optional(),
-        serverName: z.string().trim().max(160).nullable().optional(),
-        watchedSeconds: z.number().min(0).max(86_400), durationSeconds: z.number().min(0).max(86_400),
-        isCompleted: z.boolean().optional(), lastWatchedAt: z.string().datetime(),
-      })).max(100),
-      removedFavorites: z.array(z.object({ movieSlug: slugInput, deletedAt: z.string().datetime() })).max(100).optional(),
-      removedHistory: z.array(z.object({ key: z.string().trim().max(280), deletedAt: z.string().datetime() })).max(100).optional(),
-      preferences: playbackPreferencesInput.optional(),
-      preferencesUpdatedAt: z.string().datetime().optional(),
-    })).mutation(async ({ ctx, input }) => {
-      // Merge into the existing unique-key tables; never replace server state with a local snapshot.
-      for (const favorite of input.favorites) {
-        const { addedAt, ...snapshot } = favorite;
-        await addFavorite({ userId: ctx.user.id, ...snapshot, addedAt: addedAt ? trustedClientTimestamp(addedAt) : undefined, posterUrl: await getPersistentPosterSource(favorite.movieSlug, favorite.posterUrl) });
-      }
-      for (const history of input.history) {
-        await recordWatchHistory({ userId: ctx.user.id, ...history, lastWatchedAt: trustedClientTimestamp(history.lastWatchedAt), posterUrl: await getPersistentPosterSource(history.movieSlug, history.posterUrl) });
-      }
-      for (const deletion of input.removedFavorites || []) await removeFavoriteIfOlder(ctx.user.id, deletion.movieSlug, trustedClientTimestamp(deletion.deletedAt));
-      for (const deletion of input.removedHistory || []) {
-        const key = deletion.key;
-        const separator = key.lastIndexOf("::");
-        if (separator <= 0) continue;
-        const movieSlug = key.slice(0, separator);
-        const episodeSlug = key.slice(separator + 2) || "movie";
-        if (/^[a-z0-9-]{2,140}$/i.test(movieSlug) && /^[a-z0-9-]{1,140}$/i.test(episodeSlug)) {
-          await removeWatchHistoryIfOlder(ctx.user.id, movieSlug, episodeSlug, trustedClientTimestamp(deletion.deletedAt));
-        }
-      }
-      if (input.preferences && input.preferencesUpdatedAt) {
-        const current = await getPlaybackPreferences(ctx.user.id);
-        const incomingAt = trustedClientTimestamp(input.preferencesUpdatedAt);
-        if (!current || incomingAt >= current.updatedAt) await savePlaybackPreferences(ctx.user.id, input.preferences, incomingAt);
-      }
-      const [favorites, history, preferences] = await Promise.all([
-        listFavorites(ctx.user.id), listWatchHistory(ctx.user.id), getPlaybackPreferences(ctx.user.id),
-      ]);
-      return {
-        favorites: favorites.map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) })),
-        history: history.map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) })),
-        preferences,
-      };
+    heartbeat: protectedProcedure.mutation(async ({ ctx }) => ({ success: Boolean(ctx.session) })),
+    kickDevice: protectedProcedure.input(z.object({ sessionId: z.string().min(16).max(64) })).mutation(async ({ ctx, input }) => {
+      const target = (await listAccountSessions(ctx.user.id)).find((item) => item.id === input.sessionId);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Không tìm thấy thiết bị." });
+      await revokeAccountSession(target.id, "kicked");
+      return { success: true } as const;
     }),
+    logoutAllDevices: protectedProcedure.mutation(async ({ ctx }) => { await revokeAllAccountSessions(ctx.user.id, undefined, "logout_all"); return { success: true } as const; }),
+    changePassword: protectedProcedure.input(z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordInput, confirmPassword: passwordInput, logoutAll: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+      if (input.newPassword !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Hai mật khẩu mới không khớp." });
+      if (!(await verifyPassword(input.currentPassword, ctx.user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Mật khẩu hiện tại không đúng." });
+      await updateUserPassword(ctx.user.id, await hashPassword(input.newPassword));
+      if (input.logoutAll) await revokeAllAccountSessions(ctx.user.id, undefined, "password_changed");
+      return { success: true, loggedOutCurrent: input.logoutAll } as const;
+    }),
+    preferences: protectedProcedure.query(async ({ ctx }) => { const row = await getAccountPreferences(ctx.user.id); return row?.playbackDefaults ? JSON.parse(row.playbackDefaults) : null; }),
+    savePreferences: protectedProcedure.input(z.object({ playbackDefaults: z.record(z.string(), z.unknown()) })).mutation(async ({ ctx, input }) => { await saveAccountPreferences(ctx.user.id, JSON.stringify(input.playbackDefaults)); return { success: true } as const; }),
   }),
 });
 

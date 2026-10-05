@@ -36,13 +36,6 @@
       "when": 1790818627000,
       "tag": "0004_tv_stream_audio",
       "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1791218460000,
-      "tag": "0005_account_sessions_preferences",
-      "breakpoints": true
     }
   ]
 }

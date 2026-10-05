@@ -1,9 +1,9 @@
-import { and, desc, eq, gt, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { accountSessions, accountSyncTombstones, InsertUser, movieFavorites, movieWatchHistory, users, userPlaybackPreferences } from "../drizzle/schema";
+import { AccountSession, InsertUser, accountPreferences, accountSessions, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -23,16 +23,11 @@ export async function getDb() {
 
 async function ensureDefaultAdmin(db: ReturnType<typeof drizzle>) {
   const email = (process.env.ADMIN_EMAIL || "admin@cungcapicloud.id.vn").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "Cinemora@2026!";
   const name = process.env.ADMIN_NAME || "Cinemora Admin";
-  if (!email) throw new Error("ADMIN_EMAIL không hợp lệ.");
+  if (!email || password.length < 8) throw new Error("ADMIN_EMAIL/ADMIN_PASSWORD không hợp lệ.");
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing.length > 0) return;
-  const password = process.env.ADMIN_PASSWORD || (process.env.NODE_ENV === "development" ? "Cinemora@2026!" : "");
-  if (!password) {
-    console.warn("[Database] Skipping default admin bootstrap: configure ADMIN_PASSWORD before creating a new admin account.");
-    return;
-  }
-  if (password.length < 12) throw new Error("ADMIN_PASSWORD phải có ít nhất 12 ký tự khi bootstrap admin.");
   const { hashPassword } = await import("./localAuth");
   await db.insert(users).values({
     openId: `local_admin_${randomUUID()}`,
@@ -97,14 +92,9 @@ export async function ensureTvVideosCompatibility(db: ReturnType<typeof drizzle>
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* column already exists */ } }
 }
 
-function isAlreadyCreatedMigrationTable(error: unknown) {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && current; depth++) {
-    const value = current as { code?: string; errno?: number; message?: string; cause?: unknown };
-    if (value.code === "ER_TABLE_EXISTS_ERROR" || value.errno === 1050 || /table .* already exists/i.test(value.message || "")) return true;
-    current = value.cause;
-  }
-  return false;
+export async function ensureAccountCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_sessions (id varchar(64) NOT NULL PRIMARY KEY, userId int NOT NULL, tokenHash varchar(128) NOT NULL UNIQUE, deviceId varchar(160) NOT NULL, deviceName varchar(120) NOT NULL, deviceModel varchar(160) NULL, ipAddress varchar(64) NULL, userAgent text NULL, lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, revokedAt timestamp NULL, revokeReason varchar(40) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY account_sessions_user_device_idx (userId, deviceId), KEY account_sessions_user_active_idx (userId, revokedAt)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_preferences (userId int NOT NULL PRIMARY KEY, playbackDefaults text NULL, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
 }
 
 export async function initializeDatabase() {
@@ -115,15 +105,13 @@ export async function initializeDatabase() {
     try {
       await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "drizzle") });
     } catch (error) {
-      // Manual SQL import may have created an additive account table before the
-      // Drizzle journal advances. Continue only for that recognized collision;
-      // repair/assertion below must still verify every required schema contract.
-      if (!isAlreadyCreatedMigrationTable(error)) throw error;
-      console.warn("[Database] Found an already-created migration table; verifying the full compatible schema before startup.");
+      // Older deployments may already have a tv_streams migration with a different tag.
+      // Compatibility repair below can safely add only the missing columns.
+      console.warn("[Database] Migration warning, running compatibility repair:", error instanceof Error ? error.message : error);
     }
     await ensureTvStreamsCompatibility(db);
     await ensureTvVideosCompatibility(db);
-    await ensureAccountSchemaCompatibility(db);
+    await ensureAccountCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -159,6 +147,13 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
@@ -174,6 +169,12 @@ export async function createLocalUser(input: { name: string; email: string; pass
   return getUserByOpenId(openId);
 }
 
+export async function updateUserPassword(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
 export async function listFavorites(userId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -187,334 +188,51 @@ export async function isFavorite(userId: number, movieSlug: string) {
   return rows.length > 0;
 }
 
-function syncRecordKeyHash(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-export async function addFavorite(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null; addedAt?: Date }) {
+export async function addFavorite(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const addedAt = input.addedAt ?? new Date();
-  const keyHash = syncRecordKeyHash(input.movieSlug);
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT id FROM users WHERE id = ${input.userId} FOR UPDATE`);
-    const tombstones = await tx.select({ deletedAt: accountSyncTombstones.deletedAt }).from(accountSyncTombstones).where(and(
-      eq(accountSyncTombstones.userId, input.userId), eq(accountSyncTombstones.recordType, "favorite"), eq(accountSyncTombstones.keyHash, keyHash),
-    )).limit(1);
-    if (tombstones[0] && tombstones[0].deletedAt >= addedAt) return true;
-    if (tombstones[0]) await tx.delete(accountSyncTombstones).where(and(eq(accountSyncTombstones.userId, input.userId), eq(accountSyncTombstones.recordType, "favorite"), eq(accountSyncTombstones.keyHash, keyHash)));
-    const updates = { movieName: input.movieName, originName: input.originName || null, posterUrl: input.posterUrl || null, year: input.year || null,
-      addedAt: sql`GREATEST(addedAt, VALUES(addedAt))` };
-    await tx.insert(movieFavorites).values({ ...input, addedAt, originName: input.originName || null, posterUrl: input.posterUrl || null, year: input.year || null }).onDuplicateKeyUpdate({ set: updates });
-    return true;
-  });
+  await db.insert(movieFavorites).values({ ...input, originName: input.originName || null, posterUrl: input.posterUrl || null, year: input.year || null }).onDuplicateKeyUpdate({ set: { movieName: input.movieName, originName: input.originName || null, posterUrl: input.posterUrl || null, year: input.year || null } });
+  return true;
 }
 
 export async function removeFavorite(userId: number, movieSlug: string) {
-  return removeFavoriteIfOlder(userId, movieSlug, new Date());
-}
-
-export async function removeFavoriteIfOlder(userId: number, movieSlug: string, deletedAt: Date) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const keyHash = syncRecordKeyHash(movieSlug);
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`);
-    const current = await tx.select({ addedAt: movieFavorites.addedAt }).from(movieFavorites).where(and(eq(movieFavorites.userId, userId), eq(movieFavorites.movieSlug, movieSlug))).limit(1);
-    if (current[0] && current[0].addedAt >= deletedAt) {
-      await tx.delete(accountSyncTombstones).where(and(eq(accountSyncTombstones.userId, userId), eq(accountSyncTombstones.recordType, "favorite"), eq(accountSyncTombstones.keyHash, keyHash)));
-      return true;
-    }
-    await tx.insert(accountSyncTombstones).values({ userId, recordType: "favorite", keyHash, deletedAt }).onDuplicateKeyUpdate({ set: { deletedAt: sql`GREATEST(deletedAt, VALUES(deletedAt))` } });
-    await tx.delete(movieFavorites).where(and(eq(movieFavorites.userId, userId), eq(movieFavorites.movieSlug, movieSlug), lt(movieFavorites.addedAt, deletedAt)));
-    return true;
-  });
+  await db.delete(movieFavorites).where(and(eq(movieFavorites.userId, userId), eq(movieFavorites.movieSlug, movieSlug)));
+  return true;
 }
 
-export async function recordWatchHistory(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null; episodeSlug?: string; episodeName?: string; serverName?: string | null; watchedSeconds?: number; durationSeconds?: number; isCompleted?: boolean; lastWatchedAt?: Date }) {
+export async function recordWatchHistory(input: { userId: number; movieSlug: string; movieName: string; originName?: string; posterUrl?: string | null; year?: number | null; episodeSlug?: string; episodeName?: string; watchedSeconds?: number; durationSeconds?: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const safeEpisode = input.episodeSlug || "movie";
-  const watchedAt = input.lastWatchedAt ?? new Date();
-  const keyHash = syncRecordKeyHash(`${input.movieSlug}::${safeEpisode}`);
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT id FROM users WHERE id = ${input.userId} FOR UPDATE`);
-    const tombstones = await tx.select({ deletedAt: accountSyncTombstones.deletedAt }).from(accountSyncTombstones).where(and(
-      eq(accountSyncTombstones.userId, input.userId), eq(accountSyncTombstones.recordType, "history"), eq(accountSyncTombstones.keyHash, keyHash),
-    )).limit(1);
-    if (tombstones[0] && tombstones[0].deletedAt >= watchedAt) return true;
-    if (tombstones[0]) await tx.delete(accountSyncTombstones).where(and(eq(accountSyncTombstones.userId, input.userId), eq(accountSyncTombstones.recordType, "history"), eq(accountSyncTombstones.keyHash, keyHash)));
-    await tx.insert(movieWatchHistory).values({
-      ...input,
+  await db.insert(movieWatchHistory).values({
+    ...input,
+    originName: input.originName || null,
+    posterUrl: input.posterUrl || null,
+    year: input.year || null,
+    episodeSlug: safeEpisode,
+    episodeName: input.episodeName || "Phim",
+    watchedSeconds: Math.max(0, Math.floor(input.watchedSeconds || 0)),
+    durationSeconds: Math.max(0, Math.floor(input.durationSeconds || 0)),
+    lastWatchedAt: new Date(),
+  }).onDuplicateKeyUpdate({
+    set: {
+      movieName: input.movieName,
       originName: input.originName || null,
       posterUrl: input.posterUrl || null,
       year: input.year || null,
-      episodeSlug: safeEpisode,
       episodeName: input.episodeName || "Phim",
-      serverName: input.serverName || null,
       watchedSeconds: Math.max(0, Math.floor(input.watchedSeconds || 0)),
       durationSeconds: Math.max(0, Math.floor(input.durationSeconds || 0)),
-      isCompleted: !!input.isCompleted,
-      lastWatchedAt: watchedAt,
-    }).onDuplicateKeyUpdate({
-      set: {
-        movieName: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(movieName), movieName)`,
-        originName: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(originName), originName)`,
-        posterUrl: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(posterUrl), posterUrl)`,
-        year: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(year), year)`,
-        episodeName: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(episodeName), episodeName)`,
-        serverName: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(serverName), serverName)`,
-        watchedSeconds: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(watchedSeconds), watchedSeconds)`,
-        durationSeconds: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(durationSeconds), durationSeconds)`,
-        isCompleted: sql`IF(VALUES(lastWatchedAt) >= lastWatchedAt, VALUES(isCompleted), isCompleted)`,
-        lastWatchedAt: sql`GREATEST(lastWatchedAt, VALUES(lastWatchedAt))`,
-      },
-    });
-    return true;
+      lastWatchedAt: sql`CURRENT_TIMESTAMP`,
+    },
   });
+  return true;
 }
 
 export async function listWatchHistory(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(movieWatchHistory).where(eq(movieWatchHistory.userId, userId)).orderBy(desc(movieWatchHistory.lastWatchedAt)).limit(100);
-}
-
-export async function removeWatchHistory(userId: number, movieSlug: string, episodeSlug: string) {
-  return removeWatchHistoryIfOlder(userId, movieSlug, episodeSlug, new Date());
-}
-
-export async function removeWatchHistoryIfOlder(userId: number, movieSlug: string, episodeSlug: string, deletedAt: Date) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  const keyHash = syncRecordKeyHash(`${movieSlug}::${episodeSlug || "movie"}`);
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`);
-    const current = await tx.select({ lastWatchedAt: movieWatchHistory.lastWatchedAt }).from(movieWatchHistory).where(and(
-      eq(movieWatchHistory.userId, userId), eq(movieWatchHistory.movieSlug, movieSlug), eq(movieWatchHistory.episodeSlug, episodeSlug || "movie"),
-    )).limit(1);
-    if (current[0] && current[0].lastWatchedAt >= deletedAt) {
-      await tx.delete(accountSyncTombstones).where(and(eq(accountSyncTombstones.userId, userId), eq(accountSyncTombstones.recordType, "history"), eq(accountSyncTombstones.keyHash, keyHash)));
-      return true;
-    }
-    await tx.insert(accountSyncTombstones).values({ userId, recordType: "history", keyHash, deletedAt }).onDuplicateKeyUpdate({ set: { deletedAt: sql`GREATEST(deletedAt, VALUES(deletedAt))` } });
-    await tx.delete(movieWatchHistory).where(and(
-      eq(movieWatchHistory.userId, userId), eq(movieWatchHistory.movieSlug, movieSlug),
-      eq(movieWatchHistory.episodeSlug, episodeSlug || "movie"), lt(movieWatchHistory.lastWatchedAt, deletedAt),
-    ));
-    return true;
-  });
-}
-
-/** Safe additive repair for databases provisioned before account sessions were added. */
-export async function ensureAccountSchemaCompatibility(db: ReturnType<typeof drizzle>) {
-  const [rows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`);
-  const columns = new Set(((rows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
-  if (!columns.has("passwordHash")) {
-    await db.execute(sql.raw("ALTER TABLE `users` ADD COLUMN `passwordHash` text NULL"));
-    console.log("[Database] Added missing users.passwordHash column.");
-  }
-  const [historyRows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movie_watch_history'`);
-  const historyColumns = new Set(((historyRows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
-  if (!historyColumns.size) throw new Error("Database table movie_watch_history is missing; account data cannot be migrated safely.");
-  for (const [column, definition] of Object.entries({ serverName: "varchar(160) NULL", isCompleted: "tinyint(1) NOT NULL DEFAULT 0" })) {
-    if (historyColumns.size && !historyColumns.has(column)) {
-      await db.execute(sql.raw(`ALTER TABLE \`movie_watch_history\` ADD COLUMN \`${column}\` ${definition}`));
-      console.log(`[Database] Added missing movie_watch_history.${column} column.`);
-    }
-  }
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_sessions (
-    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    userId int NOT NULL,
-    sessionId varchar(64) NOT NULL,
-    deviceId varchar(128) NOT NULL,
-    deviceName varchar(160) NOT NULL,
-    deviceModel varchar(120) NULL,
-    osVersion varchar(80) NULL,
-    appVersion varchar(80) NULL,
-    ipAddress varchar(45) NULL,
-    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expiresAt timestamp NOT NULL,
-    revokedAt timestamp NULL,
-    revokeReason varchar(40) NULL,
-    UNIQUE KEY account_sessions_session_unique (sessionId),
-    KEY account_sessions_user_active_idx (userId, revokedAt, expiresAt),
-    KEY account_sessions_user_device_idx (userId, deviceId),
-    KEY account_sessions_user_seen_idx (userId, lastSeenAt),
-    CONSTRAINT account_sessions_user_fk FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`));
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS user_playback_preferences (
-    userId int NOT NULL PRIMARY KEY,
-    preferences text NOT NULL,
-    updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    KEY user_playback_preferences_updated_idx (updatedAt),
-    CONSTRAINT user_playback_preferences_user_fk FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`));
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_sync_tombstones (
-    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    userId int NOT NULL,
-    recordType enum('favorite','history') NOT NULL,
-    keyHash varchar(64) NOT NULL,
-    deletedAt timestamp NOT NULL,
-    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY account_sync_tombstones_record_unique (userId, recordType, keyHash),
-    KEY account_sync_tombstones_user_deleted_idx (userId, deletedAt),
-    CONSTRAINT account_sync_tombstones_user_fk FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`));
-
-  const requirements: Record<string, { columns: string[]; indexes: string[]; foreignKeys: string[] }> = {
-    users: {
-      columns: ["id", "openId", "name", "email", "passwordHash", "loginMethod", "role", "createdAt", "updatedAt", "lastSignedIn"],
-      indexes: ["PRIMARY", "users_openId_unique", "users_email_unique"], foreignKeys: [],
-    },
-    movie_favorites: {
-      columns: ["id", "userId", "movieSlug", "movieName", "originName", "posterUrl", "year", "addedAt"],
-      indexes: ["PRIMARY", "movie_favorites_user_movie_unique", "movie_favorites_user_added_idx"], foreignKeys: [],
-    },
-    movie_watch_history: {
-      columns: ["id", "userId", "movieSlug", "movieName", "originName", "posterUrl", "year", "episodeSlug", "episodeName", "serverName", "watchedSeconds", "durationSeconds", "isCompleted", "lastWatchedAt"],
-      indexes: ["PRIMARY", "movie_history_user_movie_episode_unique", "movie_history_user_watched_idx"], foreignKeys: [],
-    },
-    account_sessions: {
-      columns: ["id", "userId", "sessionId", "deviceId", "deviceName", "deviceModel", "osVersion", "appVersion", "ipAddress", "createdAt", "lastSeenAt", "expiresAt", "revokedAt", "revokeReason"],
-      indexes: ["PRIMARY", "account_sessions_session_unique", "account_sessions_user_active_idx", "account_sessions_user_device_idx", "account_sessions_user_seen_idx"],
-      foreignKeys: ["account_sessions_user_fk"],
-    },
-    user_playback_preferences: {
-      columns: ["userId", "preferences", "updatedAt"],
-      indexes: ["PRIMARY", "user_playback_preferences_updated_idx"],
-      foreignKeys: ["user_playback_preferences_user_fk"],
-    },
-    account_sync_tombstones: {
-      columns: ["id", "userId", "recordType", "keyHash", "deletedAt", "createdAt"],
-      indexes: ["PRIMARY", "account_sync_tombstones_record_unique", "account_sync_tombstones_user_deleted_idx"],
-      foreignKeys: ["account_sync_tombstones_user_fk"],
-    },
-  };
-  for (const [table, required] of Object.entries(requirements)) {
-    const [columnRows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table}`);
-    const actualColumns = new Set(((columnRows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
-    const [indexRows] = await db.execute(sql`SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table}`);
-    const actualIndexes = new Set(((indexRows as unknown) as Array<{ INDEX_NAME?: string }>).map((row) => row.INDEX_NAME));
-    const [foreignKeyRows] = await db.execute(sql`SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND REFERENCED_TABLE_NAME IS NOT NULL`);
-    const actualForeignKeys = new Set(((foreignKeyRows as unknown) as Array<{ CONSTRAINT_NAME?: string }>).map((row) => row.CONSTRAINT_NAME));
-    const missing = [
-      ...required.columns.filter((name) => !actualColumns.has(name)).map((name) => `column ${name}`),
-      ...required.indexes.filter((name) => !actualIndexes.has(name)).map((name) => `index ${name}`),
-      ...required.foreignKeys.filter((name) => !actualForeignKeys.has(name)).map((name) => `foreign key ${name}`),
-    ];
-    if (missing.length) throw new Error(`Database table ${table} is incomplete; missing ${missing.join(", ")}. Re-apply the account migration before starting Cinemora.`);
-  }
-}
-
-export class DeviceLimitError extends Error {
-  constructor() { super("Tài khoản đã đăng nhập đủ 5 thiết bị. Hãy kết thúc một phiên cũ rồi thử lại."); this.name = "DeviceLimitError"; }
-}
-
-export async function createDeviceSession(input: {
-  userId: number; sessionId: string; deviceId: string; deviceName: string;
-  deviceModel?: string | null; osVersion?: string | null; appVersion?: string | null;
-  ipAddress?: string | null; expiresAt: Date; reuseExistingDeviceSession?: boolean;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  return db.transaction(async (tx) => {
-    // Lock the owner row so two simultaneous first-time logins cannot both claim slot #5.
-    await tx.execute(sql`SELECT id FROM users WHERE id = ${input.userId} FOR UPDATE`);
-    const now = new Date();
-    const retentionCutoff = new Date(now.getTime() - 90 * 24 * 60 * 60_000);
-    await tx.delete(accountSessions).where(and(eq(accountSessions.userId, input.userId), or(
-      lt(accountSessions.expiresAt, retentionCutoff),
-      and(isNotNull(accountSessions.revokedAt), lt(accountSessions.revokedAt, retentionCutoff)),
-    )));
-    await tx.update(accountSessions).set({ revokedAt: now, revokeReason: "expired" })
-      .where(and(eq(accountSessions.userId, input.userId), isNull(accountSessions.revokedAt), lt(accountSessions.expiresAt, now)));
-    if (input.reuseExistingDeviceSession) {
-      const existing = await tx.select({ sessionId: accountSessions.sessionId, expiresAt: accountSessions.expiresAt }).from(accountSessions)
-        .where(and(eq(accountSessions.userId, input.userId), eq(accountSessions.deviceId, input.deviceId), isNull(accountSessions.revokedAt), gt(accountSessions.expiresAt, now))).limit(1);
-      if (existing[0]) {
-        await tx.update(accountSessions).set({ lastSeenAt: now }).where(eq(accountSessions.sessionId, existing[0].sessionId));
-        return { sessionId: existing[0].sessionId, expiresAt: existing[0].expiresAt };
-      }
-    }
-    // Re-login from the same stable device replaces its old session rather than consuming another slot.
-    await tx.update(accountSessions).set({ revokedAt: now, revokeReason: "replaced" })
-      .where(and(eq(accountSessions.userId, input.userId), eq(accountSessions.deviceId, input.deviceId), isNull(accountSessions.revokedAt)));
-    const active = await tx.select({ id: accountSessions.id }).from(accountSessions)
-      .where(and(eq(accountSessions.userId, input.userId), isNull(accountSessions.revokedAt), gt(accountSessions.expiresAt, now)));
-    if (active.length >= 5) throw new DeviceLimitError();
-    const { reuseExistingDeviceSession: _reuse, ...sessionData } = input;
-    await tx.insert(accountSessions).values({ ...sessionData, lastSeenAt: now });
-    return { sessionId: input.sessionId, expiresAt: input.expiresAt };
-  });
-}
-
-export async function getActiveDeviceSession(sessionId: string, userId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const now = new Date();
-  const rows = await db.select().from(accountSessions).where(and(
-    eq(accountSessions.sessionId, sessionId), eq(accountSessions.userId, userId),
-    isNull(accountSessions.revokedAt), gt(accountSessions.expiresAt, now),
-  )).limit(1);
-  return rows[0];
-}
-
-export async function touchDeviceSession(sessionId: string, userId: number) {
-  const db = await getDb();
-  if (!db) return false;
-  await db.update(accountSessions).set({ lastSeenAt: new Date() }).where(and(
-    eq(accountSessions.sessionId, sessionId), eq(accountSessions.userId, userId),
-    isNull(accountSessions.revokedAt), gt(accountSessions.expiresAt, new Date()),
-  ));
-  return !!(await getActiveDeviceSession(sessionId, userId));
-}
-
-export async function listDeviceSessions(userId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(accountSessions).where(and(
-    eq(accountSessions.userId, userId), isNull(accountSessions.revokedAt), gt(accountSessions.expiresAt, new Date()),
-  )).orderBy(desc(accountSessions.lastSeenAt));
-}
-
-export async function revokeDeviceSession(userId: number, sessionId: string, reason = "user_kick") {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  const result = await db.update(accountSessions).set({ revokedAt: new Date(), revokeReason: reason })
-    .where(and(eq(accountSessions.userId, userId), eq(accountSessions.sessionId, sessionId), isNull(accountSessions.revokedAt)));
-  return result[0].affectedRows > 0;
-}
-
-export async function revokeAllDeviceSessions(userId: number, reason = "logout_all") {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  const result = await db.update(accountSessions).set({ revokedAt: new Date(), revokeReason: reason })
-    .where(and(eq(accountSessions.userId, userId), isNull(accountSessions.revokedAt)));
-  return Number(result[0].affectedRows || 0);
-}
-
-export async function updatePasswordHash(userId: number, passwordHash: string) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
-}
-
-export async function getPlaybackPreferences(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(userPlaybackPreferences).where(eq(userPlaybackPreferences.userId, userId)).limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  try { return { preferences: JSON.parse(row.preferences) as Record<string, unknown>, updatedAt: row.updatedAt }; }
-  catch { return null; }
-}
-
-export async function savePlaybackPreferences(userId: number, preferences: Record<string, unknown>, updatedAt = new Date()) {
-  const db = await getDb();
-  if (!db) throw new Error("Database is not available");
-  await db.insert(userPlaybackPreferences).values({ userId, preferences: JSON.stringify(preferences), updatedAt })
-    .onDuplicateKeyUpdate({ set: { preferences: JSON.stringify(preferences), updatedAt } });
-  return true;
 }

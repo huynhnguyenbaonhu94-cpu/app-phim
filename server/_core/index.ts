@@ -100,7 +100,6 @@ async function startServer() {
     console.log("[Database] Migration and default admin check completed.");
   } catch (error) {
     console.error("[Database] Startup initialization failed:", error instanceof Error ? error.message : error);
-    throw error;
   }
   const app = express();
   const server = createServer(app);
@@ -309,7 +308,4 @@ async function startServer() {
   });
 }
 
-startServer().catch((error) => {
-  console.error("[Startup] Cinemora server did not start because initialization failed.", error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+startServer().catch(console.error);

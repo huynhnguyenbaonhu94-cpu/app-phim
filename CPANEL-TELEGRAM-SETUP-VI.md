@@ -177,19 +177,26 @@ Trong app SwiftUI, màn hình phát TV có:
 - Picture-in-Picture nếu thiết bị/iOS hỗ trợ.
 - Hiển thị trạng thái online/offline của nguồn.
 
-## 9. Tài khoản admin và tự khởi tạo database
+## 9. Tài khoản admin mặc định và tự khởi tạo database
 
-Khi Node.js khởi động với `DATABASE_URL` hợp lệ, backend chạy Drizzle migrations cùng compatibility checks. Trên production, backend **không dùng mật khẩu admin mặc định**. Nếu đã có admin, tài khoản hiện tại được giữ nguyên. Nếu chưa có admin, bootstrap chỉ diễn ra khi đã cấu hình `ADMIN_PASSWORD` mạnh.
+Từ bản cập nhật này, khi Node.js khởi động với `DATABASE_URL` hợp lệ, backend sẽ tự chạy các migration trong thư mục `drizzle/` và tự tạo tài khoản admin nếu email đó chưa tồn tại. Không cần đăng ký tài khoản trước và không cần tự chạy SQL trong phpMyAdmin.
 
-Trong cPanel Node.js Selector, trước restart, hãy đặt:
+Thông tin mặc định:
 
 ```text
-ADMIN_EMAIL=dia-chi-email-admin-chua-dung@example.com
-ADMIN_PASSWORD=<mat-khau-ngau-nhien-rieng-it-nhat-12-ky-tu>
+Email: admin@cungcapicloud.id.vn
+Mật khẩu: Cinemora@2026!
+```
+
+Nên đổi thông tin mặc định bằng Environment Variables trong cPanel Node.js Selector trước khi restart:
+
+```text
+ADMIN_EMAIL=dia-chi-email-admin-cua-ban@example.com
+ADMIN_PASSWORD=MatKhauManhMoiCuaBan
 ADMIN_NAME=Cinemora Admin
 ```
 
-Chọn email chưa thuộc tài khoản hiện có; backend không tự đổi role/password của user cùng email. `JWT_SECRET` cũng phải là secret ngẫu nhiên dài và được giữ kín. Nếu thiếu `ADMIN_PASSWORD`, account bootstrap được bỏ qua; source không bật một credential dự đoán được. Khi đăng nhập thành công, mở:
+Nếu đã có user cùng `ADMIN_EMAIL`, backend không ghi đè mật khẩu hoặc quyền của user đó. Nếu chưa có, backend tạo user với role `admin`. Khi đăng nhập xong, mở:
 
 ```text
 https://cungcapicloud.id.vn/admin/tv
