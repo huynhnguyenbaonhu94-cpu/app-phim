@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { InsertUser, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
+import { AccountSession, InsertUser, accountPreferences, accountSessions, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -92,6 +92,11 @@ export async function ensureTvVideosCompatibility(db: ReturnType<typeof drizzle>
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* column already exists */ } }
 }
 
+export async function ensureAccountCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_sessions (id varchar(64) NOT NULL PRIMARY KEY, userId int NOT NULL, tokenHash varchar(128) NOT NULL UNIQUE, deviceId varchar(160) NOT NULL, deviceName varchar(120) NOT NULL, deviceModel varchar(160) NULL, ipAddress varchar(64) NULL, userAgent text NULL, lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, revokedAt timestamp NULL, revokeReason varchar(40) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY account_sessions_user_device_idx (userId, deviceId), KEY account_sessions_user_active_idx (userId, revokedAt)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS account_preferences (userId int NOT NULL PRIMARY KEY, playbackDefaults text NULL, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
 export async function initializeDatabase() {
   if (initialization) return initialization;
   initialization = (async () => {
@@ -106,6 +111,7 @@ export async function initializeDatabase() {
     }
     await ensureTvStreamsCompatibility(db);
     await ensureTvVideosCompatibility(db);
+    await ensureAccountCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -141,6 +147,13 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
@@ -154,6 +167,12 @@ export async function createLocalUser(input: { name: string; email: string; pass
   const openId = `local_${randomUUID()}`;
   await db.insert(users).values({ openId, name: input.name, email: input.email, passwordHash: input.passwordHash, loginMethod: "email" });
   return getUserByOpenId(openId);
+}
+
+export async function updateUserPassword(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
 }
 
 export async function listFavorites(userId: number) {

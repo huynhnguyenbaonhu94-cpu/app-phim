@@ -22,6 +22,18 @@ workflows:
           grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
           grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
           grep -Fq 'MainActor.assumeIsolated' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'loadMediaSelectionGroup' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'loadMediaSelectionGroup' mobile-swiftui/Sources/Cinemora/Views/TVScreen.swift
+          grep -Fq 'accountBusy' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'accountSyncing' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'accountSyncPending' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'var name: String { deviceName }' mobile-swiftui/Sources/Cinemora/Models/AccountModels.swift
+          if grep -Fq 'mediaSelectionGroup(forMediaCharacteristic:' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift; then
+            echo 'ERROR: stale CinemaPlayerScreen.swift detected; IPA fix was not uploaded to this revision'; exit 1
+          fi
+          if grep -Fq 'mediaSelectionGroup(forMediaCharacteristic:' mobile-swiftui/Sources/Cinemora/Views/TVScreen.swift; then
+            echo 'ERROR: stale TVScreen.swift detected; IPA fix was not uploaded to this revision'; exit 1
+          fi
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
           fi

@@ -71,7 +71,7 @@ private final class TVPlaybackController: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 if item.status == .readyToPlay {
-                    self.disableEmbeddedSubtitles(in: item)
+                    await self.disableEmbeddedSubtitles(in: item)
                     self.isLoading = false
                 }
                 if item.status == .failed { self.isLoading = false }
@@ -90,10 +90,12 @@ private final class TVPlaybackController: ObservableObject {
         isPlaying = true
     }
 
-    private func disableEmbeddedSubtitles(in item: AVPlayerItem) {
-        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-            item.select(nil, in: group)
-        }
+    private func disableEmbeddedSubtitles(in item: AVPlayerItem) async {
+        do {
+            if let group = try await item.asset.loadMediaSelectionGroup(for: .legible) {
+                item.select(nil, in: group)
+            }
+        } catch { /* Subtitle metadata is optional. */ }
     }
 
     /// Rebuild both live items, then seek each one to its own live edge. This is

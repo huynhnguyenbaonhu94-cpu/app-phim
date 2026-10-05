@@ -5,6 +5,7 @@ import { CinemaPlayer } from "@/components/CinemaPlayer";
 import { PageShell, SkeletonCard } from "@/components/CinemaChrome";
 import { trpc } from "@/lib/trpc";
 import { isFavorite, listHistory, saveHistory, toggleFavorite } from "@/lib/localLibrary";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 type Episode = { name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null };
 type MovieDetail = { slug: string; name: string; originName: string; poster: string | null; backdrop: string | null; year: number | null; quality: string; episodeCurrent: string; episodeTotal: number | null; time: string; lang: string; type: string; description: string; rating: number | null; categories: Array<{ name: string; slug: string }>; countries: Array<{ name: string; slug: string }>; alternativeNames: string[]; actors: string[]; actorProfiles?: Array<{ name: string; image: string | null }>; directors: string[]; status: string; views: number | null; isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null; createdAt: string | null; updatedAt: string | null; servers: Array<{ name: string; isAi: boolean; episodes: Episode[] }> };
@@ -108,6 +109,12 @@ function ActorGallery({ actors }: { actors: ActorProfile[] }) {
 export default function DetailPage({ slug }: { slug: string }) {
   const [, navigate] = useLocation();
   const query = trpc.cinema.detail.useQuery({ slug }, { staleTime: 60_000 });
+  const { user } = useAuth();
+  const cloudFavorite = trpc.account.isFavorite.useQuery({ movieSlug: slug }, { enabled: Boolean(user) });
+  const cloudHistory = trpc.account.history.useQuery(undefined, { enabled: Boolean(user) });
+  const addCloudFavorite = trpc.account.addFavorite.useMutation({ onSuccess: () => void cloudFavorite.refetch() });
+  const removeCloudFavorite = trpc.account.removeFavorite.useMutation({ onSuccess: () => void cloudFavorite.refetch() });
+  const recordCloudHistory = trpc.account.recordHistory.useMutation();
   const movie = query.data as MovieDetail | undefined;
   const [serverIndex, setServerIndex] = useState(0);
   const [episodeIndex, setEpisodeIndex] = useState(0);
@@ -118,7 +125,7 @@ export default function DetailPage({ slug }: { slug: string }) {
   });
 
   useEffect(() => { setServerIndex(0); setEpisodeIndex(0); }, [slug]);
-  useEffect(() => { setFavorite(isFavorite(slug)); }, [slug]);
+  useEffect(() => { setFavorite(user ? Boolean(cloudFavorite.data) : isFavorite(slug)); }, [slug, user, cloudFavorite.data]);
   useEffect(() => { setAdLocked(false); }, [slug]);
 
   const server = movie?.servers?.[serverIndex];
@@ -127,14 +134,14 @@ export default function DetailPage({ slug }: { slug: string }) {
 
   // Look up saved progress for this episode
   const savedProgress = episode
-    ? listHistory().find((h) => h.slug === slug && h.episodeSlug === episode.slug)
+    ? (user ? cloudHistory.data?.find((h) => h.movieSlug === slug && h.episodeSlug === episode.slug) : listHistory().find((h) => h.slug === slug && h.episodeSlug === episode.slug))
     : undefined;
   const startAt = savedProgress && savedProgress.watchedSeconds > 10 ? savedProgress.watchedSeconds : undefined;
 
   // onProgress callback - receives real currentTime & duration from the player
   const handleProgress = useCallback((currentTime: number, duration: number) => {
     if (!movie || !episode) return;
-    saveHistory({
+    const payload = {
       id: movie.slug,
       slug: movie.slug,
       name: movie.name,
@@ -149,13 +156,15 @@ export default function DetailPage({ slug }: { slug: string }) {
       episodeName: episode.name,
       watchedSeconds: Math.floor(currentTime),
       durationSeconds: Math.floor(duration),
-    });
-  }, [episode, movie]);
+    };
+    if (user) recordCloudHistory.mutate({ movieSlug: movie.slug, movieName: movie.name, originName: movie.originName, posterUrl: movie.poster, year: movie.year, episodeSlug: episode.slug, episodeName: episode.name, watchedSeconds: Math.floor(currentTime), durationSeconds: Math.floor(duration) });
+    else saveHistory(payload);
+  }, [episode, movie, user, recordCloudHistory]);
 
   // Save initial history entry when episode changes
   useEffect(() => {
     if (!movie || !episode) return;
-    saveHistory({
+    const payload = {
       id: movie.slug,
       slug: movie.slug,
       name: movie.name,
@@ -170,10 +179,11 @@ export default function DetailPage({ slug }: { slug: string }) {
       episodeName: episode.name,
       watchedSeconds: savedProgress?.watchedSeconds ?? 0,
       durationSeconds: savedProgress?.durationSeconds ?? 0,
-    });
+    };
+    if (!user) saveHistory(payload);
   // Only run when episode changes, not on every savedProgress update
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episode?.slug, movie?.slug]);
+  }, [episode?.slug, movie?.slug, user]);
 
   function selectEpisode(nextServerIndex: number, nextEpisodeIndex: number) {
     if (adLocked) return;
@@ -210,7 +220,11 @@ export default function DetailPage({ slug }: { slug: string }) {
 
   function handleFavorite() {
     if (!movie) return;
-    setFavorite(toggleFavorite({ id: movie.slug, slug: movie.slug, name: movie.name, originName: movie.originName, poster: movie.poster, year: movie.year, quality: movie.quality, episodeCurrent: movie.episodeCurrent, rating: movie.rating, categories: movie.categories }));
+    if (user) {
+      if (favorite) removeCloudFavorite.mutate({ movieSlug: movie.slug });
+      else addCloudFavorite.mutate({ movieSlug: movie.slug, movieName: movie.name, originName: movie.originName, posterUrl: movie.poster, year: movie.year });
+      setFavorite(!favorite);
+    } else setFavorite(toggleFavorite({ id: movie.slug, slug: movie.slug, name: movie.name, originName: movie.originName, poster: movie.poster, year: movie.year, quality: movie.quality, episodeCurrent: movie.episodeCurrent, rating: movie.rating, categories: movie.categories }));
   }
 
   if (query.isLoading) return <PageShell><main className="content-wrap inner-page detail-loading"><div className="detail-backdrop-skeleton skeleton" /><div className="detail-loading-grid"><SkeletonCard /><div><div className="skeleton skeleton-line wide" /><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line wide" /></div></div></main></PageShell>;
