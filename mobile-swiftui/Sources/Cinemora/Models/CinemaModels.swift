@@ -34,6 +34,8 @@ struct TvVideo: Decodable, Identifiable, Hashable {
     let sortOrder: Int
     let isActive: Bool
     let allowPip: Bool?
+    let isFeatured: Bool?
+    let featuredEffect: String?
     let episodes: [TvVideoEpisode]
     var logoURL: URL? { CinemaAPI.absoluteURL(logoUrl) }
 }
@@ -67,9 +69,11 @@ struct TvVideoQuality: Decodable, Identifiable, Hashable {
     let streamUrl: String
     let subtitleUrl: String?
     let bilingualSubtitleUrl: String?
+    let subtitleTracks: [TvVideoSubtitle]?
     var streamURL: URL? { CinemaAPI.tvStreamURL(streamUrl) }
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
+    var languageSubtitleTracks: [TvVideoSubtitle] { subtitleTracks ?? [] }
 }
 
 struct Movie: Decodable, Identifiable, Hashable {

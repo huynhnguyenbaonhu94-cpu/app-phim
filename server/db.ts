@@ -76,16 +76,19 @@ export async function ensureTvStreamsCompatibility(db: ReturnType<typeof drizzle
 }
 
 export async function ensureTvVideosCompatibility(db: ReturnType<typeof drizzle>) {
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_videos (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, name varchar(180) NOT NULL, logoUrl text NULL, description varchar(1000) NULL, sortOrder int NOT NULL DEFAULT 0, isActive tinyint(1) NOT NULL DEFAULT 1, allowPip tinyint(1) NOT NULL DEFAULT 1, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX tv_videos_active_order_idx (isActive, sortOrder)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_videos (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, name varchar(180) NOT NULL, logoUrl text NULL, description varchar(1000) NULL, sortOrder int NOT NULL DEFAULT 0, isActive tinyint(1) NOT NULL DEFAULT 1, allowPip tinyint(1) NOT NULL DEFAULT 1, isFeatured tinyint(1) NOT NULL DEFAULT 0, featuredEffect varchar(30) NOT NULL DEFAULT 'glow', createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX tv_videos_active_order_idx (isActive, sortOrder)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_episodes (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, videoId int NOT NULL, episodeNumber int NOT NULL, name varchar(180) NOT NULL, subtitleUrl text NULL, bilingualSubtitleUrl text NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_episodes_video_order_idx (videoId, episodeNumber)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
-  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_qualities (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, episodeId int NOT NULL, label varchar(40) NOT NULL, streamUrl text NOT NULL, subtitleUrl text NULL, bilingualSubtitleUrl text NULL, healthStatus varchar(20) NOT NULL DEFAULT 'unknown', healthMessage varchar(255) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_qualities_episode_idx (episodeId)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_qualities (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, episodeId int NOT NULL, label varchar(40) NOT NULL, streamUrl text NOT NULL, subtitleUrl text NULL, bilingualSubtitleUrl text NULL, subtitleTracks text NULL, healthStatus varchar(20) NOT NULL DEFAULT 'unknown', healthMessage varchar(255) NULL, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_qualities_episode_idx (episodeId)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS tv_video_subtitles (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, episodeId int NOT NULL, language varchar(40) NOT NULL, subtitleUrl text NOT NULL, isDefault tinyint(1) NOT NULL DEFAULT 0, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX tv_video_subtitles_episode_idx (episodeId)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
   for (const statement of [
     "ALTER TABLE `tv_videos` ADD COLUMN `allowPip` tinyint(1) NOT NULL DEFAULT 1",
+    "ALTER TABLE `tv_videos` ADD COLUMN `isFeatured` tinyint(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE `tv_videos` ADD COLUMN `featuredEffect` varchar(30) NOT NULL DEFAULT 'glow'",
     "ALTER TABLE `tv_video_episodes` ADD COLUMN `subtitleUrl` text NULL",
     "ALTER TABLE `tv_video_episodes` ADD COLUMN `bilingualSubtitleUrl` text NULL",
     "ALTER TABLE `tv_video_qualities` ADD COLUMN `subtitleUrl` text NULL",
     "ALTER TABLE `tv_video_qualities` ADD COLUMN `bilingualSubtitleUrl` text NULL",
+    "ALTER TABLE `tv_video_qualities` ADD COLUMN `subtitleTracks` text NULL",
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* column already exists */ } }
 }
 

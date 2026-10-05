@@ -3,10 +3,10 @@ import { getDb, ensureTvVideosCompatibility } from "./db";
 import { tvVideos, tvVideoEpisodes, tvVideoQualities, tvVideoSubtitles } from "../drizzle/schema";
 import { checkStreamHealth, validateOptionalUrl, validateStreamUrl } from "./tvStreams";
 
-export type TvVideoQualityInput = { label: string; streamUrl: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null };
-export type TvVideoSubtitleInput = { language: string; subtitleUrl: string };
+export type TvVideoQualityInput = { label: string; streamUrl: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null; subtitleTracks?: TvVideoSubtitleInput[] };
+export type TvVideoSubtitleInput = { language: string; subtitleUrl: string | null };
 export type TvVideoEpisodeInput = { episodeNumber: number; name?: string; subtitleUrl?: string | null; bilingualSubtitleUrl?: string | null; subtitles?: TvVideoSubtitleInput[]; qualities: TvVideoQualityInput[] };
-export type TvVideoPayload = { name: string; logoUrl?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean; allowPip?: boolean; episodes: TvVideoEpisodeInput[] };
+export type TvVideoPayload = { name: string; logoUrl?: string | null; description?: string | null; sortOrder?: number; isActive?: boolean; allowPip?: boolean; isFeatured?: boolean; featuredEffect?: string; episodes: TvVideoEpisodeInput[] };
 
 function clean(value: string | null | undefined, max: number) { return value?.trim().slice(0, max) || null; }
 function validateSubtitleUrl(value: string | null | undefined) {
@@ -41,10 +41,11 @@ function normalize(input: TvVideoPayload) {
         streamUrl: validateStreamUrl(quality.streamUrl),
         subtitleUrl: validateSubtitleUrl(quality.subtitleUrl),
         bilingualSubtitleUrl: validateSubtitleUrl(quality.bilingualSubtitleUrl),
+        subtitleTracks: (quality.subtitleTracks ?? []).map((subtitle) => ({ language: subtitle.language.trim().slice(0, 40) || "原语言", subtitleUrl: validateSubtitleUrl(subtitle.subtitleUrl) })).filter((subtitle) => subtitle.subtitleUrl),
       })),
     };
   });
-  return { name, logoUrl: validateOptionalUrl(input.logoUrl, "URL logo"), description: clean(input.description, 1000), sortOrder: Math.max(0, Math.min(100000, Math.floor(input.sortOrder ?? 0))), isActive: input.isActive !== false, allowPip: input.allowPip !== false, episodes };
+  return { name, logoUrl: validateOptionalUrl(input.logoUrl, "URL logo"), description: clean(input.description, 1000), sortOrder: Math.max(0, Math.min(100000, Math.floor(input.sortOrder ?? 0))), isActive: input.isActive !== false, allowPip: input.allowPip !== false, isFeatured: input.isFeatured === true, featuredEffect: ["glow", "pulse", "ribbon", "spark"].includes(input.featuredEffect || "") ? input.featuredEffect : "glow", episodes };
 }
 
 async function validateAllLinks(episodes: TvVideoEpisodeInput[]) {
@@ -78,7 +79,7 @@ export async function listTvVideos(includeInactive = false) {
   return videos.map((video) => ({ ...video, episodes: episodes.filter((episode) => episode.videoId === video.id).map((episode) => {
     const episodeQualities = qualities.filter((quality) => quality.episodeId === episode.id);
     const defaultURL = episode.subtitleUrl || episodeQualities.find((quality) => quality.subtitleUrl)?.subtitleUrl;
-    return { ...episode, qualities: episodeQualities, subtitles: subtitles.filter((subtitle) => subtitle.episodeId === episode.id).map((subtitle) => ({ ...subtitle, isDefault: Boolean(defaultURL && subtitle.subtitleUrl === defaultURL) })) };
+    return { ...episode, qualities: episodeQualities.map((quality) => ({ ...quality, subtitleTracks: (() => { try { return quality.subtitleTracks ? JSON.parse(quality.subtitleTracks) : []; } catch { return []; } })() })), subtitles: subtitles.filter((subtitle) => subtitle.episodeId === episode.id).map((subtitle) => ({ ...subtitle, isDefault: Boolean(defaultURL && subtitle.subtitleUrl === defaultURL) })) };
   }) }));
 }
 
@@ -87,14 +88,14 @@ export async function createTvVideo(input: TvVideoPayload) {
   await ensureTvVideosCompatibility(db);
   const values = normalize(input);
   const healthByURL = await validateAllLinks(values.episodes);
-  const inserted = await db.insert(tvVideos).values({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip });
+  const inserted = await db.insert(tvVideos).values({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip, isFeatured: values.isFeatured, featuredEffect: values.featuredEffect });
   const videoId = getInsertId(inserted, "video");
   for (const episode of values.episodes) {
     const result = await db.insert(tvVideoEpisodes).values({ videoId, episodeNumber: episode.episodeNumber, name: episode.name, subtitleUrl: episode.subtitleUrl, bilingualSubtitleUrl: episode.bilingualSubtitleUrl });
     const episodeId = getInsertId(result, "tập");
     await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => {
       const health = healthByURL.get(quality.streamUrl);
-      return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
+      return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, subtitleTracks: quality.subtitleTracks?.length ? JSON.stringify(quality.subtitleTracks) : null, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
     }));
     if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault })));
   }
@@ -106,7 +107,7 @@ export async function updateTvVideo(id: number, input: TvVideoPayload) {
   await ensureTvVideosCompatibility(db);
   const values = normalize(input);
   const healthByURL = await validateAllLinks(values.episodes);
-  await db.update(tvVideos).set({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip }).where(eq(tvVideos.id, id));
+  await db.update(tvVideos).set({ name: values.name, logoUrl: values.logoUrl, description: values.description, sortOrder: values.sortOrder, isActive: values.isActive, allowPip: values.allowPip, isFeatured: values.isFeatured, featuredEffect: values.featuredEffect }).where(eq(tvVideos.id, id));
   const oldEpisodes = await db.select({ id: tvVideoEpisodes.id }).from(tvVideoEpisodes).where(eq(tvVideoEpisodes.videoId, id));
   if (oldEpisodes.length) {
     const oldEpisodeIds = oldEpisodes.map((episode) => episode.id);
@@ -119,7 +120,7 @@ export async function updateTvVideo(id: number, input: TvVideoPayload) {
     const episodeId = getInsertId(result, "tập");
     await db.insert(tvVideoQualities).values(episode.qualities.map((quality) => {
       const health = healthByURL.get(quality.streamUrl);
-      return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
+      return { episodeId, label: quality.label, streamUrl: quality.streamUrl, subtitleUrl: quality.subtitleUrl, bilingualSubtitleUrl: quality.bilingualSubtitleUrl, subtitleTracks: quality.subtitleTracks?.length ? JSON.stringify(quality.subtitleTracks) : null, healthStatus: health?.status ?? "unknown", healthMessage: health?.message ?? "Chưa xác minh từ máy chủ" };
     }));
     if (episode.subtitles.length) await db.insert(tvVideoSubtitles).values(episode.subtitles.map((subtitle) => ({ episodeId, language: subtitle.language, subtitleUrl: subtitle.subtitleUrl!, isDefault: subtitle.isDefault })));
   }

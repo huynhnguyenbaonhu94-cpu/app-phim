@@ -456,7 +456,7 @@ private extension TvVideo {
                     filename: "",
                     embedUrl: nil,
                     streamUrl: streamURL.absoluteString,
-                    subtitleUrl: (quality.subtitleURL ?? tvEpisode.subtitleURL)?.absoluteString,
+                    subtitleUrl: (quality.subtitleURL ?? quality.languageSubtitleTracks.first?.subtitleURL ?? tvEpisode.subtitleURL)?.absoluteString,
                     bilingualSubtitleUrl: (quality.bilingualSubtitleURL ?? tvEpisode.bilingualSubtitleURL)?.absoluteString
                 )
             }
@@ -757,13 +757,14 @@ private struct TVFullscreenPlayer: View {
 private struct TVVideoRow: View {
     let video: TvVideo
     let action: () -> Void
+    @State private var pulse = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 13) {
                 PosterArt(url: video.logoURL).frame(width: 76, height: 48).clipped().clipShape(RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(video.name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                    HStack(spacing: 6) { Text(video.name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white); if video.isFeatured == true { Text("NỔI BẬT").font(.system(size: 8, weight: .black)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 6).padding(.vertical, 3).background(Color.cinemaAccent, in: Capsule()) } }
                     Text(video.episodes.count > 1 ? "Video bộ · \(video.episodes.count) tập" : "Video · sẵn sàng phát")
                         .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.55))
                 }
@@ -771,8 +772,12 @@ private struct TVVideoRow: View {
                 Image(systemName: "play.circle.fill").font(.system(size: 24)).foregroundStyle(Color.cinemaAccent)
             }
             .padding(13)
-            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.08), lineWidth: 1))
+            .background(video.isFeatured == true ? Color.cinemaAccent.opacity(0.10) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 15).stroke(video.isFeatured == true ? Color.cinemaAccent.opacity(0.62) : .white.opacity(0.08), lineWidth: 1))
+            .shadow(color: video.isFeatured == true && video.featuredEffect == "glow" ? Color.cinemaAccent.opacity(0.45) : .clear, radius: 12)
+            .scaleEffect(video.isFeatured == true && video.featuredEffect == "pulse" && pulse ? 1.015 : 1)
+            .overlay(alignment: .topTrailing) { if video.isFeatured == true && video.featuredEffect == "ribbon" { Text("★").font(.system(size: 12, weight: .black)).foregroundStyle(Color.cinemaInk).padding(7).background(Color.cinemaAccent, in: Circle()).offset(x: -8, y: -8) } }
+            .onAppear { if video.isFeatured == true && video.featuredEffect == "pulse" { withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { pulse = true } } }
         }.buttonStyle(.plain)
     }
 }
@@ -898,7 +903,7 @@ private struct TVVideoFullscreenPlayer: View {
     private func loadCurrent() {
         guard let episode, episode.qualities.indices.contains(qualityIndex), let quality, let url = quality.streamURL else { return }
         playback.load(url); playback.setVolume(volume); playback.setMuted(isMuted)
-        subtitles.load(url: quality.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
+        subtitles.load(url: quality.subtitleURL ?? quality.languageSubtitleTracks.first?.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
     }
     private func moveEpisode(_ offset: Int) { let next = episodeIndex + offset; guard video.episodes.indices.contains(next) else { playback.togglePlayback(); return }; episodeIndex = next }
     private func skip(_ seconds: Double) { let now = playback.player.currentTime().seconds; playback.player.seek(to: CMTime(seconds: max(0, now + seconds), preferredTimescale: 600)) }

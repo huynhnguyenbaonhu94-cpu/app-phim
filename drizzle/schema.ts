@@ -74,6 +74,8 @@ export const tvVideos = mysqlTable("tv_videos", {
   sortOrder: int("sortOrder").default(0).notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   allowPip: boolean("allowPip").default(true).notNull(),
+  isFeatured: boolean("isFeatured").default(false).notNull(),
+  featuredEffect: varchar("featuredEffect", { length: 30 }).default("glow").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({ activeOrderIndex: index("tv_videos_active_order_idx").on(table.isActive, table.sortOrder) }));
@@ -95,6 +97,7 @@ export const tvVideoQualities = mysqlTable("tv_video_qualities", {
   streamUrl: text("streamUrl").notNull(),
   subtitleUrl: text("subtitleUrl"),
   bilingualSubtitleUrl: text("bilingualSubtitleUrl"),
+  subtitleTracks: text("subtitleTracks"),
   healthStatus: varchar("healthStatus", { length: 20 }).default("unknown").notNull(),
   healthMessage: varchar("healthMessage", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
