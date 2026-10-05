@@ -48,6 +48,7 @@ final class CinemaStore: ObservableObject {
     private var catalogRequestID = 0
     private var searchRequestID = 0
     private var tvEventsTask: Task<Void, Never>?
+    private var tvVideoRefreshTask: Task<Void, Never>?
     private var lastHomeRefreshAt: Date?
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
@@ -77,7 +78,7 @@ final class CinemaStore: ObservableObject {
         }
     }
 
-    deinit { tvEventsTask?.cancel() }
+    deinit { tvEventsTask?.cancel(); tvVideoRefreshTask?.cancel() }
 
     func startTvLiveUpdates() async {
         guard tvEventsTask == nil else { return }
@@ -92,6 +93,15 @@ final class CinemaStore: ObservableObject {
             tvError = error.localizedDescription
         }
         tvLoading = false
+        tvVideoRefreshTask?.cancel()
+        tvVideoRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(12))
+                guard !Task.isCancelled else { return }
+                if let videos = try? await self.api.tvVideos() { self.tvVideos = videos }
+            }
+        }
         tvEventsTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
@@ -117,7 +127,9 @@ final class CinemaStore: ObservableObject {
 
     func stopTvLiveUpdates() {
         tvEventsTask?.cancel()
+        tvVideoRefreshTask?.cancel()
         tvEventsTask = nil
+        tvVideoRefreshTask = nil
     }
 
     func refreshTvStreams() async {

@@ -99,7 +99,7 @@ export const appRouter = router({
   tv: router({
     list: publicProcedure.query(() => listTvStreams(false)),
     adminList: adminProcedure.query(() => listTvStreams(true)),
-    videos: publicProcedure.query(() => listTvVideos(false)),
+    videos: publicProcedure.input(z.object({ refresh: z.number().optional() }).optional()).query(() => listTvVideos(false)),
     adminVideos: adminProcedure.query(() => listTvVideos(true)),
     uploadPoster: adminProcedure.input(z.object({
       base64: z.string().min(1).max(11_200_000),

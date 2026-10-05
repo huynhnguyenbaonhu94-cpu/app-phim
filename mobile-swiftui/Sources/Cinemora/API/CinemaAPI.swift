@@ -64,7 +64,7 @@ struct CinemaAPI {
     }
 
     func tvVideos() async throws -> [TvVideo] {
-        try await query("tv.videos", input: nil)
+        try await query("tv.videos", input: ["refresh": Int(Date().timeIntervalSince1970 * 1000)])
     }
 
     func tvEventBytes() async throws -> URLSession.AsyncBytes {
@@ -100,9 +100,9 @@ struct CinemaAPI {
             components.queryItems = [URLQueryItem(name: "input", value: String(data: inputData, encoding: .utf8))]
         }
         guard let url = components.url else { throw APIError.invalidURL }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 25
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
