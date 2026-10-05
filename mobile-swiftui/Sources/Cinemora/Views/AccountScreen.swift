@@ -292,9 +292,9 @@ private struct ChangePasswordSheet: View {
             CinemaBackground()
             VStack(alignment: .leading, spacing: 14) {
                 Text("Đổi mật khẩu").font(.system(size: 25, weight: .black, design: .rounded)).foregroundStyle(.white)
-                SecureField("Mật khẩu hiện tại", text: $current).passwordFieldStyle()
-                SecureField("Mật khẩu mới (ít nhất 10 ký tự)", text: $newPassword).passwordFieldStyle()
-                SecureField("Nhập lại mật khẩu mới", text: $confirmation).passwordFieldStyle()
+                SecureField("Mật khẩu hiện tại", text: $current).passwordField()
+                SecureField("Mật khẩu mới (ít nhất 10 ký tự)", text: $newPassword).passwordField()
+                SecureField("Nhập lại mật khẩu mới", text: $confirmation).passwordField()
                 if let error = store.accountError { Text(error).font(.system(size: 11)).foregroundStyle(.red) }
                 Button {
                     guard newPassword == confirmation else { store.setAccountError("Hai mật khẩu mới không khớp."); return }

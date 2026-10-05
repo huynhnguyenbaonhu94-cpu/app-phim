@@ -36,3 +36,7 @@ Hãy upload gói source cập nhật và chạy lại workflow `cinemora-ios`. N
 - Preflight Codemagic kiểm tra để không cho pattern actor-isolation cũ quay lại.
 
 Sau patch này vẫn cần chạy archive trên Codemagic/macOS vì sandbox Linux không có Xcode hoặc iOS SDK.
+
+## Patch bổ sung — `SecureField` modifier
+
+Log Codemagic tiếp theo chỉ ra `AccountScreen.swift:295` với lỗi `SecureField<Text> has no member passwordFieldStyle`. Ba field đổi mật khẩu đã được chuyển sang modifier nội bộ hợp lệ `.passwordField()`, vốn đã được khai báo ở cuối file.
