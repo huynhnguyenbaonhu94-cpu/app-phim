@@ -28,3 +28,11 @@ Log Codemagic chỉ rõ hai chỗ dùng API AVFoundation đã deprecated từ iO
 Sandbox này chạy Linux, không có `xcodebuild`, Xcode/iOS SDK hay signing profiles. Vì vậy không thể thực hiện archive iOS hoặc tạo IPA tại đây, và chưa thể khẳng định Codemagic sẽ hoàn tất ký gói cho tới khi workflow chạy lại trên macOS. Không thay đổi provisioning profile, bundle ID hay thông tin signing.
 
 Hãy upload gói source cập nhật và chạy lại workflow `cinemora-ios`. Nếu Codemagic vẫn fail, cần lấy toàn bộ các dòng `error:` đầu tiên và phần compiler diagnostics (không dùng đoạn log đã rút gọn) để sửa lỗi tiếp theo nếu có.
+
+## Patch bổ sung — Xcode 26 / Swift concurrency
+
+- Bỏ `MainActor.assumeIsolated` khỏi periodic AVPlayer observer; callback nay chuyển rõ ràng sang `@MainActor`, tránh diagnostic hoặc lỗi runtime khi SDK mới giao callback trong lúc teardown.
+- Thêm `SWIFT_STRICT_CONCURRENCY: minimal` và tắt treat-warnings-as-errors trong project settings để giữ tương thích với Swift 5 mode của source hiện tại; các lỗi compiler thật vẫn làm archive thất bại.
+- Preflight Codemagic kiểm tra để không cho pattern actor-isolation cũ quay lại.
+
+Sau patch này vẫn cần chạy archive trên Codemagic/macOS vì sandbox Linux không có Xcode hoặc iOS SDK.

@@ -21,9 +21,11 @@ workflows:
           set -euo pipefail
           grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
           grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
-          grep -Fq 'MainActor.assumeIsolated' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
+          fi
+          if grep -Fq 'MainActor.assumeIsolated' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift; then
+            echo 'ERROR: unsafe MainActor.assumeIsolated callback remains'; exit 1
           fi
           if grep -R -n 'mediaSelectionGroup(forMediaCharacteristic:' mobile-swiftui/Sources/Cinemora; then
             echo 'ERROR: deprecated synchronous AVAsset media-selection API is still present'; exit 1

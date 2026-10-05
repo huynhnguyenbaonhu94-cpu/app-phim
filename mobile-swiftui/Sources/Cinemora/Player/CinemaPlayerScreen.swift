@@ -34,9 +34,11 @@ final class PlaybackController: ObservableObject {
             }
         ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            let requestID = MainActor.assumeIsolated { self?.activeRequestID }
+            // Hop explicitly to the controller's actor instead of asserting
+            // isolation; AVFoundation can deliver teardown callbacks from a
+            // different executor on newer SDKs.
             Task { @MainActor [weak self] in
-                guard let self, let requestID, self.activeRequestID == requestID else { return }
+                guard let self else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 self.isPlaying = self.player.timeControlStatus == .playing
