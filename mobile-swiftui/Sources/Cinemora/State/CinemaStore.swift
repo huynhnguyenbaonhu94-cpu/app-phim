@@ -33,6 +33,7 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var accountUser: AccountUser?
     @Published private(set) var accountDevices: [AccountDevice] = []
     @Published private(set) var accountError: String?
+    @Published var requiresLoginMessage: String?
     @Published private(set) var accountBusy = false
     @Published private(set) var accountSyncing = false
     @Published private(set) var accountSyncPending = false
@@ -229,6 +230,23 @@ final class CinemaStore: ObservableObject {
     func refreshAccountDevices() async { do { accountDevices = try await api.devices() } catch { accountError = error.localizedDescription } }
     func kickDevice(_ device: AccountDevice) async { accountBusy = true; defer { accountBusy = false }; do { try await api.kickDevice(sessionId: device.id); await refreshAccountDevices() } catch { accountError = error.localizedDescription } }
     func logoutAllDevices() async { accountBusy = true; defer { accountBusy = false }; do { try await api.logoutAllDevices(); accountUser = nil; accountDevices = [] } catch { accountError = error.localizedDescription } }
+    func syncAccountData() async {
+        guard accountUser != nil else {
+            requiresLoginMessage = "Vui lòng đăng nhập để đồng bộ dữ liệu tài khoản."
+            return
+        }
+        accountBusy = true
+        accountSyncPending = true
+        defer { accountBusy = false; accountSyncPending = false }
+        do {
+            try await syncAccount()
+            requiresLoginMessage = nil
+            accountError = nil
+        } catch {
+            accountError = error.localizedDescription
+            requiresLoginMessage = error.localizedDescription
+        }
+    }
     func changePassword(current: String, new: String, confirm: String, logoutAll: Bool) async -> Bool {
         accountBusy = true; defer { accountBusy = false }
         do { let result = try await api.changePassword(current: current, new: new, confirm: confirm, logoutAll: logoutAll); if result.loggedOutCurrent { accountUser = nil }; return result.success }

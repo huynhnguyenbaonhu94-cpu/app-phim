@@ -19,6 +19,7 @@ struct AccountDevice: Decodable, Identifiable, Hashable {
     let revoked: Bool
     let revokeReason: String?
     var name: String { deviceName }
+    var isOnline: Bool { online }
 }
 
 struct AccountPlaybackPreferences: Codable, Equatable {
