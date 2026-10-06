@@ -91,8 +91,10 @@ private final class TVPlaybackController: ObservableObject {
     }
 
     private func disableEmbeddedSubtitles(in item: AVPlayerItem) {
-        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-            item.select(nil, in: group)
+        Task { @MainActor in
+            if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
+                item.select(nil, in: group)
+            }
         }
     }
 

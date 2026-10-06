@@ -111,7 +111,7 @@ final class PlaybackController: ObservableObject {
                     guard self.activeRequestID == requestID else { return }
                     switch item.status {
                     case .readyToPlay:
-                        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible), let option = group.options.first {
+                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible), let option = group.options.first {
                             item.select(option, in: group)
                         }
                         self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
@@ -163,11 +163,11 @@ final class PlaybackController: ObservableObject {
                 return AVPlayerItem(url: videoURL)
             }
             let composition = AVMutableComposition()
-            try composition.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: videoAsset, at: .zero)
+            try await composition.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: videoAsset, at: .zero)
             guard let track = composition.addMutableTrack(withMediaType: .text, preferredTrackID: kCMPersistentTrackID_Invalid) else {
                 return AVPlayerItem(url: videoURL)
             }
-            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: subtitleAsset, at: .zero)
+            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: subtitleTrack, at: .zero)
             return AVPlayerItem(asset: composition)
         } catch {
             // HLS assets may not expose an external text track to a composition.
