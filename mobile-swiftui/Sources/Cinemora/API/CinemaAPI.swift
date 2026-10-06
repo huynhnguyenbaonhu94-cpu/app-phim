@@ -2,6 +2,9 @@ import Foundation
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(Security)
+import Security
+#endif
 
 struct CinemaAPI {
     static let shared = CinemaAPI()
@@ -11,10 +14,32 @@ struct CinemaAPI {
     init(session: URLSession = .shared) { self.session = session }
 
     private var deviceId: String {
-        let key = "cinemora.account.device.id.v1"
-        if let value = UserDefaults.standard.string(forKey: key), !value.isEmpty { return value }
-        let value = UUID().uuidString
-        UserDefaults.standard.set(value, forKey: key)
+        let key = "app.serval4238.cinemora.account.device.id.v2"
+        #if canImport(Security)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: key,
+            kSecAttrAccount as String: "device",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data,
+           let value = String(data: data, encoding: .utf8),
+           !value.isEmpty { return value }
+        #endif
+        let value = UserDefaults.standard.string(forKey: "cinemora.account.device.id.v1") ?? UUID().uuidString
+        #if canImport(Security)
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: key,
+            kSecAttrAccount as String: "device",
+            kSecValueData as String: Data(value.utf8),
+        ]
+        SecItemAdd(attributes as CFDictionary, nil)
+        UserDefaults.standard.removeObject(forKey: "cinemora.account.device.id.v1")
+        #endif
         return value
     }
 
@@ -141,6 +166,9 @@ struct CinemaAPI {
     }
 
     func logout() async throws { let _: SuccessResponse = try await mutate("auth.logout", input: [:]) }
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        let _: SuccessResponse = try await mutate("account.changePassword", input: ["currentPassword": currentPassword, "newPassword": newPassword])
+    }
 
     func accountDevices() async throws -> [RemoteAccountDevice] { try await query("account.devices", input: nil) }
     func isCurrentDevice(_ remoteDeviceId: String) -> Bool { remoteDeviceId == deviceId }
@@ -282,6 +310,7 @@ private struct MovieRequestResponse: Decodable {
 
 enum APIError: LocalizedError {
     case invalidURL, invalidResponse
+    case rateLimited(seconds: Int)
     case http(Int)
     case server(String)
     case decoding(String)
@@ -298,6 +327,7 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidURL: return "Địa chỉ API không hợp lệ."
         case .invalidResponse: return "Máy chủ trả về dữ liệu chưa đúng định dạng."
+        case .rateLimited(let seconds): return "Bạn thao tác quá nhanh. Vui lòng thử lại sau khoảng \(max(1, seconds)) giây."
         case .http(let code): return "Máy chủ phản hồi lỗi (\(code)). Vui lòng thử lại."
         case .server(let message): return Self.friendlyServerMessage(message)
         case .decoding(let message): return "Không đọc được dữ liệu phim: \(message)"

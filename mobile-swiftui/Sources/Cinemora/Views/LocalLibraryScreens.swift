@@ -11,14 +11,16 @@ struct WatchHistoryScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .lastTextBaseline) {
-                        CinemaHeader(eyebrow: "LƯU TRÊN THIẾT BỊ", title: "LỊCH SỬ XEM")
+                        CinemaHeader(eyebrow: "LƯU TRÊN TÀI KHOẢN", title: "LỊCH SỬ XEM")
                         Spacer()
                         if !store.localHistory.isEmpty {
                             Button("Xóa tất cả") { showClearAlert = true }
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(Color.cinemaAccent)
                         }
                     }
-                    if store.localHistory.isEmpty {
+                    if store.accountUser == nil {
+                        StateMessage(icon: "person.crop.circle.badge.exclamationmark", title: "Cần đăng nhập", detail: "Đăng nhập tài khoản để lưu và đồng bộ lịch sử xem trên các thiết bị.")
+                    } else if store.localHistory.isEmpty {
                         StateMessage(icon: "clock.arrow.circlepath", title: "Chưa có lịch sử xem", detail: "Các phim bạn bắt đầu xem sẽ xuất hiện ở đây.")
                     } else {
                         LazyVStack(spacing: 12) {
@@ -51,7 +53,7 @@ struct WatchHistoryScreen: View {
             Button("Xóa tất cả", role: .destructive) { store.clearHistory() }
             Button("Hủy", role: .cancel) { }
         } message: {
-            Text("Tất cả lịch sử xem được lưu trên thiết bị sẽ bị xóa.")
+            Text("Tất cả lịch sử xem trong tài khoản sẽ bị xóa.")
         }
     }
 
@@ -106,14 +108,16 @@ struct FavoritesScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .lastTextBaseline) {
-                        CinemaHeader(eyebrow: "LƯU TRÊN THIẾT BỊ", title: "YÊU THÍCH")
+                        CinemaHeader(eyebrow: "LƯU TRÊN TÀI KHOẢN", title: "YÊU THÍCH")
                         Spacer()
                         if !store.localFavorites.isEmpty {
                             Button("Xóa tất cả") { showClearAlert = true }
                                 .font(.system(size: 10, weight: .bold)).foregroundStyle(Color.cinemaAccent)
                         }
                     }
-                    if store.localFavorites.isEmpty {
+                    if store.accountUser == nil {
+                        StateMessage(icon: "person.crop.circle.badge.exclamationmark", title: "Cần đăng nhập", detail: "Đăng nhập tài khoản để lưu và đồng bộ phim yêu thích trên các thiết bị.")
+                    } else if store.localFavorites.isEmpty {
                         StateMessage(icon: "heart", title: "Chưa có phim yêu thích", detail: "Nhấn biểu tượng trái tim trong trang chi tiết để lưu phim.")
                     } else {
                         LazyVGrid(columns: columns, spacing: 20) {
@@ -146,7 +150,7 @@ struct FavoritesScreen: View {
             Button("Xóa tất cả", role: .destructive) { store.clearFavorites() }
             Button("Hủy", role: .cancel) { }
         } message: {
-            Text("Danh sách phim yêu thích trên thiết bị sẽ bị xóa.")
+            Text("Danh sách phim yêu thích trong tài khoản sẽ bị xóa.")
         }
     }
 
@@ -181,11 +185,11 @@ struct SavedHubScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 7) {
-                        SectionEyebrow(text: "LƯU TRÊN THIẾT BỊ")
+                        SectionEyebrow(text: "LƯU TRÊN TÀI KHOẢN")
                         Text("Lịch sử & Yêu thích")
                             .font(.system(size: 29, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("Quản lý phim đang xem, phim yêu thích và gửi yêu cầu phim mới.")
+                        Text("Đăng nhập để lưu lịch sử xem và phim yêu thích; các cài đặt khác vẫn dùng được khi offline.")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.62))
                     }

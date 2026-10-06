@@ -262,6 +262,13 @@ export async function getUserById(id: number) {
   return result[0];
 }
 
+export async function updateLocalPassword(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+  return true;
+}
+
 export async function updateLocalAccountByAdmin(input: { id: number; name?: string; email?: string; passwordHash?: string; role?: "user" | "admin" }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");

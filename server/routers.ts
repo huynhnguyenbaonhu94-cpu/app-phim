@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin } from "./db";
+import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, getUserById, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -12,6 +12,7 @@ import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
+import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -24,6 +25,13 @@ const movieSnapshot = z.object({
 });
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
+const changePasswordInput = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: passwordInput,
+}).refine(({ currentPassword, newPassword }) => currentPassword !== newPassword, {
+  message: "Mật khẩu mới phải khác mật khẩu hiện tại.",
+  path: ["newPassword"],
+});
 const movieRequestCooldown = new Map<string, number>();
 const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((value) => {
   if (!value) return true;
@@ -40,6 +48,7 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput, deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "auth.register", SECURITY_LIMITS.registerPerIp.limit, SECURITY_LIMITS.registerPerIp.windowMs);
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Email này đã được đăng ký" });
       const user = await createLocalUser({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) });
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Không thể tạo tài khoản" });
@@ -47,6 +56,8 @@ export const appRouter = router({
       return { user };
     }),
     login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128), deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "auth.login.ip", SECURITY_LIMITS.loginPerIp.limit, SECURITY_LIMITS.loginPerIp.windowMs);
+      enforceRateLimit(ctx.req, "auth.login.email", SECURITY_LIMITS.loginPerEmail.limit, SECURITY_LIMITS.loginPerEmail.windowMs, input.email);
       const user = await getUserByEmail(input.email);
       if (!user || !(await verifyPassword(input.password, user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email hoặc mật khẩu không đúng" });
       setSessionCookie(ctx, await createLocalSession(user, ctx.req, input));
@@ -59,10 +70,14 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
-    qrCreate: publicProcedure.input(z.object({ deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(({ ctx, input }) => createQrLoginChallenge(ctx.req, input)),
+    qrCreate: publicProcedure.input(z.object({ deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "auth.qrCreate", SECURITY_LIMITS.qrCreatePerIp.limit, SECURITY_LIMITS.qrCreatePerIp.windowMs);
+      return createQrLoginChallenge(ctx.req, input);
+    }),
     qrStatus: publicProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220) })).query(({ input }) => qrLoginStatus(input.nonce)),
     qrApprove: protectedProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220), approved: z.boolean() })).mutation(({ ctx, input }) => approveQrLogin(input.nonce, ctx.user.id, input.approved)),
     qrComplete: publicProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220), deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "auth.qrComplete", SECURITY_LIMITS.qrCompletePerIp.limit, SECURITY_LIMITS.qrCompletePerIp.windowMs);
       const result = await completeQrLogin(ctx.req, input.nonce, input);
       setSessionCookie(ctx, result.token);
       return { user: result.user };
@@ -155,6 +170,21 @@ export const appRouter = router({
   }),
   account: router({
     devices: protectedProcedure.query(({ ctx }) => listAccountDevices(ctx.user.id)),
+    changePassword: protectedProcedure.input(changePasswordInput).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "account.changePassword", SECURITY_LIMITS.loginPerEmail.limit, SECURITY_LIMITS.loginPerEmail.windowMs, String(ctx.user.id));
+      const user = await getUserById(ctx.user.id);
+      if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Mật khẩu hiện tại không đúng." });
+      }
+      await updateLocalPassword(ctx.user.id, await hashPassword(input.newPassword));
+      await revokeAllSessions(ctx.user.id);
+      const token = await createLocalSession(user, ctx.req, {
+        deviceId: ctx.req.get("x-cinemora-device-id") || undefined,
+        deviceName: ctx.req.get("x-cinemora-device-name") || undefined,
+      });
+      setSessionCookie(ctx, token);
+      return { success: true } as const;
+    }),
     logoutDevice: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ ctx, input }) => revokeDevice(ctx.user.id, input.id)),
     logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
       await revokeAllSessions(ctx.user.id);
@@ -164,17 +194,32 @@ export const appRouter = router({
     }),
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     isFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).query(({ ctx, input }) => isFavorite(ctx.user.id, input.movieSlug)),
-    addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
-    removeFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).mutation(({ ctx, input }) => removeFavorite(ctx.user.id, input.movieSlug)),
+    addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
+      return addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) });
+    }),
+    removeFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).mutation(({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
+      return removeFavorite(ctx.user.id, input.movieSlug);
+    }),
     history: protectedProcedure.query(async ({ ctx }) => (await listWatchHistory(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     recordHistory: protectedProcedure.input(movieSnapshot.extend({
       episodeSlug: z.string().trim().max(140).optional(),
       episodeName: z.string().trim().max(255).optional(),
       watchedSeconds: z.number().int().min(0).max(86_400).optional(),
       durationSeconds: z.number().int().min(0).max(86_400).optional(),
-    })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
-    removeHistory: protectedProcedure.input(z.object({ movieSlug: slugInput, episodeSlug: z.string().trim().max(140).optional() })).mutation(({ ctx, input }) => removeWatchHistory(ctx.user.id, input.movieSlug, input.episodeSlug)),
-    clearHistory: protectedProcedure.mutation(({ ctx }) => clearWatchHistory(ctx.user.id)),
+    })).mutation(async ({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
+      return recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) });
+    }),
+    removeHistory: protectedProcedure.input(z.object({ movieSlug: slugInput, episodeSlug: z.string().trim().max(140).optional() })).mutation(({ ctx, input }) => {
+      enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
+      return removeWatchHistory(ctx.user.id, input.movieSlug, input.episodeSlug);
+    }),
+    clearHistory: protectedProcedure.mutation(({ ctx }) => {
+      enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
+      return clearWatchHistory(ctx.user.id);
+    }),
   }),
   adminAccounts: router({
     list: adminProcedure.query(() => listAllAccountSummaries()),

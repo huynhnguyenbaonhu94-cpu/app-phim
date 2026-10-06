@@ -42,8 +42,6 @@ final class CinemaStore: ObservableObject {
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
-    private let favoritesKey = "cinemora.local.favorites.v1"
-    private let historyKey = "cinemora.local.history.v1"
     private let playbackDefaultsKey = "cinemora.playback.defaults.v1"
     private var homePage = 1
     private var detailTask: Task<Void, Never>?
@@ -51,6 +49,7 @@ final class CinemaStore: ObservableObject {
     private var detailRequestID = 0
     private var catalogRequestID = 0
     private var searchRequestID = 0
+    private var nextAuthAttemptAt = Date.distantPast
     private var tvEventsTask: Task<Void, Never>?
     private var tvVideoRefreshTask: Task<Void, Never>?
     private var lastHomeRefreshAt: Date?
@@ -71,12 +70,9 @@ final class CinemaStore: ObservableObject {
 
     init() {
         let decoder = JSONDecoder()
-        if let data = localDefaults.data(forKey: favoritesKey), let records = try? decoder.decode([LocalMovieRecord].self, from: data) {
-            localFavorites = records
-        }
-        if let data = localDefaults.data(forKey: historyKey), let records = try? decoder.decode([LocalWatchRecord].self, from: data) {
-            localHistory = records
-        }
+        // Library data is account-scoped. Remove data written by older builds
+        // so an anonymous device can never show a previous user's library.
+        clearLegacyLocalLibrary()
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
         }
@@ -165,6 +161,7 @@ final class CinemaStore: ObservableObject {
     }
 
     func toggleFavorite(_ movie: Movie) {
+        guard accountUser != nil else { return }
         let adding = !isFavorite(movie)
         if let index = localFavorites.firstIndex(where: { $0.slug == movie.slug }) {
             localFavorites.remove(at: index)
@@ -172,50 +169,46 @@ final class CinemaStore: ObservableObject {
             localFavorites.insert(LocalMovieRecord(movie: movie), at: 0)
             localFavorites = Array(localFavorites.prefix(100))
         }
-        if let accountUser {
-            Task {
-                do {
-                    if adding { try await api.addFavorite(movie: movie) }
-                    else { try await api.removeFavorite(slug: movie.slug) }
-                } catch { await MainActor.run { self.accountError = error.localizedDescription } }
-            }
-        } else { persistLocalLibrary() }
+        Task {
+            do {
+                if adding { try await api.addFavorite(movie: movie) }
+                else { try await api.removeFavorite(slug: movie.slug) }
+            } catch { await MainActor.run { self.accountError = error.localizedDescription } }
+        }
     }
 
     func removeFavorite(_ record: LocalMovieRecord) {
         localFavorites.removeAll { $0.slug == record.slug }
-        if accountUser != nil { Task { try? await api.removeFavorite(slug: record.slug) } }
-        else { persistLocalLibrary() }
+        guard accountUser != nil else { return }
+        Task { try? await api.removeFavorite(slug: record.slug) }
     }
 
     func recordLocalHistory(movie: Movie, episode: MovieEpisode?, serverName: String? = nil, watchedSeconds: Double = 0, durationSeconds: Double = 0) {
+        guard accountUser != nil else { return }
         let record = LocalWatchRecord(movie: LocalMovieRecord(movie: movie), episodeName: episode?.name, episodeSlug: episode?.slug, serverName: serverName, streamURL: episode?.streamUrl, embedURL: episode?.embedUrl, watchedSeconds: watchedSeconds, durationSeconds: durationSeconds, watchedAt: Date())
         localHistory.removeAll { $0.movie.slug == movie.slug }
         localHistory.insert(record, at: 0)
         localHistory = Array(localHistory.prefix(100))
-        if accountUser != nil {
-            Task { try? await api.recordHistory(movie: movie, episode: episode, watchedSeconds: watchedSeconds, durationSeconds: durationSeconds) }
-        } else { persistLocalLibrary() }
+        Task { try? await api.recordHistory(movie: movie, episode: episode, watchedSeconds: watchedSeconds, durationSeconds: durationSeconds) }
     }
 
     func removeHistory(_ record: LocalWatchRecord) {
         localHistory.removeAll { $0.id == record.id }
-        if accountUser != nil { Task { try? await api.removeHistory(slug: record.movie.slug, episodeSlug: record.episodeSlug) } }
-        else { persistLocalLibrary() }
+        guard accountUser != nil else { return }
+        Task { try? await api.removeHistory(slug: record.movie.slug, episodeSlug: record.episodeSlug) }
     }
 
     func clearFavorites() {
         let records = localFavorites
         localFavorites.removeAll()
-        if accountUser != nil { for record in records { Task { try? await api.removeFavorite(slug: record.slug) } } }
-        else { persistLocalLibrary() }
+        guard accountUser != nil else { return }
+        for record in records { Task { try? await api.removeFavorite(slug: record.slug) } }
     }
 
     func clearHistory() {
-        let wasLoggedIn = accountUser != nil
         localHistory.removeAll()
-        if wasLoggedIn { Task { try? await api.clearHistory() } }
-        else { persistLocalLibrary() }
+        guard accountUser != nil else { return }
+        Task { try? await api.clearHistory() }
     }
 
     func restoreAccount() async {
@@ -225,7 +218,7 @@ final class CinemaStore: ObservableObject {
             if accountUser != nil { await refreshCloudLibrary() }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
-                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+                clearAccountState()
             } else { accountError = error.localizedDescription }
         }
     }
@@ -236,19 +229,18 @@ final class CinemaStore: ObservableObject {
             let response = try await api.me()
             if let user = response.value { accountUser = user }
             else {
-                accountUser = nil
-                accountDevices = []
-                localFavorites = []
-                localHistory = []
+                clearAccountState()
             }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
-                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+                clearAccountState()
             } else if accountUser != nil { accountError = error.localizedDescription }
         }
     }
 
     func login(email: String, password: String) async throws {
+        try enforceAuthInput(email: email, password: password)
+        try enforceAuthCooldown()
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
         do {
@@ -261,12 +253,15 @@ final class CinemaStore: ObservableObject {
                 await deviceRefresh
             }
         } catch {
+            nextAuthAttemptAt = Date().addingTimeInterval(3)
             accountError = error.localizedDescription
             throw error
         }
     }
 
     func register(name: String, email: String, password: String) async throws {
+        try enforceAuthInput(name: name, email: email, password: password)
+        try enforceAuthCooldown()
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
         do {
@@ -279,8 +274,33 @@ final class CinemaStore: ObservableObject {
                 await deviceRefresh
             }
         } catch {
+            nextAuthAttemptAt = Date().addingTimeInterval(3)
             accountError = error.localizedDescription
             throw error
+        }
+    }
+
+    private func enforceAuthInput(name: String? = nil, email: String, password: String) throws {
+        if let name, name.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 {
+            accountError = "Họ tên phải có ít nhất 2 ký tự."
+            throw APIError.server("Họ tên phải có ít nhất 2 ký tự.")
+        }
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedEmail.count <= 320, normalizedEmail.contains("@"), normalizedEmail.contains(".") else {
+            accountError = "Email không đúng định dạng."
+            throw APIError.server("Email không đúng định dạng.")
+        }
+        guard password.count >= 8, password.count <= 128 else {
+            accountError = "Mật khẩu phải có từ 8 đến 128 ký tự."
+            throw APIError.server("Mật khẩu phải có từ 8 đến 128 ký tự.")
+        }
+    }
+
+    private func enforceAuthCooldown() throws {
+        let remaining = Int(ceil(nextAuthAttemptAt.timeIntervalSinceNow))
+        guard remaining <= 0 else {
+            accountError = "Bạn thao tác quá nhanh. Vui lòng thử lại sau khoảng \(max(1, remaining)) giây."
+            throw APIError.rateLimited(seconds: remaining)
         }
     }
 
@@ -309,17 +329,39 @@ final class CinemaStore: ObservableObject {
     }
 
     func logout() async {
-        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+        clearAccountState()
         try? await api.logout()
     }
 
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        guard accountUser != nil else { throw APIError.server("Vui lòng đăng nhập để đổi mật khẩu.") }
+        guard currentPassword.count > 0 else { throw APIError.server("Vui lòng nhập mật khẩu hiện tại.") }
+        guard newPassword.count >= 8, newPassword.count <= 128 else {
+            throw APIError.server("Mật khẩu mới phải có từ 8 đến 128 ký tự.")
+        }
+        guard currentPassword != newPassword else {
+            throw APIError.server("Mật khẩu mới phải khác mật khẩu hiện tại.")
+        }
+        accountLoading = true
+        accountError = nil
+        defer { accountLoading = false }
+        do {
+            try await api.changePassword(currentPassword: currentPassword, newPassword: newPassword)
+            await refreshAccountDevices()
+        } catch {
+            accountError = error.localizedDescription
+            throw error
+        }
+    }
+
     func refreshCloudLibrary() async {
-        guard accountUser != nil else { return }
+        guard let expectedUserID = accountUser?.id else { return }
         do {
             async let favorites = api.accountFavorites()
             async let history = api.accountHistory()
             let remoteFavorites = try await favorites
             let remoteHistory = try await history
+            guard accountUser?.id == expectedUserID else { return }
             localFavorites = remoteFavorites.map(\.localRecord)
             localHistory = remoteHistory.map(\.localRecord)
         } catch {
@@ -328,8 +370,12 @@ final class CinemaStore: ObservableObject {
     }
 
     func refreshAccountDevices() async {
-        guard accountUser != nil else { return }
-        do { accountDevices = try await api.accountDevices() }
+        guard let expectedUserID = accountUser?.id else { return }
+        do {
+            let devices = try await api.accountDevices()
+            guard accountUser?.id == expectedUserID else { return }
+            accountDevices = devices
+        }
         catch {
             if accountUser != nil { accountError = error.localizedDescription }
         }
@@ -350,20 +396,19 @@ final class CinemaStore: ObservableObject {
         do {
             try await api.logoutDevice(id: id)
             if isCurrentDevice {
-                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+                clearAccountState()
             } else {
                 await refreshAccountDevices()
             }
         } catch {
             if isCurrentDevice {
-                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+                clearAccountState()
             } else { accountError = error.localizedDescription }
         }
     }
 
     func logoutAllDevices() async {
-        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []
-        accountError = nil
+        clearAccountState()
         try? await api.logoutAllDevices()
     }
 
@@ -371,10 +416,23 @@ final class CinemaStore: ObservableObject {
         accountError = nil
     }
 
-    private func clearLocalCacheAfterAccountLogin() {
-        localDefaults.removeObject(forKey: favoritesKey)
-        localDefaults.removeObject(forKey: historyKey)
+    private func clearLegacyLocalLibrary() {
+        localDefaults.removeObject(forKey: "cinemora.local.favorites.v1")
+        localDefaults.removeObject(forKey: "cinemora.local.history.v1")
         localFavorites = []; localHistory = []
+    }
+
+    private func clearLocalCacheAfterAccountLogin() {
+        clearLegacyLocalLibrary()
+    }
+
+    private func clearAccountState() {
+        accountUser = nil
+        accountDevices = []
+        localFavorites = []
+        localHistory = []
+        accountError = nil
+        clearLegacyLocalLibrary()
     }
 
     func savePlaybackDefaults() {
@@ -382,12 +440,6 @@ final class CinemaStore: ObservableObject {
         if let data = try? encoder.encode(playbackDefaults) {
             localDefaults.set(data, forKey: playbackDefaultsKey)
         }
-    }
-
-    private func persistLocalLibrary() {
-        let encoder = JSONEncoder()
-        if let data = try? encoder.encode(localFavorites) { localDefaults.set(data, forKey: favoritesKey) }
-        if let data = try? encoder.encode(localHistory) { localDefaults.set(data, forKey: historyKey) }
     }
 
     func loadHome() async {

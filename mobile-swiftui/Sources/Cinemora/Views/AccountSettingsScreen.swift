@@ -9,12 +9,15 @@ struct AccountSettingsScreen: View {
     @State private var password = ""
     @State private var submitting = false
     @State private var showLogoutAllAlert = false
+    @State private var showChangePassword = false
     @State private var showQrLogin = false
     @State private var showQrScanner = false
     @State private var showQrApproval = false
     @State private var scannedNonce: String?
     @State private var scannedDeviceName = "thiết bị mới"
     @State private var qrActionError: String?
+    @State private var lastScannedNonce: String?
+    @State private var lastScannedAt = Date.distantPast
 
     var body: some View {
         ZStack {
@@ -51,7 +54,10 @@ struct AccountSettingsScreen: View {
         .onChange(of: store.accountUser) { _, user in
             if user == nil {
                 submitting = false
+                name = ""
+                email = ""
                 password = ""
+                isRegistering = false
                 store.clearAccountError()
             }
         }
@@ -70,6 +76,9 @@ struct AccountSettingsScreen: View {
         }
         .sheet(isPresented: $showQrLogin) {
             QRLoginSheet().environmentObject(store)
+        }
+        .sheet(isPresented: $showChangePassword) {
+            ChangePasswordSheet().environmentObject(store)
         }
         .sheet(isPresented: $showQrScanner) {
             NavigationStack {
@@ -205,6 +214,15 @@ struct AccountSettingsScreen: View {
             .padding(16)
             .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.14), lineWidth: 0.8))
+            Button { showChangePassword = true } label: {
+                Label("Đổi mật khẩu", systemImage: "key.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.cinemaAccent)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(Color.cinemaAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.35), lineWidth: 0.8))
+            }
+            .buttonStyle(.plain)
             Button("Đăng xuất tài khoản") { Task { await store.logout() } }
                 .font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(maxWidth: .infinity)
         }
@@ -244,7 +262,23 @@ struct AccountSettingsScreen: View {
     }
 
     private func handleScannedQr(_ rawValue: String) {
-        let nonce = rawValue.hasPrefix("cinemora-qr-v1:") ? String(rawValue.dropFirst("cinemora-qr-v1:".count)) : rawValue
+        let prefix = "cinemora-qr-v1:"
+        guard rawValue.hasPrefix(prefix) else {
+            qrActionError = "Mã QR không thuộc Cinemora hoặc đã bị thay đổi."
+            return
+        }
+        let nonce = String(rawValue.dropFirst(prefix.count))
+        guard nonce.count >= 32, nonce.count <= 160,
+              nonce.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else {
+            qrActionError = "Mã QR không hợp lệ."
+            return
+        }
+        guard nonce != lastScannedNonce || Date().timeIntervalSince(lastScannedAt) > 5 else {
+            qrActionError = "Mã QR vừa được quét. Vui lòng chờ một chút."
+            return
+        }
+        lastScannedNonce = nonce
+        lastScannedAt = Date()
         scannedNonce = nonce
         Task {
             do {
@@ -266,5 +300,107 @@ struct AccountSettingsScreen: View {
             }
             catch { qrActionError = error.localizedDescription }
         }
+    }
+}
+
+private struct ChangePasswordSheet: View {
+    @EnvironmentObject private var store: CinemaStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var didSucceed = false
+
+    private var canSubmit: Bool {
+        !currentPassword.isEmpty && newPassword.count >= 8 && newPassword == confirmPassword && !isSaving
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                CinemaBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SectionEyebrow(text: "BẢO MẬT TÀI KHOẢN")
+                        Text("Đổi mật khẩu")
+                            .font(.system(size: 29, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Sau khi đổi, các thiết bị khác sẽ phải đăng nhập lại bằng mật khẩu mới.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                        passwordField("Mật khẩu hiện tại", text: $currentPassword)
+                        passwordField("Mật khẩu mới", text: $newPassword)
+                        passwordField("Nhập lại mật khẩu mới", text: $confirmPassword)
+                        if !newPassword.isEmpty && newPassword.count < 8 {
+                            Text("Mật khẩu mới cần ít nhất 8 ký tự.")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        } else if !confirmPassword.isEmpty && newPassword != confirmPassword {
+                            Text("Hai mật khẩu mới chưa khớp.")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        }
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.red.opacity(0.92))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if didSucceed {
+                            Text("Đổi mật khẩu thành công. Các phiên khác đã được đăng xuất.")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.cinemaAccent)
+                        }
+                        Button {
+                            Task { await save() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if isSaving { ProgressView().tint(Color.cinemaInk) }
+                                Text(isSaving ? "Đang cập nhật…" : "Cập nhật mật khẩu")
+                                Spacer()
+                            }
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundStyle(Color.cinemaInk)
+                            .padding(.vertical, 14)
+                            .background(canSubmit ? Color.cinemaAccent : Color.cinemaAccent.opacity(0.35), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSubmit || didSucceed)
+                    }
+                    .padding(22)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Đóng") { dismiss() } }
+            }
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+    }
+
+    private func passwordField(_ title: String, text: Binding<String>) -> some View {
+        SecureField(title, text: text)
+            .textFieldStyle(.plain)
+            .padding(14)
+            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+            .foregroundStyle(.white)
+    }
+
+    private func save() async {
+        guard canSubmit else { return }
+        isSaving = true
+        errorMessage = nil
+        do {
+            try await store.changePassword(currentPassword: currentPassword, newPassword: newPassword)
+            didSucceed = true
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSaving = false
     }
 }
