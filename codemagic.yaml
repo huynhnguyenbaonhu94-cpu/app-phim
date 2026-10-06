@@ -1,38 +1,70 @@
 workflows:
-  cinemora-ios-ipa:
-    name: Cinemora iOS IPA
-    max_build_duration: 60
+  cinemora-ios:
+    name: Cinemora Native iOS IPA (SwiftUI)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
     environment:
       xcode: latest
-      vars:
-        BUNDLE_ID: app.serval4238.taurus3258
-      groups:
-        - app_store_connect
+      cocoapods: default
       ios_signing:
-        distribution_type: app_store
+        distribution_type: ad_hoc
         bundle_identifier: app.serval4238.taurus3258
+      vars:
+        API_BASE_URL: https://cungcapicloud.id.vn
     scripts:
       - name: Install XcodeGen
         script: |
-          brew install xcodegen || brew upgrade xcodegen
-      - name: Generate Xcode project
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+
+      - name: Verify latest SwiftUI build fixes
         script: |
-          cd mobile-swiftui
+          set -euo pipefail
+          grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
+          grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
+          grep -Fq 'MainActor.assumeIsolated' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
+            echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
+          fi
+
+          # Xcode/SwiftDriver identifies private declarations by filename. Older
+          # checkouts may still contain both copies of AccountModels.swift, which
+          # makes the archive fail before Swift compilation starts. Keep both
+          # implementations available, but give the State copy a unique basename.
+          MODELS_ACCOUNT='mobile-swiftui/Sources/Cinemora/Models/AccountModels.swift'
+          STATE_ACCOUNT='mobile-swiftui/Sources/Cinemora/State/AccountModels.swift'
+          if [ -f "$MODELS_ACCOUNT" ] && [ -f "$STATE_ACCOUNT" ]; then
+            mv "$STATE_ACCOUNT" 'mobile-swiftui/Sources/Cinemora/State/AccountModelsState.swift'
+            echo 'Renamed duplicate State/AccountModels.swift to AccountModelsState.swift'
+          fi
+
+          DUPLICATE_SWIFT_BASENAMES="$(find mobile-swiftui/Sources/Cinemora -type f -name '*.swift' -print \
+            | sed 's#^.*/##' | sort | uniq -d)"
+          if [ -n "$DUPLICATE_SWIFT_BASENAMES" ]; then
+            echo "ERROR: duplicate Swift basenames remain: $DUPLICATE_SWIFT_BASENAMES"
+            exit 1
+          fi
+          echo 'SwiftUI build-fix preflight: OK'
+
+      - name: Generate and validate native SwiftUI Xcode project
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR/mobile-swiftui"
           xcodegen generate --spec project.yml
-      - name: Apply Codemagic signing profiles
+          test -d Cinemora.xcodeproj
+          xcodebuild -list -project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj"
+
+      - name: Configure iOS signing profiles
         script: |
-          cd mobile-swiftui
           xcode-project use-profiles
-      - name: Build signed IPA
+
+      - name: Build signed SwiftUI IPA
         script: |
-          cd mobile-swiftui
-          mkdir -p build/ios/ipa
+          set -euo pipefail
           xcode-project build-ipa \
-            --project Cinemora.xcodeproj \
+            --project "$CM_BUILD_DIR/mobile-swiftui/Cinemora.xcodeproj" \
             --scheme Cinemora \
-            --config Release \
-            --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO"
-          find build -type f -name "*.ipa" -exec cp {} build/ios/ipa/ \;
+            --config Release
     artifacts:
-      - mobile-swiftui/build/ios/ipa/*.ipa
+      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
