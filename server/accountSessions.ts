@@ -25,6 +25,11 @@ export type AccountDevice = {
   isOnline: boolean;
 };
 
+export type AdminAccountSummary = {
+  id: number; openId: string; name: string | null; email: string | null; role: string; loginMethod: string | null;
+  createdAt: Date; updatedAt: Date; lastSignedIn: Date; activeDeviceCount: number; favoriteCount: number; historyCount: number; latestDeviceSeenAt: Date | null;
+};
+
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -147,6 +152,29 @@ export async function listAccountDevices(userId: number): Promise<AccountDevice[
     createdAt: row.createdAt,
     lastSeenAt: row.lastSeenAt,
     isOnline: now - row.lastSeenAt.getTime() <= ONLINE_WINDOW_MS,
+  }));
+}
+
+export async function listAllAccountSummaries(): Promise<AdminAccountSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const [rows] = await db.execute(sql.raw(`
+    SELECT u.id, u.openId, u.name, u.email, u.role, u.loginMethod, u.createdAt, u.updatedAt, u.lastSignedIn,
+      COUNT(DISTINCT CASE WHEN s.revokedAt IS NULL THEN s.id END) AS activeDeviceCount,
+      COUNT(DISTINCT f.id) AS favoriteCount, COUNT(DISTINCT h.id) AS historyCount,
+      MAX(CASE WHEN s.revokedAt IS NULL THEN s.lastSeenAt END) AS latestDeviceSeenAt
+    FROM users u
+    LEFT JOIN account_sessions s ON s.userId = u.id
+    LEFT JOIN movie_favorites f ON f.userId = u.id
+    LEFT JOIN movie_watch_history h ON h.userId = u.id
+    GROUP BY u.id, u.openId, u.name, u.email, u.role, u.loginMethod, u.createdAt, u.updatedAt, u.lastSignedIn
+    ORDER BY u.createdAt DESC
+  `));
+  return (rows as unknown as Array<Record<string, unknown>>).map((row) => ({
+    id: Number(row.id), openId: String(row.openId), name: row.name as string | null, email: row.email as string | null, role: String(row.role), loginMethod: row.loginMethod as string | null,
+    createdAt: new Date(String(row.createdAt)), updatedAt: new Date(String(row.updatedAt)), lastSignedIn: new Date(String(row.lastSignedIn)),
+    activeDeviceCount: Number(row.activeDeviceCount || 0), favoriteCount: Number(row.favoriteCount || 0), historyCount: Number(row.historyCount || 0),
+    latestDeviceSeenAt: row.latestDeviceSeenAt ? new Date(String(row.latestDeviceSeenAt)) : null,
   }));
 }
 

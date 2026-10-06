@@ -192,6 +192,10 @@ struct CinemaAPI {
         let result = envelope["result"] as? [String: Any]
         let resultData = result?["data"] as? [String: Any]
         let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
+        if payload is NSNull {
+            do { return try JSONDecoder().decode(T.self, from: Data("null".utf8)) }
+            catch { throw APIError.decoding(error.localizedDescription) }
+        }
         guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
         let decodedData = try JSONSerialization.data(withJSONObject: payload)
         do { return try JSONDecoder().decode(T.self, from: decodedData) }
@@ -229,6 +233,10 @@ struct CinemaAPI {
         let result = envelope["result"] as? [String: Any]
         let resultData = result?["data"] as? [String: Any]
         let payload = resultData?["json"] ?? resultData?["data"] ?? envelope
+        if payload is NSNull {
+            do { return try JSONDecoder().decode(T.self, from: Data("null".utf8)) }
+            catch { throw APIError.decoding(error.localizedDescription) }
+        }
         guard JSONSerialization.isValidJSONObject(payload) else { throw APIError.invalidResponse }
         let decodedData = try JSONSerialization.data(withJSONObject: payload)
         do { return try JSONDecoder().decode(T.self, from: decodedData) }

@@ -6,7 +6,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
-import { listAccountDevices, revokeAllSessions, revokeDevice, revokeSession } from "./accountSessions";
+import { listAccountDevices, listAllAccountSummaries, revokeAllSessions, revokeDevice, revokeSession } from "./accountSessions";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
@@ -166,6 +166,11 @@ export const appRouter = router({
     })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
     removeHistory: protectedProcedure.input(z.object({ movieSlug: slugInput, episodeSlug: z.string().trim().max(140).optional() })).mutation(({ ctx, input }) => removeWatchHistory(ctx.user.id, input.movieSlug, input.episodeSlug)),
     clearHistory: protectedProcedure.mutation(({ ctx }) => clearWatchHistory(ctx.user.id)),
+  }),
+  adminAccounts: router({
+    list: adminProcedure.query(() => listAllAccountSummaries()),
+    devices: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => listAccountDevices(input.userId)),
+    logoutAll: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(({ input }) => revokeAllSessions(input.userId)),
   }),
 });
 

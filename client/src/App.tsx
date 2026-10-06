@@ -9,6 +9,7 @@ import { CatalogPage, CategoryDirectoryPage, DirectoryPage, SearchPage } from "@
 import DetailPage from "./pages/Detail";
 import AccountPage from "./pages/Account";
 import AdminTvStreams from "./pages/AdminTvStreams";
+import AdminAccounts from "./pages/AdminAccounts";
 
 function Router() {
   return <Switch>
@@ -16,6 +17,7 @@ function Router() {
     <Route path="/search" component={SearchPage} />
     <Route path="/account" component={AccountPage} />
     <Route path="/admin/tv" component={AdminTvStreams} />
+    <Route path="/admin/accounts" component={AdminAccounts} />
     <Route path="/catalog/latest"><CatalogPage kind="latest" /></Route>
     <Route path="/catalog/single"><CatalogPage kind="single" /></Route>
     <Route path="/catalog/series"><CatalogPage kind="series" /></Route>
