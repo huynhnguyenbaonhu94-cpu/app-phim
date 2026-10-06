@@ -284,6 +284,30 @@ final class CinemaStore: ObservableObject {
         }
     }
 
+    func createQrLogin() async throws -> RemoteQrChallenge {
+        try await api.createQrLogin()
+    }
+
+    func qrLoginStatus(nonce: String) async throws -> RemoteQrStatus {
+        try await api.qrLoginStatus(nonce: nonce)
+    }
+
+    func approveQrLogin(nonce: String, approved: Bool) async throws -> RemoteQrStatus {
+        try await api.approveQrLogin(nonce: nonce, approved: approved)
+    }
+
+    func completeQrLogin(nonce: String) async throws {
+        accountError = nil
+        accountUser = try await api.completeQrLogin(nonce: nonce)
+        clearLocalCacheAfterAccountLogin()
+        Task {
+            async let cloudRefresh: Void = refreshCloudLibrary()
+            async let deviceRefresh: Void = refreshAccountDevices()
+            await cloudRefresh
+            await deviceRefresh
+        }
+    }
+
     func logout() async {
         accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
         try? await api.logout()

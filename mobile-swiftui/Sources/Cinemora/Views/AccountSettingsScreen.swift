@@ -9,6 +9,12 @@ struct AccountSettingsScreen: View {
     @State private var password = ""
     @State private var submitting = false
     @State private var showLogoutAllAlert = false
+    @State private var showQrLogin = false
+    @State private var showQrScanner = false
+    @State private var showQrApproval = false
+    @State private var scannedNonce: String?
+    @State private var scannedDeviceName = "thiết bị mới"
+    @State private var qrActionError: String?
 
     var body: some View {
         ZStack {
@@ -62,6 +68,34 @@ struct AccountSettingsScreen: View {
         } message: {
             Text("Tất cả phiên đăng nhập, kể cả thiết bị đang xem phim, sẽ bị thu hồi ngay lập tức.")
         }
+        .sheet(isPresented: $showQrLogin) {
+            QRLoginSheet().environmentObject(store)
+        }
+        .sheet(isPresented: $showQrScanner) {
+            NavigationStack {
+                QRCodeScannerView(onCode: { code in
+                    showQrScanner = false
+                    handleScannedQr(code)
+                }, onFailure: { message in
+                    qrActionError = message
+                    showQrScanner = false
+                })
+                .ignoresSafeArea()
+                .navigationTitle("Quét QR đăng nhập")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { showQrScanner = false } } }
+            }
+        }
+        .confirmationDialog("Cho phép đăng nhập?", isPresented: $showQrApproval, titleVisibility: .visible) {
+            Button("Chấp nhận", role: .none) { approveScannedQr(true) }
+            Button("Từ chối", role: .destructive) { approveScannedQr(false) }
+            Button("Hủy", role: .cancel) { scannedNonce = nil }
+        } message: {
+            Text("Thiết bị \(scannedDeviceName) đang yêu cầu đăng nhập vào tài khoản \(store.accountUser?.email ?? "này").")
+        }
+        .alert("QR login", isPresented: Binding(get: { qrActionError != nil }, set: { if !$0 { qrActionError = nil } })) {
+            Button("Đóng", role: .cancel) { qrActionError = nil }
+        } message: { Text(qrActionError ?? "") }
     }
 
     private var signInContent: some View {
@@ -113,6 +147,12 @@ struct AccountSettingsScreen: View {
                     .padding(.vertical, 14).background(Color.cinemaAccent, in: Capsule())
             }
             .buttonStyle(.plain).disabled(submitting || email.isEmpty || password.isEmpty || (isRegistering && name.isEmpty))
+            Button { showQrLogin = true } label: {
+                Label("Đăng nhập bằng QR", systemImage: "qrcode")
+                    .font(.system(size: 12, weight: .bold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered).tint(Color.cinemaAccent)
         }
         .padding(18)
         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
@@ -135,6 +175,12 @@ struct AccountSettingsScreen: View {
                 }
             }
             infoCard(icon: "arrow.triangle.2.circlepath", title: "Đồng bộ cloud", detail: "Lịch sử và yêu thích được đồng bộ trên các thiết bị đã đăng nhập.")
+            Button { showQrScanner = true } label: {
+                Label("Quét QR để đăng nhập thiết bị khác", systemImage: "qrcode.viewfinder")
+                    .font(.system(size: 12, weight: .bold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent).tint(Color.cinemaAccent)
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     SectionEyebrow(text: "THIẾT BỊ ĐÃ ĐĂNG NHẬP")
@@ -192,5 +238,27 @@ struct AccountSettingsScreen: View {
                 .buttonStyle(.plain).accessibilityLabel("Đăng xuất thiết bị \(device.deviceName)")
         }
         .padding(11).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private func handleScannedQr(_ rawValue: String) {
+        let nonce = rawValue.hasPrefix("cinemora-qr-v1:") ? String(rawValue.dropFirst("cinemora-qr-v1:".count)) : rawValue
+        scannedNonce = nonce
+        Task {
+            do {
+                let status = try await store.qrLoginStatus(nonce: nonce)
+                guard status.status == "pending" else { qrActionError = "Mã QR đã hết hạn hoặc đã được xử lý."; return }
+                scannedDeviceName = status.deviceName ?? "thiết bị mới"
+                showQrApproval = true
+            } catch { qrActionError = error.localizedDescription }
+        }
+    }
+
+    private func approveScannedQr(_ approved: Bool) {
+        guard let nonce = scannedNonce else { return }
+        scannedNonce = nil
+        Task {
+            do { _ = try await store.approveQrLogin(nonce: nonce, approved: approved) }
+            catch { qrActionError = error.localizedDescription }
+        }
     }
 }

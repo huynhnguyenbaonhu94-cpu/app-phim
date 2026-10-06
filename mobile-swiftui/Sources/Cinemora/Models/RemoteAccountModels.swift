@@ -22,6 +22,24 @@ struct RemoteAuthResponse: Decodable {
     let user: RemoteAccountUser
 }
 
+struct RemoteQrChallenge: Decodable {
+    let nonce: String
+    let payload: String
+    let expiresAt: String
+}
+
+struct RemoteQrStatus: Decodable {
+    let status: String
+    let expiresAt: String?
+    let deviceName: String?
+    let approver: RemoteQrApprover?
+}
+
+struct RemoteQrApprover: Decodable {
+    let name: String?
+    let email: String?
+}
+
 struct SuccessResponse: Decodable {
     let success: Bool
 }

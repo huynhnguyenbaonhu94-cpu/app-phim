@@ -108,6 +108,7 @@ export async function initializeDatabase() {
     await ensureTvStreamsCompatibility(db);
     await ensureTvVideosCompatibility(db);
     await ensureAccountSessionsCompatibility();
+    await ensureQrLoginCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -116,6 +117,25 @@ export async function initializeDatabase() {
     initialization = null;
     throw error;
   }
+}
+
+export async function ensureQrLoginCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS qr_login_challenges (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    nonceHash varchar(128) NOT NULL UNIQUE,
+    deviceId varchar(160) NOT NULL,
+    deviceName varchar(160) NOT NULL,
+    ipAddress varchar(80) NULL,
+    location varchar(160) NULL,
+    userAgent text NULL,
+    status varchar(20) NOT NULL DEFAULT 'pending',
+    approvedUserId int NULL,
+    approvedAt timestamp NULL,
+    expiresAt timestamp NOT NULL,
+    consumedAt timestamp NULL,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX qr_login_challenges_status_expiry_idx (status, expiresAt)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {

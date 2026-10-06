@@ -123,6 +123,23 @@ struct CinemaAPI {
         return response.user
     }
 
+    func createQrLogin() async throws -> RemoteQrChallenge {
+        try await mutate("auth.qrCreate", input: ["deviceId": deviceId, "deviceName": deviceName])
+    }
+
+    func qrLoginStatus(nonce: String) async throws -> RemoteQrStatus {
+        try await query("auth.qrStatus", input: ["nonce": nonce])
+    }
+
+    func approveQrLogin(nonce: String, approved: Bool) async throws -> RemoteQrStatus {
+        try await mutate("auth.qrApprove", input: ["nonce": nonce, "approved": approved])
+    }
+
+    func completeQrLogin(nonce: String) async throws -> RemoteAccountUser {
+        let response: RemoteAuthResponse = try await mutate("auth.qrComplete", input: ["nonce": nonce, "deviceId": deviceId, "deviceName": deviceName])
+        return response.user
+    }
+
     func logout() async throws { let _: SuccessResponse = try await mutate("auth.logout", input: [:]) }
 
     func accountDevices() async throws -> [RemoteAccountDevice] { try await query("account.devices", input: nil) }

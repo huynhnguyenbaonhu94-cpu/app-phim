@@ -11,6 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
+import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -57,6 +58,14 @@ export const appRouter = router({
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+    qrCreate: publicProcedure.input(z.object({ deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(({ ctx, input }) => createQrLoginChallenge(ctx.req, input)),
+    qrStatus: publicProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220) })).query(({ input }) => qrLoginStatus(input.nonce)),
+    qrApprove: protectedProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220), approved: z.boolean() })).mutation(({ ctx, input }) => approveQrLogin(input.nonce, ctx.user.id, input.approved)),
+    qrComplete: publicProcedure.input(z.object({ nonce: z.string().trim().min(32).max(220), deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      const result = await completeQrLogin(ctx.req, input.nonce, input);
+      setSessionCookie(ctx, result.token);
+      return { user: result.user };
     }),
   }),
   cinema: router({

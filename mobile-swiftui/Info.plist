@@ -22,6 +22,8 @@
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Cinemora cần camera để quét mã QR đăng nhập trên thiết bị khác.</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UILaunchScreen</key>

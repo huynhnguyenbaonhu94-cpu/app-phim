@@ -65,6 +65,24 @@ export const accountSessions = mysqlTable("account_sessions", {
   lastSeenIndex: index("account_sessions_last_seen_idx").on(table.lastSeenAt),
 }));
 
+export const qrLoginChallenges = mysqlTable("qr_login_challenges", {
+  id: int("id").autoincrement().primaryKey(),
+  nonceHash: varchar("nonceHash", { length: 128 }).notNull().unique(),
+  deviceId: varchar("deviceId", { length: 160 }).notNull(),
+  deviceName: varchar("deviceName", { length: 160 }).notNull(),
+  ipAddress: varchar("ipAddress", { length: 80 }),
+  location: varchar("location", { length: 160 }),
+  userAgent: text("userAgent"),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  approvedUserId: int("approvedUserId"),
+  approvedAt: timestamp("approvedAt"),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consumedAt: timestamp("consumedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  statusExpiryIndex: index("qr_login_challenges_status_expiry_idx").on(table.status, table.expiresAt),
+}));
+
 export const tvStreams = mysqlTable("tv_streams", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
@@ -135,6 +153,7 @@ export type InsertUser = typeof users.$inferInsert;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
 export type AccountSession = typeof accountSessions.$inferSelect;
+export type QrLoginChallenge = typeof qrLoginChallenges.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
 export type InsertTvStream = typeof tvStreams.$inferInsert;
 export type TvVideo = typeof tvVideos.$inferSelect;
