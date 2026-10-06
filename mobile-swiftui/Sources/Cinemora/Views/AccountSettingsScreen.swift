@@ -178,9 +178,12 @@ struct AccountSettingsScreen: View {
             Button { showQrScanner = true } label: {
                 Label("Quét QR để đăng nhập thiết bị khác", systemImage: "qrcode.viewfinder")
                     .font(.system(size: 12, weight: .bold))
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .foregroundStyle(Color.cinemaAccent)
+                    .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    .background(Color.cinemaAccent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.48), lineWidth: 1))
             }
-            .buttonStyle(.borderedProminent).tint(Color.cinemaAccent)
+            .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     SectionEyebrow(text: "THIẾT BỊ ĐÃ ĐĂNG NHẬP")

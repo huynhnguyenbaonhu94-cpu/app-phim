@@ -20,8 +20,11 @@ struct QRCodeImage: View {
         filter.message = Data(payload.utf8)
         filter.correctionLevel = "Q"
         let context = CIContext()
-        guard let output = filter.outputImage,
-              let cgImage = context.createCGImage(output.transformed(by: CGAffineTransform(scaleX: 12, y: 12)), from: output.extent) else {
+        guard let output = filter.outputImage else {
+            return UIImage(systemName: "xmark.octagon") ?? UIImage()
+        }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else {
             return UIImage(systemName: "xmark.octagon") ?? UIImage()
         }
         return UIImage(cgImage: cgImage)
