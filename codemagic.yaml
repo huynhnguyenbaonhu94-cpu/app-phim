@@ -25,6 +25,24 @@ workflows:
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
           fi
+
+          # Xcode/SwiftDriver identifies private declarations by filename. Older
+          # checkouts may still contain both copies of AccountModels.swift, which
+          # makes the archive fail before Swift compilation starts. Keep both
+          # implementations available, but give the State copy a unique basename.
+          MODELS_ACCOUNT='mobile-swiftui/Sources/Cinemora/Models/AccountModels.swift'
+          STATE_ACCOUNT='mobile-swiftui/Sources/Cinemora/State/AccountModels.swift'
+          if [ -f "$MODELS_ACCOUNT" ] && [ -f "$STATE_ACCOUNT" ]; then
+            mv "$STATE_ACCOUNT" 'mobile-swiftui/Sources/Cinemora/State/AccountModelsState.swift'
+            echo 'Renamed duplicate State/AccountModels.swift to AccountModelsState.swift'
+          fi
+
+          DUPLICATE_SWIFT_BASENAMES="$(find mobile-swiftui/Sources/Cinemora -type f -name '*.swift' -print \
+            | sed 's#^.*/##' | sort | uniq -d)"
+          if [ -n "$DUPLICATE_SWIFT_BASENAMES" ]; then
+            echo "ERROR: duplicate Swift basenames remain: $DUPLICATE_SWIFT_BASENAMES"
+            exit 1
+          fi
           echo 'SwiftUI build-fix preflight: OK'
 
       - name: Generate and validate native SwiftUI Xcode project

@@ -92,66 +92,6 @@ struct CinemaAPI {
         let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
-    func registerAccount(name: String, email: String, password: String, deviceName: String, deviceModel: String) async throws -> AccountAuthResponse {
-        try await mutate("auth.register", input: ["name": name, "email": email, "password": password, "deviceName": deviceName, "deviceModel": deviceModel, "platform": "ios"])
-    }
-
-    func loginAccount(email: String, password: String, deviceName: String, deviceModel: String) async throws -> AccountAuthResponse {
-        try await mutate("auth.login", input: ["email": email, "password": password, "deviceName": deviceName, "deviceModel": deviceModel, "platform": "ios"])
-    }
-
-    func accountMe() async throws -> AccountUser? {
-        let response: AccountMeResponse = try await query("auth.current", input: nil)
-        return response.user
-    }
-
-    func accountDevices() async throws -> [AccountDevice] { try await query("account.devices", input: nil) }
-    func kickDevice(_ id: String) async throws -> AccountSessionResult { try await mutate("account.kickDevice", input: ["sessionId": id]) }
-    func changePassword(current: String, new: String, confirm: String, logoutAll: Bool = false) async throws -> AccountSessionResult {
-        try await mutate("auth.changePassword", input: ["currentPassword": current, "newPassword": new, "confirmPassword": confirm, "logoutAll": logoutAll])
-    }
-    func logoutCurrent() async throws -> AccountSessionResult { try await mutate("account.logoutCurrent", input: [:]) }
-    func logoutAllDevices() async throws -> AccountSessionResult { try await mutate("account.logoutAllDevices", input: [:]) }
-
-    func cloudFavorites() async throws -> [CloudFavorite] { try await query("account.favorites", input: nil) }
-    func cloudHistory() async throws -> [CloudHistory] { try await query("account.history", input: nil) }
-    func addCloudFavorite(_ movie: LocalMovieRecord) async throws {
-        var input: [String: Any] = ["movieSlug": movie.slug, "movieName": movie.name]
-        if let origin = movie.originName { input["originName"] = origin }
-        if let year = movie.year { input["year"] = year }
-        if let poster = movie.poster, poster.hasPrefix("/api/cinema/image/") { input["posterUrl"] = poster }
-        let _: AccountSessionResult = try await mutate("account.addFavorite", input: input)
-    }
-    func removeCloudFavorite(_ slug: String) async throws {
-        let _: AccountSessionResult = try await mutate("account.removeFavorite", input: ["movieSlug": slug])
-    }
-    func recordCloudHistory(_ record: LocalWatchRecord) async throws {
-        var input: [String: Any] = [
-            "movieSlug": record.movie.slug, "movieName": record.movie.name,
-            "episodeSlug": record.episodeSlug ?? "movie", "episodeName": record.episodeName ?? "Phim",
-            "watchedSeconds": max(0, Int(record.watchedSeconds)), "durationSeconds": max(0, Int(record.durationSeconds)),
-        ]
-        if let origin = record.movie.originName { input["originName"] = origin }
-        if let year = record.movie.year { input["year"] = year }
-        if let poster = record.movie.poster, poster.hasPrefix("/api/cinema/image/") { input["posterUrl"] = poster }
-        let _: AccountSessionResult = try await mutate("account.recordHistory", input: input)
-    }
-    func deleteCloudHistory(_ record: LocalWatchRecord) async throws {
-        var input: [String: Any] = ["movieSlug": record.movie.slug]
-        if let episode = record.episodeSlug { input["episodeSlug"] = episode }
-        let _: AccountSessionResult = try await mutate("account.deleteHistory", input: input)
-    }
-    func clearCloudHistory() async throws { let _: AccountSessionResult = try await mutate("account.clearHistory", input: [:]) }
-    func cloudPlaybackDefaults() async throws -> PlaybackDefaults? {
-        let preferences: [String: PlaybackDefaults] = try await query("account.preferences", input: nil)
-        return preferences["playbackDefaults"]
-    }
-    func saveCloudPlaybackDefaults(_ defaults: PlaybackDefaults) async throws {
-        let data = try JSONEncoder().encode(defaults)
-        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw APIError.invalidResponse }
-        let _: [String: PlaybackDefaults] = try await mutate("account.savePreferences", input: ["preferences": ["playbackDefaults": value]])
-    }
-
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
@@ -163,7 +103,6 @@ struct CinemaAPI {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        if let token = AccountTokenStore.read() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -191,7 +130,6 @@ struct CinemaAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token = AccountTokenStore.read() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 25
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)

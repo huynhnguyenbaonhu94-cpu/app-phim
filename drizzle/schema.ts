@@ -1,4 +1,4 @@
-import { boolean, int, index, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, index, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -14,29 +14,6 @@ export const users = mysqlTable("users", {
 }, (table) => ({
   emailUnique: uniqueIndex("users_email_unique").on(table.email),
 }));
-
-export const authSessions = mysqlTable("auth_sessions", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  userId: int("userId").notNull(),
-  deviceName: varchar("deviceName", { length: 120 }).notNull(),
-  deviceModel: varchar("deviceModel", { length: 120 }),
-  platform: varchar("platform", { length: 40 }).notNull(),
-  ipAddress: varchar("ipAddress", { length: 64 }),
-  userAgent: varchar("userAgent", { length: 500 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
-  revokedAt: timestamp("revokedAt"),
-  revokeReason: varchar("revokeReason", { length: 40 }),
-}, (table) => ({
-  userActiveIndex: index("auth_sessions_user_active_idx").on(table.userId, table.revokedAt),
-  heartbeatIndex: index("auth_sessions_last_seen_idx").on(table.lastSeenAt),
-}));
-
-export const accountPreferences = mysqlTable("account_preferences", {
-  userId: int("userId").primaryKey(),
-  preferences: json("preferences").$type<Record<string, unknown>>().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
 
 export const movieFavorites = mysqlTable("movie_favorites", {
   id: int("id").autoincrement().primaryKey(),

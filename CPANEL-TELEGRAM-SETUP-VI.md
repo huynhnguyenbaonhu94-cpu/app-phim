@@ -179,21 +179,30 @@ Trong app SwiftUI, màn hình phát TV có:
 
 ## 9. Tài khoản admin mặc định và tự khởi tạo database
 
-Backend tự chạy các migration trong thư mục `drizzle/` khi khởi động với `DATABASE_URL` hợp lệ. Vì lý do bảo mật, source mới **không còn tạo admin bằng mật khẩu mặc định đã biết trước**. Nếu chưa có tài khoản admin, cấu hình các biến sau trong cPanel Node.js Selector rồi restart:
+Từ bản cập nhật này, khi Node.js khởi động với `DATABASE_URL` hợp lệ, backend sẽ tự chạy các migration trong thư mục `drizzle/` và tự tạo tài khoản admin nếu email đó chưa tồn tại. Không cần đăng ký tài khoản trước và không cần tự chạy SQL trong phpMyAdmin.
+
+Thông tin mặc định:
+
+```text
+Email: admin@cungcapicloud.id.vn
+Mật khẩu: Cinemora@2026!
+```
+
+Nên đổi thông tin mặc định bằng Environment Variables trong cPanel Node.js Selector trước khi restart:
 
 ```text
 ADMIN_EMAIL=dia-chi-email-admin-cua-ban@example.com
-ADMIN_PASSWORD=<mat-khau-ngau-nhien-toi-thieu-12-ky-tu>
+ADMIN_PASSWORD=MatKhauManhMoiCuaBan
 ADMIN_NAME=Cinemora Admin
 ```
 
-Nếu đã có user cùng `ADMIN_EMAIL`, backend không ghi đè mật khẩu hoặc quyền của user đó. Nếu chưa có và `ADMIN_PASSWORD` hợp lệ, backend tạo user với role `admin`. Nếu database đã có admin đang dùng mật khẩu mặc định cũ, đăng nhập và đổi mật khẩu ngay trong trang Tài khoản; cấu hình biến môi trường không tự đổi mật khẩu của user đã tồn tại. Khi đăng nhập xong, mở:
+Nếu đã có user cùng `ADMIN_EMAIL`, backend không ghi đè mật khẩu hoặc quyền của user đó. Nếu chưa có, backend tạo user với role `admin`. Khi đăng nhập xong, mở:
 
 ```text
 https://cungcapicloud.id.vn/admin/tv
 ```
 
-Lỗi `Failed query: select ... from users` thường có nghĩa là bảng chưa được tạo hoặc `DATABASE_URL` chưa kết nối đúng. Sau khi thêm `DATABASE_URL`, hãy bấm **Restart** Node.js app; kiểm tra application log để xác nhận migration hoàn tất. Không đặt chuỗi `>` trong giá trị Environment Variable.
+Lỗi `Failed query: select ... from users` thường có nghĩa là bảng chưa được tạo hoặc `DATABASE_URL` chưa kết nối đúng. Sau khi thêm `DATABASE_URL`, hãy bấm **Restart** Node.js app; log khởi động cần có dòng `Migration and default admin check completed.`. Không đặt chuỗi `>` trong giá trị Environment Variable.
 
 ## 10. Sửa database cũ và upload poster
 

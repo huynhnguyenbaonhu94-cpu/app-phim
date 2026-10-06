@@ -1,11 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { clearLocalLibrary, setCloudSyncEnabled, syncLocalLibraryToAccount } from "@/lib/localLibrary";
-
-let sessionExpiredEventSent = false;
-let syncedLibraryUserId: number | null = null;
-let syncingLibraryUserId: number | null = null;
+import { useCallback, useMemo } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -15,48 +10,15 @@ type UseAuthOptions = {
 export function useAuth(options?: UseAuthOptions) {
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
   const utils = trpc.useUtils();
-  const meQuery = trpc.auth.me.useQuery(undefined, { retry: false, refetchOnWindowFocus: true, refetchInterval: 30_000 });
+  const meQuery = trpc.auth.me.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
   const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => { utils.auth.me.setData(undefined, null); } });
-  const hadUser = useRef(false);
-  const manualLogout = useRef(false);
-
-  useEffect(() => {
-    const userId = meQuery.data?.id ?? null;
-    setCloudSyncEnabled(userId !== null, userId);
-    if (userId !== null && syncedLibraryUserId !== userId && syncingLibraryUserId !== userId) {
-      syncingLibraryUserId = userId;
-      void syncLocalLibraryToAccount().then(() => { syncedLibraryUserId = userId; }).catch(() => undefined).finally(() => {
-        if (syncingLibraryUserId === userId) syncingLibraryUserId = null;
-      });
-    } else if (meQuery.data === null) {
-      syncedLibraryUserId = null;
-      syncingLibraryUserId = null;
-    }
-  }, [meQuery.data]);
-  useEffect(() => {
-    const onIntentionalLogout = () => { manualLogout.current = true; };
-    window.addEventListener("cinemora-intentional-logout", onIntentionalLogout);
-    if (meQuery.data) { hadUser.current = true; manualLogout.current = false; sessionExpiredEventSent = false; }
-    else if (hadUser.current && !manualLogout.current && !meQuery.isLoading && !sessionExpiredEventSent) {
-      hadUser.current = false;
-      sessionExpiredEventSent = true;
-      setCloudSyncEnabled(false);
-      clearLocalLibrary();
-      window.dispatchEvent(new CustomEvent("cinemora-session-expired"));
-    }
-    return () => window.removeEventListener("cinemora-intentional-logout", onIntentionalLogout);
-  }, [meQuery.data, meQuery.isLoading]);
 
   const logout = useCallback(async () => {
-    manualLogout.current = true;
-    window.dispatchEvent(new CustomEvent("cinemora-intentional-logout"));
     try {
       await logoutMutation.mutateAsync();
     } catch (error: unknown) {
       if (!(error instanceof TRPCClientError) || error.data?.code !== "UNAUTHORIZED") throw error;
     } finally {
-      setCloudSyncEnabled(false);
-      clearLocalLibrary();
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
     }
