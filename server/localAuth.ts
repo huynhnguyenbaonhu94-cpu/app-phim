@@ -1,11 +1,12 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import type { User } from "../drizzle/schema";
 import { getUserByOpenId } from "./db";
 import { ENV } from "./_core/env";
+import { authenticateDeviceRequest, createDeviceSession, type DeviceRequestMetadata } from "./accountSessions";
 
 function deriveKey(password: string, salt: Buffer, length: number) {
   return new Promise<Buffer>((resolve, reject) => {
@@ -42,16 +43,16 @@ export async function verifyPassword(password: string, stored: string | null) {
   }
 }
 
-export async function createLocalSession(user: User) {
-  return new SignJWT({ userId: user.id, openId: user.openId, loginMethod: "email" })
-    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setIssuer(SESSION_ISSUER)
-    .setIssuedAt()
-    .setExpirationTime(Math.floor((Date.now() + ONE_YEAR_MS) / 1000))
-    .sign(secretKey());
+/** Creates a revocable opaque session and records the device metadata. */
+export async function createLocalSession(user: User, req: Request, metadata: DeviceRequestMetadata = {}) {
+  return createDeviceSession(user.id, req, metadata);
 }
 
 export async function authenticateLocalRequest(req: Request): Promise<User | null> {
+  const deviceSession = await authenticateDeviceRequest(req);
+  if (deviceSession) return deviceSession.user;
+
+  // Backward compatibility for sessions issued before device-session support.
   const cookies = parseCookieHeader(req.headers.cookie || "");
   const token = cookies[COOKIE_NAME];
   if (!token) return null;

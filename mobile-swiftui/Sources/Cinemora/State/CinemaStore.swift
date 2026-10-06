@@ -29,6 +29,10 @@ final class CinemaStore: ObservableObject {
     @Published private(set) var catalogPage = 1
     @Published private(set) var localFavorites: [LocalMovieRecord] = []
     @Published private(set) var localHistory: [LocalWatchRecord] = []
+    @Published private(set) var accountUser: RemoteAccountUser?
+    @Published private(set) var accountDevices: [RemoteAccountDevice] = []
+    @Published private(set) var accountLoading = false
+    @Published private(set) var accountError: String?
     @Published var playbackDefaults = PlaybackDefaults()
     @Published private(set) var tvStreams: [TvStream] = []
     @Published private(set) var tvVideos: [TvVideo] = []
@@ -161,18 +165,27 @@ final class CinemaStore: ObservableObject {
     }
 
     func toggleFavorite(_ movie: Movie) {
+        let adding = !isFavorite(movie)
         if let index = localFavorites.firstIndex(where: { $0.slug == movie.slug }) {
             localFavorites.remove(at: index)
         } else {
             localFavorites.insert(LocalMovieRecord(movie: movie), at: 0)
             localFavorites = Array(localFavorites.prefix(100))
         }
-        persistLocalLibrary()
+        if let accountUser {
+            Task {
+                do {
+                    if adding { try await api.addFavorite(movie: movie) }
+                    else { try await api.removeFavorite(slug: movie.slug) }
+                } catch { await MainActor.run { self.accountError = error.localizedDescription } }
+            }
+        } else { persistLocalLibrary() }
     }
 
     func removeFavorite(_ record: LocalMovieRecord) {
         localFavorites.removeAll { $0.slug == record.slug }
-        persistLocalLibrary()
+        if accountUser != nil { Task { try? await api.removeFavorite(slug: record.slug) } }
+        else { persistLocalLibrary() }
     }
 
     func recordLocalHistory(movie: Movie, episode: MovieEpisode?, serverName: String? = nil, watchedSeconds: Double = 0, durationSeconds: Double = 0) {
@@ -180,22 +193,106 @@ final class CinemaStore: ObservableObject {
         localHistory.removeAll { $0.movie.slug == movie.slug }
         localHistory.insert(record, at: 0)
         localHistory = Array(localHistory.prefix(100))
-        persistLocalLibrary()
+        if accountUser != nil {
+            Task { try? await api.recordHistory(movie: movie, episode: episode, watchedSeconds: watchedSeconds, durationSeconds: durationSeconds) }
+        } else { persistLocalLibrary() }
     }
 
     func removeHistory(_ record: LocalWatchRecord) {
         localHistory.removeAll { $0.id == record.id }
-        persistLocalLibrary()
+        if accountUser != nil { Task { try? await api.removeHistory(slug: record.movie.slug, episodeSlug: record.episodeSlug) } }
+        else { persistLocalLibrary() }
     }
 
     func clearFavorites() {
+        let records = localFavorites
         localFavorites.removeAll()
-        persistLocalLibrary()
+        if accountUser != nil { for record in records { Task { try? await api.removeFavorite(slug: record.slug) } } }
+        else { persistLocalLibrary() }
     }
 
     func clearHistory() {
+        let wasLoggedIn = accountUser != nil
         localHistory.removeAll()
-        persistLocalLibrary()
+        if wasLoggedIn { Task { try? await api.clearHistory() } }
+        else { persistLocalLibrary() }
+    }
+
+    func restoreAccount() async {
+        do {
+            let response = try await api.me()
+            accountUser = response.value
+            if accountUser != nil { await refreshCloudLibrary() }
+        } catch { accountError = error.localizedDescription }
+    }
+
+    func checkAccountSession() async {
+        guard accountUser != nil else { return }
+        do {
+            let response = try await api.me()
+            if let user = response.value { accountUser = user }
+            else {
+                accountUser = nil
+                accountDevices = []
+                localFavorites = []
+                localHistory = []
+            }
+        } catch { accountError = error.localizedDescription }
+    }
+
+    func login(email: String, password: String) async throws {
+        accountLoading = true; accountError = nil
+        defer { accountLoading = false }
+        accountUser = try await api.login(email: email, password: password)
+        clearLocalCacheAfterAccountLogin()
+        await refreshCloudLibrary()
+    }
+
+    func register(name: String, email: String, password: String) async throws {
+        accountLoading = true; accountError = nil
+        defer { accountLoading = false }
+        accountUser = try await api.register(name: name, email: email, password: password)
+        clearLocalCacheAfterAccountLogin()
+        await refreshCloudLibrary()
+    }
+
+    func logout() async {
+        try? await api.logout()
+        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []
+    }
+
+    func refreshCloudLibrary() async {
+        guard accountUser != nil else { return }
+        do {
+            async let favorites = api.accountFavorites()
+            async let history = api.accountHistory()
+            let remoteFavorites = try await favorites
+            let remoteHistory = try await history
+            localFavorites = remoteFavorites.map(\.localRecord)
+            localHistory = remoteHistory.map(\.localRecord)
+        } catch { accountError = error.localizedDescription }
+    }
+
+    func refreshAccountDevices() async {
+        guard accountUser != nil else { return }
+        do { accountDevices = try await api.accountDevices() }
+        catch { accountError = error.localizedDescription }
+    }
+
+    func logoutDevice(id: Int) async {
+        try? await api.logoutDevice(id: id)
+        await refreshAccountDevices()
+    }
+
+    func logoutAllDevices() async {
+        try? await api.logoutAllDevices()
+        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []
+    }
+
+    private func clearLocalCacheAfterAccountLogin() {
+        localDefaults.removeObject(forKey: favoritesKey)
+        localDefaults.removeObject(forKey: historyKey)
+        localFavorites = []; localHistory = []
     }
 
     func savePlaybackDefaults() {

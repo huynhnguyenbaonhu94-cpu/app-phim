@@ -47,6 +47,24 @@ export const movieWatchHistory = mysqlTable("movie_watch_history", {
   userWatchedIndex: index("movie_history_user_watched_idx").on(table.userId, table.lastWatchedAt),
 }));
 
+export const accountSessions = mysqlTable("account_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  tokenHash: varchar("tokenHash", { length: 128 }).notNull().unique(),
+  deviceId: varchar("deviceId", { length: 160 }).notNull(),
+  deviceName: varchar("deviceName", { length: 160 }).notNull(),
+  ipAddress: varchar("ipAddress", { length: 80 }),
+  location: varchar("location", { length: 160 }),
+  userAgent: text("userAgent"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+}, (table) => ({
+  userActiveIndex: index("account_sessions_user_active_idx").on(table.userId, table.revokedAt),
+  userDeviceIndex: index("account_sessions_user_device_idx").on(table.userId, table.deviceId),
+  lastSeenIndex: index("account_sessions_last_seen_idx").on(table.lastSeenAt),
+}));
+
 export const tvStreams = mysqlTable("tv_streams", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
@@ -116,6 +134,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
+export type AccountSession = typeof accountSessions.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
 export type InsertTvStream = typeof tvStreams.$inferInsert;
 export type TvVideo = typeof tvVideos.$inferSelect;

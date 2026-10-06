@@ -1,6 +1,8 @@
-import { ArrowLeft, Clock3, Heart, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock3, Heart, LogIn, LogOut, MonitorSmartphone, Play, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { MovieCard, PageShell, SectionHeading } from "@/components/CinemaChrome";
+import { AuthDialog } from "@/components/AuthDialog";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { clearHistory, listFavorites, listHistory, removeFavorite, removeHistory, subscribeLibrary, updateHistoryPoster, type LocalHistory, type LocalMovie } from "@/lib/localLibrary";
 import { trpc } from "@/lib/trpc";
 import { useEffect, useRef, useState } from "react";
@@ -97,9 +99,15 @@ function HistoryItem({ item, onRemove }: { item: LocalHistory; onRemove: () => v
 }
 
 export default function AccountPage() {
+  const { user } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const [favorites, setFavorites] = useState<LocalMovie[]>(() => listFavorites());
   const [history, setHistory] = useState<LocalHistory[]>(() => listHistory());
   const [confirmClear, setConfirmClear] = useState(false);
+  const utils = trpc.useUtils();
+  const devicesQuery = trpc.account.devices.useQuery(undefined, { enabled: Boolean(user), refetchInterval: 15_000, retry: false });
+  const logoutDevice = trpc.account.logoutDevice.useMutation({ onSuccess: () => devicesQuery.refetch() });
+  const logoutAll = trpc.account.logoutAll.useMutation({ onSuccess: async () => { await utils.auth.me.invalidate(); await devicesQuery.refetch(); } });
 
   useEffect(() => subscribeLibrary(() => {
     setFavorites(listFavorites());
@@ -134,6 +142,34 @@ export default function AccountPage() {
             <h1>Thư viện của bạn</h1>
             <p>Yêu thích và lịch sử xem được lưu trực tiếp trên trình duyệt này.</p>
           </div>
+        </section>
+
+        <section className="account-section">
+          <SectionHeading eyebrow="ACCOUNT CENTER" title="Tài khoản & thiết bị" action={<MonitorSmartphone size={18} />} />
+          {!user ? (
+            <div className="account-empty">
+              <LogIn size={20} />
+              <span>Đăng nhập để quản lý tài khoản và xem các thiết bị đang online.</span>
+              <button className="button button-primary" onClick={() => setAuthOpen(true)}>Đăng nhập</button>
+            </div>
+          ) : (
+            <div className="account-device-panel">
+              <div className="account-device-summary">
+                <div><strong>{user.name || user.email}</strong><span>{user.email}</span></div>
+                <span className="live-sync"><span /> {devicesQuery.data?.length ?? 0}/5 thiết bị</span>
+              </div>
+              <div className="account-device-list">
+                {(devicesQuery.data ?? []).map((device) => (
+                  <div className="account-device-row" key={device.id}>
+                    <span className={`device-status-dot${device.isOnline ? " online" : ""}`} />
+                    <div className="account-device-copy"><strong>{device.deviceName}</strong><span>{device.ipAddress} · {device.location} · {device.isOnline ? "Đang online" : "Offline"}</span><small>Hoạt động gần nhất: {formatDate(device.lastSeenAt)}</small></div>
+                    <button className="history-remove" title="Đăng xuất thiết bị" onClick={() => logoutDevice.mutate({ id: device.id })}><LogOut size={14} /></button>
+                  </div>
+                ))}
+              </div>
+              <button className="button button-danger" disabled={logoutAll.isPending} onClick={() => logoutAll.mutate()}><LogOut size={14} /> Đăng xuất tất cả thiết bị</button>
+            </div>
+          )}
         </section>
 
         {/* History section */}
@@ -201,6 +237,7 @@ export default function AccountPage() {
           )}
         </section>
       </main>
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </PageShell>
   );
 }

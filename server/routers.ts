@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite } from "./db";
+import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
+import { listAccountDevices, revokeAllSessions, revokeDevice, revokeSession } from "./accountSessions";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
@@ -37,20 +38,22 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput })).mutation(async ({ ctx, input }) => {
+    register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput, deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Email này đã được đăng ký" });
       const user = await createLocalUser({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) });
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Không thể tạo tài khoản" });
-      setSessionCookie(ctx, await createLocalSession(user));
+      setSessionCookie(ctx, await createLocalSession(user, ctx.req, input));
       return { user };
     }),
-    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128) })).mutation(async ({ ctx, input }) => {
+    login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1).max(128), deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
       const user = await getUserByEmail(input.email);
       if (!user || !(await verifyPassword(input.password, user.passwordHash))) throw new TRPCError({ code: "UNAUTHORIZED", message: "Email hoặc mật khẩu không đúng" });
-      setSessionCookie(ctx, await createLocalSession(user));
+      setSessionCookie(ctx, await createLocalSession(user, ctx.req, input));
       return { user };
     }),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      const token = ctx.req.headers.cookie?.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`))?.[1];
+      await revokeSession(token);
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
@@ -142,6 +145,14 @@ export const appRouter = router({
     removeVideo: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvVideo(input.id)),
   }),
   account: router({
+    devices: protectedProcedure.query(({ ctx }) => listAccountDevices(ctx.user.id)),
+    logoutDevice: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ ctx, input }) => revokeDevice(ctx.user.id, input.id)),
+    logoutAll: protectedProcedure.mutation(async ({ ctx }) => {
+      await revokeAllSessions(ctx.user.id);
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return { success: true } as const;
+    }),
     favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
     isFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).query(({ ctx, input }) => isFavorite(ctx.user.id, input.movieSlug)),
     addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => addFavorite({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
@@ -153,6 +164,8 @@ export const appRouter = router({
       watchedSeconds: z.number().int().min(0).max(86_400).optional(),
       durationSeconds: z.number().int().min(0).max(86_400).optional(),
     })).mutation(async ({ ctx, input }) => recordWatchHistory({ userId: ctx.user.id, ...input, posterUrl: await getPersistentPosterSource(input.movieSlug, input.posterUrl) })),
+    removeHistory: protectedProcedure.input(z.object({ movieSlug: slugInput, episodeSlug: z.string().trim().max(140).optional() })).mutation(({ ctx, input }) => removeWatchHistory(ctx.user.id, input.movieSlug, input.episodeSlug)),
+    clearHistory: protectedProcedure.mutation(({ ctx }) => clearWatchHistory(ctx.user.id)),
   }),
 });
 

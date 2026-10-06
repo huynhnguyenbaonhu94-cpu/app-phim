@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct CinemaAPI {
     static let shared = CinemaAPI()
@@ -6,6 +9,22 @@ struct CinemaAPI {
     private let session: URLSession
 
     init(session: URLSession = .shared) { self.session = session }
+
+    private var deviceId: String {
+        let key = "cinemora.account.device.id.v1"
+        if let value = UserDefaults.standard.string(forKey: key), !value.isEmpty { return value }
+        let value = UUID().uuidString
+        UserDefaults.standard.set(value, forKey: key)
+        return value
+    }
+
+    private var deviceName: String {
+        #if canImport(UIKit)
+        return UIDevice.current.name
+        #else
+        return "Cinemora SwiftUI"
+        #endif
+    }
 
     static func absoluteURL(_ value: String?) -> URL? {
         guard let value, !value.isEmpty else { return nil }
@@ -92,6 +111,60 @@ struct CinemaAPI {
         let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
+    func me() async throws -> RemoteOptionalUser { try await query("auth.me", input: nil) }
+
+    func register(name: String, email: String, password: String) async throws -> RemoteAccountUser {
+        let response: RemoteAuthResponse = try await mutate("auth.register", input: ["name": name, "email": email, "password": password, "deviceId": deviceId, "deviceName": deviceName])
+        return response.user
+    }
+
+    func login(email: String, password: String) async throws -> RemoteAccountUser {
+        let response: RemoteAuthResponse = try await mutate("auth.login", input: ["email": email, "password": password, "deviceId": deviceId, "deviceName": deviceName])
+        return response.user
+    }
+
+    func logout() async throws { let _: SuccessResponse = try await mutate("auth.logout", input: [:]) }
+
+    func accountDevices() async throws -> [RemoteAccountDevice] { try await query("account.devices", input: nil) }
+    func logoutDevice(id: Int) async throws { let _: SuccessResponse = try await mutate("account.logoutDevice", input: ["id": id]) }
+    func logoutAllDevices() async throws { let _: SuccessResponse = try await mutate("account.logoutAll", input: [:]) }
+
+    func accountFavorites() async throws -> [RemoteFavorite] { try await query("account.favorites", input: nil) }
+    func accountHistory() async throws -> [RemoteHistory] { try await query("account.history", input: nil) }
+
+    func addFavorite(movie: Movie) async throws {
+        let _: SuccessResponse = try await mutate("account.addFavorite", input: movieSnapshot(movie))
+    }
+
+    func removeFavorite(slug: String) async throws {
+        let _: SuccessResponse = try await mutate("account.removeFavorite", input: ["movieSlug": slug])
+    }
+
+    func recordHistory(movie: Movie, episode: MovieEpisode?, watchedSeconds: Double = 0, durationSeconds: Double = 0) async throws {
+        var input = movieSnapshot(movie)
+        input["episodeSlug"] = episode?.slug
+        input["episodeName"] = episode?.name
+        input["watchedSeconds"] = Int(watchedSeconds)
+        input["durationSeconds"] = Int(durationSeconds)
+        let _: SuccessResponse = try await mutate("account.recordHistory", input: input)
+    }
+
+    func removeHistory(slug: String, episodeSlug: String?) async throws {
+        var input: [String: Any] = ["movieSlug": slug]
+        if let episodeSlug { input["episodeSlug"] = episodeSlug }
+        let _: SuccessResponse = try await mutate("account.removeHistory", input: input)
+    }
+
+    func clearHistory() async throws { let _: SuccessResponse = try await mutate("account.clearHistory", input: [:]) }
+
+    private func movieSnapshot(_ movie: Movie) -> [String: Any] {
+        var input: [String: Any] = ["movieSlug": movie.slug, "movieName": movie.name]
+        if let originName = movie.originName { input["originName"] = originName }
+        if let poster = movie.poster { input["posterUrl"] = poster }
+        if let year = movie.year { input["year"] = year }
+        return input
+    }
+
     private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
         var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
@@ -101,8 +174,11 @@ struct CinemaAPI {
         }
         guard let url = components.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
+        request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
+        request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -128,8 +204,11 @@ struct CinemaAPI {
         guard let url = components.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
+        request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
         request.timeoutInterval = 25
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)

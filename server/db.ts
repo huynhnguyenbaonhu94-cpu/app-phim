@@ -5,6 +5,7 @@ import { InsertUser, movieFavorites, movieWatchHistory, users } from "../drizzle
 import { ENV } from "./_core/env";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { ensureAccountSessionsCompatibility } from "./accountSessions";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let initialization: Promise<void> | null = null;
@@ -106,6 +107,7 @@ export async function initializeDatabase() {
     }
     await ensureTvStreamsCompatibility(db);
     await ensureTvVideosCompatibility(db);
+    await ensureAccountSessionsCompatibility();
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -216,4 +218,19 @@ export async function listWatchHistory(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(movieWatchHistory).where(eq(movieWatchHistory.userId, userId)).orderBy(desc(movieWatchHistory.lastWatchedAt)).limit(100);
+}
+
+export async function removeWatchHistory(userId: number, movieSlug: string, episodeSlug?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const safeEpisode = episodeSlug || "movie";
+  await db.delete(movieWatchHistory).where(and(eq(movieWatchHistory.userId, userId), eq(movieWatchHistory.movieSlug, movieSlug), eq(movieWatchHistory.episodeSlug, safeEpisode)));
+  return true;
+}
+
+export async function clearWatchHistory(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(movieWatchHistory).where(eq(movieWatchHistory.userId, userId));
+  return true;
 }

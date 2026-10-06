@@ -51,6 +51,7 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
+    @EnvironmentObject private var store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var showLaunchLoader = true
 
@@ -96,8 +97,15 @@ struct CinemoraTabShell: View {
         }
         .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
         .task {
+            await store.restoreAccount()
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                if !Task.isCancelled { await store.checkAccountSession() }
+            }
         }
     }
 
