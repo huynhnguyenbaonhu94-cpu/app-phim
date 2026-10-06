@@ -101,43 +101,79 @@ final class PlaybackController: ObservableObject {
         }
         activeURL = url
         isLoading = true
-        let item = AVPlayerItem(url: url)
-        // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
-        // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
-        item.preferredForwardBufferDuration = 8
-        itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            guard let self else { return }
-            Task { @MainActor in
-                guard self.activeRequestID == requestID else { return }
-                switch item.status {
-                case .readyToPlay:
-                    // Tắt subtitle tích hợp sau khi AVFoundation đã sẵn sàng.
-                    if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-                        item.select(nil, in: group)
+        loadTask = Task { @MainActor in
+            let item = await Self.makePlayerItem(videoURL: url, subtitleURL: episode.subtitleURL)
+            guard !Task.isCancelled, self.activeRequestID == requestID else { return }
+            item.preferredForwardBufferDuration = 8
+            self.itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    guard self.activeRequestID == requestID else { return }
+                    switch item.status {
+                    case .readyToPlay:
+                        if let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible), let option = group.options.first {
+                            item.select(option, in: group)
+                        }
+                        self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
+                        if let startAt, startAt > 0, startAt.isFinite {
+                            let duration = item.duration.seconds
+                            let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
+                            self.seek(to: safeStart)
+                        }
+                    case .failed:
+                        self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
+                        self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
+                    default: break
                     }
-                    self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
-                    if let startAt, startAt > 0, startAt.isFinite {
-                        let duration = item.duration.seconds
-                        let safeStart = duration.isFinite && duration > 1 ? min(startAt, duration - 1) : startAt
-                        self.seek(to: safeStart)
-                    }
-                case .failed:
-                    self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
-                    self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
-                default: break
                 }
             }
-        }
-        player.replaceCurrentItem(with: item)
-        player.play()
-        player.defaultRate = playbackRate
-        player.rate = playbackRate
-        isPlaying = true
-        loadTask = Task { @MainActor in
+            self.player.replaceCurrentItem(with: item)
+            self.player.play()
+            self.player.defaultRate = self.playbackRate
+            self.player.rate = self.playbackRate
+            self.isPlaying = true
             try? await Task.sleep(for: .seconds(18))
             guard !Task.isCancelled, self.activeRequestID == requestID, self.isLoading else { return }
             self.isLoading = false
             self.errorMessage = "Nguồn phát phản hồi quá lâu. Hãy thử tập hoặc nguồn khác."
+        }
+    }
+
+    private static func makePlayerItem(videoURL: URL, subtitleURL: URL?) async -> AVPlayerItem {
+        guard let subtitleURL else { return AVPlayerItem(url: videoURL) }
+        return await withTaskGroup(of: AVPlayerItem.self) { group in
+            group.addTask { await Self.makeComposedPlayerItem(videoURL: videoURL, subtitleURL: subtitleURL) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(1.5))
+                return AVPlayerItem(url: videoURL)
+            }
+            let item = await group.next() ?? AVPlayerItem(url: videoURL)
+            group.cancelAll()
+            return item
+        }
+    }
+
+    private static func makeComposedPlayerItem(videoURL: URL, subtitleURL: URL) async -> AVPlayerItem {
+        do {
+            let videoAsset = AVURLAsset(url: videoURL)
+            let subtitleAsset = AVURLAsset(url: subtitleURL)
+            let duration = try await videoAsset.load(.duration)
+            let subtitleTracks = try await subtitleAsset.load(.tracks)
+            guard duration.isNumeric, let subtitleTrack = subtitleTracks.first(where: { $0.mediaType == .text }) else {
+                return AVPlayerItem(url: videoURL)
+            }
+            let composition = AVMutableComposition()
+            try composition.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: videoAsset, at: .zero)
+            guard let track = composition.addMutableTrack(withMediaType: .text, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+                return AVPlayerItem(url: videoURL)
+            }
+            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: subtitleAsset, at: .zero)
+            return AVPlayerItem(asset: composition)
+        } catch {
+            // HLS assets may not expose an external text track to a composition.
+            // Keep the original AVPlayerItem so playback still works normally;
+            // the existing SwiftUI subtitle controller remains the fallback.
+            return AVPlayerItem(url: videoURL)
         }
     }
 

@@ -173,7 +173,7 @@ struct CinemaAPI {
             components.queryItems = [URLQueryItem(name: "input", value: String(data: inputData, encoding: .utf8))]
         }
         guard let url = components.url else { throw APIError.invalidURL }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         request.httpShouldHandleCookies = true
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
@@ -213,7 +213,7 @@ struct CinemaAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
-        request.timeoutInterval = 25
+        request.timeoutInterval = 12
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -273,8 +273,24 @@ enum APIError: LocalizedError {
         case .invalidURL: return "Địa chỉ API không hợp lệ."
         case .invalidResponse: return "Máy chủ trả về dữ liệu chưa đúng định dạng."
         case .http(let code): return "Máy chủ phản hồi lỗi (\(code)). Vui lòng thử lại."
-        case .server(let message): return message
+        case .server(let message): return Self.friendlyServerMessage(message)
         case .decoding(let message): return "Không đọc được dữ liệu phim: \(message)"
         }
+    }
+
+    private static func friendlyServerMessage(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let issues = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return raw
+        }
+        let messages = issues.compactMap { issue -> String? in
+            guard let message = issue["message"] as? String, !message.isEmpty else { return nil }
+            let path = (issue["path"] as? [Any])?.compactMap { $0 as? String }.joined(separator: ".") ?? ""
+            if path == "password" && message.lowercased().contains("too small") { return "Mật khẩu phải có ít nhất 8 ký tự." }
+            if path == "email" && message.lowercased().contains("invalid") { return "Email không đúng định dạng." }
+            if path == "name" && message.lowercased().contains("too small") { return "Họ tên phải có ít nhất 2 ký tự." }
+            return message
+        }
+        return messages.isEmpty ? raw : messages.map { "• \($0)" }.joined(separator: "\n")
     }
 }

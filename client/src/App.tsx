@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import { CatalogPage, CategoryDirectoryPage, DirectoryPage, SearchPage } from "@/pages/Catalog";
 import DetailPage from "./pages/Detail";
+import AccountPage from "./pages/Account";
 import AdminTvStreams from "./pages/AdminTvStreams";
 import AdminAccounts from "./pages/AdminAccounts";
 
@@ -14,6 +15,7 @@ function Router() {
   return <Switch>
     <Route path="/" component={Home} />
     <Route path="/search" component={SearchPage} />
+    <Route path="/account" component={AccountPage} />
     <Route path="/admin/tv" component={AdminTvStreams} />
     <Route path="/admin/accounts" component={AdminAccounts} />
     <Route path="/catalog/latest"><CatalogPage kind="latest" /></Route>

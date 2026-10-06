@@ -246,7 +246,12 @@ final class CinemaStore: ObservableObject {
         do {
             accountUser = try await api.login(email: email, password: password)
             clearLocalCacheAfterAccountLogin()
-            await refreshCloudLibrary()
+            Task {
+                async let cloudRefresh: Void = refreshCloudLibrary()
+                async let deviceRefresh: Void = refreshAccountDevices()
+                await cloudRefresh
+                await deviceRefresh
+            }
         } catch {
             accountError = error.localizedDescription
             throw error
@@ -259,7 +264,12 @@ final class CinemaStore: ObservableObject {
         do {
             accountUser = try await api.register(name: name, email: email, password: password)
             clearLocalCacheAfterAccountLogin()
-            await refreshCloudLibrary()
+            Task {
+                async let cloudRefresh: Void = refreshCloudLibrary()
+                async let deviceRefresh: Void = refreshAccountDevices()
+                await cloudRefresh
+                await deviceRefresh
+            }
         } catch {
             accountError = error.localizedDescription
             throw error

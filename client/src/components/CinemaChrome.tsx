@@ -1,4 +1,4 @@
-import { Film, Home, Layers, List, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
+import { Film, Heart, Home, Layers, List, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -41,6 +41,7 @@ export function SiteHeader() {
     { href: "/",                   label: "Khám phá",  exact: true,  icon: <Home size={16} /> },
     ...catalogLinks,
     { href: "/catalog/categories", label: `Thể loại${meta.data?.categories?.length ? ` (${meta.data.categories.length})` : ""}`, exact: false, icon: <List size={16} /> },
+    { href: "/account",            label: "Thư viện",  exact: false, icon: <Heart size={16} /> },
   ];
   const currentNav = navLinks.find(item => item.exact ? location === item.href : location.startsWith(item.href)) || navLinks[0];
 
@@ -76,6 +77,15 @@ export function SiteHeader() {
             <input value={value} onChange={e => setValue(e.target.value)} placeholder="Tìm tên phim, diễn viên..." aria-label="Tìm kiếm phim" />
             {value && <button type="button" className="icon-button" onClick={() => setValue("")} aria-label="Xóa"><X size={15} /></button>}
           </form>
+
+          <Link
+            href="/account"
+            className={`header-library-link${location.startsWith("/account") ? " is-active" : ""}`}
+            aria-label="Mở thư viện"
+          >
+            <Heart size={15} fill={location.startsWith("/account") ? "currentColor" : "none"} />
+            <span>Thư viện</span>
+          </Link>
 
           {/* Mobile search trigger — intentionally outside the hamburger menu */}
           <button

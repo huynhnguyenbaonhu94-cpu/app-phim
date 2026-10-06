@@ -38,6 +38,7 @@ struct AccountSettingsScreen: View {
             .padding(.leading, 20).padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: store.accountUser != nil)
         .task {
             await store.refreshAccountDevices()
             while !Task.isCancelled {
@@ -75,7 +76,15 @@ struct AccountSettingsScreen: View {
                 .textFieldStyle(.plain)
                 .padding(14)
                 .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-            if let error = store.accountError { Text(error).font(.system(size: 11, weight: .semibold)).foregroundStyle(.red.opacity(0.9)) }
+            if let error = store.accountError {
+                Text(error)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.red.opacity(0.92))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
             Button {
                 submitting = true
                 Task {
@@ -101,7 +110,13 @@ struct AccountSettingsScreen: View {
 
     private func signedInContent(_ user: RemoteAccountUser) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionEyebrow(text: "ĐÃ ĐĂNG NHẬP")
+            HStack {
+                SectionEyebrow(text: "ĐÃ ĐĂNG NHẬP")
+                Spacer()
+                Label("Đồng bộ", systemImage: "checkmark.icloud.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.cinemaAccent)
+            }
             HStack(spacing: 13) {
                 Image(systemName: "person.crop.circle.fill").font(.system(size: 42)).foregroundStyle(Color.cinemaAccent)
                 VStack(alignment: .leading, spacing: 4) {
@@ -114,14 +129,23 @@ struct AccountSettingsScreen: View {
                 HStack {
                     SectionEyebrow(text: "THIẾT BỊ ĐÃ ĐĂNG NHẬP")
                     Spacer()
-                    Text("\(store.accountDevices.count)/5").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(Color.cinemaAccent)
+                    Text("\(store.accountDevices.count) / 5").font(.system(size: 12, weight: .black, design: .monospaced)).foregroundStyle(Color.cinemaAccent)
                 }
                 ForEach(store.accountDevices) { device in deviceRow(device) }
-                if store.accountDevices.isEmpty { Text("Chưa tải được danh sách thiết bị.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)) }
+                if store.accountDevices.isEmpty {
+                    HStack(spacing: 9) {
+                        ProgressView().tint(Color.cinemaAccent)
+                        Text("Đang đồng bộ danh sách thiết bị…").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.58))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 7)
+                }
                 Button("Đăng xuất tất cả thiết bị", role: .destructive) { showLogoutAllAlert = true }
                     .font(.system(size: 12, weight: .bold)).frame(maxWidth: .infinity).padding(.top, 5)
             }
-            .padding(16).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
+            .padding(16)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.14), lineWidth: 0.8))
             Button("Đăng xuất tài khoản") { Task { await store.logout() } }
                 .font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(maxWidth: .infinity)
         }
@@ -151,6 +175,9 @@ struct AccountSettingsScreen: View {
                 Text("\(device.ipAddress) · \(device.location) · \(device.isOnline ? "Đang online" : "Offline")").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
             }
             Spacer()
+            Text(device.isOnline ? "ONLINE" : "OFFLINE")
+                .font(.system(size: 8, weight: .black, design: .monospaced))
+                .foregroundStyle(device.isOnline ? Color.cinemaAccent : .white.opacity(0.42))
             Button { Task { await store.logoutDevice(id: device.id) } } label: { Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(.red.opacity(0.85)) }
                 .buttonStyle(.plain).accessibilityLabel("Đăng xuất thiết bị \(device.deviceName)")
         }

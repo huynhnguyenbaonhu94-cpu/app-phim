@@ -173,6 +173,8 @@ struct FavoritesScreen: View {
 }
 
 struct SavedHubScreen: View {
+    @State private var pressedDestination: String?
+
     var body: some View {
         ZStack {
             CinemaBackground()
@@ -224,6 +226,16 @@ struct SavedHubScreen: View {
             .overlay(RoundedRectangle(cornerRadius: 19).strokeBorder(.white.opacity(0.11), lineWidth: 0.7))
         }
         .buttonStyle(.plain)
+        .scaleEffect(pressedDestination == title ? 0.975 : 1)
+        .opacity(pressedDestination == title ? 0.82 : 1)
+        .animation(.easeOut(duration: 0.12), value: pressedDestination)
+        .simultaneousGesture(TapGesture().onEnded {
+            withAnimation(.easeOut(duration: 0.12)) { pressedDestination = title }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(220))
+                withAnimation(.easeOut(duration: 0.18)) { if pressedDestination == title { pressedDestination = nil } }
+            }
+        })
     }
 }
 
