@@ -58,7 +58,7 @@ struct AccountSettingsScreen: View {
         .task {
             await store.refreshAccountDevices()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
+                try? await Task.sleep(for: .seconds(5))
                 if !Task.isCancelled { await store.refreshAccountDevices() }
             }
         }
@@ -260,7 +260,10 @@ struct AccountSettingsScreen: View {
         guard let nonce = scannedNonce else { return }
         scannedNonce = nil
         Task {
-            do { _ = try await store.approveQrLogin(nonce: nonce, approved: approved) }
+            do {
+                _ = try await store.approveQrLogin(nonce: nonce, approved: approved)
+                if approved { await store.refreshAccountDevicesAfterQrApproval() }
+            }
             catch { qrActionError = error.localizedDescription }
         }
     }

@@ -120,6 +120,8 @@ struct QRLoginSheet: View {
     @State private var statusText = "Đang tạo mã QR…"
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var remainingSeconds = 0
+    @State private var sessionID = UUID()
 
     var body: some View {
         ZStack {
@@ -136,6 +138,9 @@ struct QRLoginSheet: View {
                 if let challenge {
                     QRCodeImage(payload: challenge.payload).frame(width: 260, height: 260)
                     Text(statusText).font(.system(size: 12, weight: .semibold)).foregroundStyle(statusText.contains("thành công") ? Color.cinemaAccent : .white.opacity(0.7)).multilineTextAlignment(.center)
+                    Text(remainingSeconds > 0 ? "Mã QR còn hiệu lực: \(remainingSeconds) giây" : "Mã QR đã hết hạn")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(remainingSeconds > 15 ? Color.cinemaAccent : .orange)
                     Text("Mở Cinemora trên thiết bị đã đăng nhập, chọn Quét QR, rồi xác nhận thiết bị này.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.58)).multilineTextAlignment(.center)
                 } else if isLoading {
                     ProgressView().tint(Color.cinemaAccent).padding(50)
@@ -148,19 +153,31 @@ struct QRLoginSheet: View {
             }
             .padding(22)
         }
-        .task { await runLoginLoop() }
+        .onAppear {
+            // A dismissed sheet may be reused by SwiftUI. Changing the task
+            // identity guarantees a fresh nonce and a fresh countdown next time.
+            challenge = nil
+            remainingSeconds = 0
+            statusText = "Đang tạo mã QR…"
+            errorMessage = nil
+            sessionID = UUID()
+        }
+        .task(id: sessionID) { await runLoginLoop() }
     }
 
     private func runLoginLoop() async {
-        isLoading = true; errorMessage = nil
+        isLoading = true; errorMessage = nil; remainingSeconds = 0
         while !Task.isCancelled {
             do {
                 let created = try await store.createQrLogin()
                 challenge = created; isLoading = false; statusText = "Đang chờ thiết bị đã đăng nhập xác nhận…"
                 let expires = Self.parseDate(created.expiresAt) ?? Date().addingTimeInterval(120)
+                remainingSeconds = max(0, Int(ceil(expires.timeIntervalSinceNow)))
                 while !Task.isCancelled && Date() < expires {
                     try? await Task.sleep(for: .seconds(1))
                     guard !Task.isCancelled else { return }
+                    remainingSeconds = max(0, Int(ceil(expires.timeIntervalSinceNow)))
+                    if Date() >= expires { break }
                     let status = try await store.qrLoginStatus(nonce: created.nonce)
                     switch status.status {
                     case "approved":

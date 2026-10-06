@@ -335,6 +335,16 @@ final class CinemaStore: ObservableObject {
         }
     }
 
+    func refreshAccountDevicesAfterQrApproval() async {
+        // Device B creates its session just after A receives the approval.
+        // Retry briefly so A shows the new device without leaving the screen.
+        for delay in [0, 400, 900, 1_500, 2_500] {
+            guard accountUser != nil else { return }
+            if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
+            await refreshAccountDevices()
+        }
+    }
+
     func logoutDevice(id: Int, deviceId: String? = nil) async {
         let isCurrentDevice = deviceId.map(api.isCurrentDevice) ?? false
         do {
