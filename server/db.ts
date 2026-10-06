@@ -234,3 +234,27 @@ export async function clearWatchHistory(userId: number) {
   await db.delete(movieWatchHistory).where(eq(movieWatchHistory.userId, userId));
   return true;
 }
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0];
+}
+
+export async function updateLocalAccountByAdmin(input: { id: number; name?: string; email?: string; passwordHash?: string; role?: "user" | "admin" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const updates: Record<string, unknown> = {};
+  if (input.name !== undefined) updates.name = input.name;
+  if (input.email !== undefined) {
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, input.email)).limit(1);
+    if (existing[0] && existing[0].id !== input.id) throw new Error("Email này đã được sử dụng bởi tài khoản khác.");
+    updates.email = input.email;
+  }
+  if (input.passwordHash !== undefined) updates.passwordHash = input.passwordHash;
+  if (input.role !== undefined) updates.role = input.role;
+  if (Object.keys(updates).length === 0) return getUserById(input.id);
+  await db.update(users).set(updates).where(eq(users.id, input.id));
+  return getUserById(input.id);
+}

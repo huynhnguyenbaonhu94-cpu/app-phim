@@ -39,6 +39,16 @@ struct AccountSettingsScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: store.accountUser != nil)
+        .onAppear {
+            if store.accountUser == nil { store.clearAccountError() }
+        }
+        .onChange(of: store.accountUser) { _, user in
+            if user == nil {
+                submitting = false
+                password = ""
+                store.clearAccountError()
+            }
+        }
         .task {
             await store.refreshAccountDevices()
             while !Task.isCancelled {
@@ -178,7 +188,7 @@ struct AccountSettingsScreen: View {
             Text(device.isOnline ? "ONLINE" : "OFFLINE")
                 .font(.system(size: 8, weight: .black, design: .monospaced))
                 .foregroundStyle(device.isOnline ? Color.cinemaAccent : .white.opacity(0.42))
-            Button { Task { await store.logoutDevice(id: device.id) } } label: { Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(.red.opacity(0.85)) }
+            Button { Task { await store.logoutDevice(id: device.id, deviceId: device.deviceId) } } label: { Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(.red.opacity(0.85)) }
                 .buttonStyle(.plain).accessibilityLabel("Đăng xuất thiết bị \(device.deviceName)")
         }
         .padding(11).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 13))

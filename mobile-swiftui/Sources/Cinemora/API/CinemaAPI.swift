@@ -126,6 +126,7 @@ struct CinemaAPI {
     func logout() async throws { let _: SuccessResponse = try await mutate("auth.logout", input: [:]) }
 
     func accountDevices() async throws -> [RemoteAccountDevice] { try await query("account.devices", input: nil) }
+    func isCurrentDevice(_ remoteDeviceId: String) -> Bool { remoteDeviceId == deviceId }
     func logoutDevice(id: Int) async throws { let _: SuccessResponse = try await mutate("account.logoutDevice", input: ["id": id]) }
     func logoutAllDevices() async throws { let _: SuccessResponse = try await mutate("account.logoutAll", input: [:]) }
 
@@ -267,6 +268,14 @@ enum APIError: LocalizedError {
     case http(Int)
     case server(String)
     case decoding(String)
+
+    var isUnauthorized: Bool {
+        switch self {
+        case .http(let code): return code == 401
+        case .server(let message): return message.contains("401") || message.localizedCaseInsensitiveContains("unauthorized") || message.localizedCaseInsensitiveContains("unauthenticated")
+        default: return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {

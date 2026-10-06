@@ -223,7 +223,11 @@ final class CinemaStore: ObservableObject {
             let response = try await api.me()
             accountUser = response.value
             if accountUser != nil { await refreshCloudLibrary() }
-        } catch { accountError = error.localizedDescription }
+        } catch {
+            if let apiError = error as? APIError, apiError.isUnauthorized {
+                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+            } else { accountError = error.localizedDescription }
+        }
     }
 
     func checkAccountSession() async {
@@ -237,7 +241,11 @@ final class CinemaStore: ObservableObject {
                 localFavorites = []
                 localHistory = []
             }
-        } catch { accountError = error.localizedDescription }
+        } catch {
+            if let apiError = error as? APIError, apiError.isUnauthorized {
+                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+            } else if accountUser != nil { accountError = error.localizedDescription }
+        }
     }
 
     func login(email: String, password: String) async throws {
@@ -277,8 +285,8 @@ final class CinemaStore: ObservableObject {
     }
 
     func logout() async {
+        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
         try? await api.logout()
-        accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []
     }
 
     func refreshCloudLibrary() async {
@@ -290,23 +298,43 @@ final class CinemaStore: ObservableObject {
             let remoteHistory = try await history
             localFavorites = remoteFavorites.map(\.localRecord)
             localHistory = remoteHistory.map(\.localRecord)
-        } catch { accountError = error.localizedDescription }
+        } catch {
+            if accountUser != nil { accountError = error.localizedDescription }
+        }
     }
 
     func refreshAccountDevices() async {
         guard accountUser != nil else { return }
         do { accountDevices = try await api.accountDevices() }
-        catch { accountError = error.localizedDescription }
+        catch {
+            if accountUser != nil { accountError = error.localizedDescription }
+        }
     }
 
-    func logoutDevice(id: Int) async {
-        try? await api.logoutDevice(id: id)
-        await refreshAccountDevices()
+    func logoutDevice(id: Int, deviceId: String? = nil) async {
+        let isCurrentDevice = deviceId.map(api.isCurrentDevice) ?? false
+        do {
+            try await api.logoutDevice(id: id)
+            if isCurrentDevice {
+                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+            } else {
+                await refreshAccountDevices()
+            }
+        } catch {
+            if isCurrentDevice {
+                accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []; accountError = nil
+            } else { accountError = error.localizedDescription }
+        }
     }
 
     func logoutAllDevices() async {
-        try? await api.logoutAllDevices()
         accountUser = nil; accountDevices = []; localFavorites = []; localHistory = []
+        accountError = nil
+        try? await api.logoutAllDevices()
+    }
+
+    func clearAccountError() {
+        accountError = nil
     }
 
     private func clearLocalCacheAfterAccountLogin() {

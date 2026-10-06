@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory } from "./db";
+import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -171,6 +171,18 @@ export const appRouter = router({
     list: adminProcedure.query(() => listAllAccountSummaries()),
     devices: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => listAccountDevices(input.userId)),
     logoutAll: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(({ input }) => revokeAllSessions(input.userId)),
+    update: adminProcedure.input(z.object({
+      id: z.number().int().positive(),
+      name: z.string().trim().min(2).max(120).optional(),
+      email: z.string().trim().email().max(255).optional(),
+      password: z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(200).optional(),
+      role: z.enum(["user", "admin"]).optional(),
+    })).mutation(async ({ input }) => {
+      const { password, ...rest } = input;
+      const updated = await updateLocalAccountByAdmin({ ...rest, ...(password ? { passwordHash: await hashPassword(password) } : {}) });
+      if (password) await revokeAllSessions(input.id);
+      return updated;
+    }),
   }),
 });
 
