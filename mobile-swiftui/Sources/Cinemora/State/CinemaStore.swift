@@ -243,17 +243,27 @@ final class CinemaStore: ObservableObject {
     func login(email: String, password: String) async throws {
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
-        accountUser = try await api.login(email: email, password: password)
-        clearLocalCacheAfterAccountLogin()
-        await refreshCloudLibrary()
+        do {
+            accountUser = try await api.login(email: email, password: password)
+            clearLocalCacheAfterAccountLogin()
+            await refreshCloudLibrary()
+        } catch {
+            accountError = error.localizedDescription
+            throw error
+        }
     }
 
     func register(name: String, email: String, password: String) async throws {
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
-        accountUser = try await api.register(name: name, email: email, password: password)
-        clearLocalCacheAfterAccountLogin()
-        await refreshCloudLibrary()
+        do {
+            accountUser = try await api.register(name: name, email: email, password: password)
+            clearLocalCacheAfterAccountLogin()
+            await refreshCloudLibrary()
+        } catch {
+            accountError = error.localizedDescription
+            throw error
+        }
     }
 
     func logout() async {

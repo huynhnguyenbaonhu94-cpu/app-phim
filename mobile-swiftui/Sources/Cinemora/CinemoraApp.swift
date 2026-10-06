@@ -97,9 +97,13 @@ struct CinemoraTabShell: View {
         }
         .animation(.easeInOut(duration: 0.25), value: connectivity.isConnected)
         .task {
-            await store.restoreAccount()
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.38)) { showLaunchLoader = false }
+        }
+        .task {
+            // Session restore runs in the background; the launch screen must
+            // never wait for a slow/unavailable API before showing the app.
+            await store.restoreAccount()
         }
         .task {
             while !Task.isCancelled {

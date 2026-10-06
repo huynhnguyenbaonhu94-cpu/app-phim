@@ -82,11 +82,14 @@ struct AccountSettingsScreen: View {
                     do {
                         if isRegistering { try await store.register(name: name, email: email, password: password) }
                         else { try await store.login(email: email, password: password) }
-                    } catch { }
-                    submitting = false
+                    } catch {
+                        // CinemaStore publishes the server message; keep the
+                        // failure visible instead of silently swallowing it.
+                    }
+                    await MainActor.run { submitting = false }
                 }
             } label: {
-                HStack { Spacer(); if submitting { ProgressView().tint(Color.cinemaInk) }; Text(isRegistering ? "Tạo tài khoản" : "Đăng nhập"); Spacer() }
+                HStack { Spacer(); if submitting { ProgressView().tint(Color.cinemaInk) }; Text(submitting ? (isRegistering ? "Đang tạo tài khoản…" : "Đang đăng nhập…") : (isRegistering ? "Tạo tài khoản" : "Đăng nhập")); Spacer() }
                     .font(.system(size: 13, weight: .black)).foregroundStyle(Color.cinemaInk)
                     .padding(.vertical, 14).background(Color.cinemaAccent, in: Capsule())
             }
