@@ -283,7 +283,7 @@ private final class TVPlaybackController: ObservableObject {
 }
 
 struct TVScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @EnvironmentObject private var tv: TvStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = TVPlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
@@ -301,12 +301,12 @@ struct TVScreen: View {
     private var selectedStream: TvStream? {
         if let selectedStreamSnapshot { return selectedStreamSnapshot }
         guard let selectedStreamID else { return nil }
-        return store.tvStreams.first { $0.id == selectedStreamID }
+        return tv.streams.first { $0.id == selectedStreamID }
     }
 
     private var selectedVideo: TvVideo? {
         guard let selectedVideoID else { return nil }
-        return store.tvVideos.first { $0.id == selectedVideoID }
+        return tv.videos.first { $0.id == selectedVideoID }
     }
 
     /// Posted TV videos use the same movie player as catalog movies. Each
@@ -323,7 +323,7 @@ struct TVScreen: View {
                     CinemaHeader(eyebrow: "CINEMORA LIVE", title: "TRUYỀN HÌNH")
                         .auroraReveal(0)
 
-                    if store.tvLoading && store.tvStreams.isEmpty {
+                    if tv.loading && tv.streams.isEmpty {
                         VStack(alignment: .leading, spacing: 16) {
                             SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Đang tải kênh")
                             LazyVGrid(columns: columns, spacing: 16) {
@@ -338,13 +338,13 @@ struct TVScreen: View {
                                 }
                             }
                         }
-                    } else if store.tvStreams.isEmpty {
-                        StateMessage(icon: "tv", title: "Chưa có kênh truyền hình", detail: store.tvError ?? "Admin chưa thêm stream nào.")
+                    } else if tv.streams.isEmpty {
+                        StateMessage(icon: "tv", title: "Chưa có kênh truyền hình", detail: tv.error ?? "Admin chưa thêm stream nào.")
                     } else {
                         SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Chọn kênh để xem")
                             .auroraReveal(1)
                         LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(Array(store.tvStreams.enumerated()), id: \.element.id) { index, stream in
+                            ForEach(Array(tv.streams.enumerated()), id: \.element.id) { index, stream in
                                 TVChannelCard(stream: stream, isSelected: stream.id == selectedStream?.id) {
                                     selectedStreamID = stream.id
                                     selectedStreamSnapshot = stream
@@ -358,11 +358,11 @@ struct TVScreen: View {
                         }
                     }
 
-                    if !store.tvVideos.isEmpty {
+                    if !tv.videos.isEmpty {
                         SectionHeading(eyebrow: "VIDEO", title: "Video đã đăng")
                             .auroraReveal(2)
                         LazyVStack(spacing: 11) {
-                            ForEach(Array(store.tvVideos.enumerated()), id: \.element.id) { index, video in
+                            ForEach(Array(tv.videos.enumerated()), id: \.element.id) { index, video in
                                 TVVideoRow(video: video) {
                                     selectedVideoID = video.id
                                     selectedVideoMovieSnapshot = nil
@@ -386,18 +386,18 @@ struct TVScreen: View {
                 .padding(.top, 6)
                 .padding(.bottom, 120)
             }
-            .refreshable { await store.refreshTvStreams() }
+            .refreshable { await tv.refresh() }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.startTvLiveUpdates() }
+        .task { await tv.startLive() }
         .onChange(of: scenePhase) { _, phase in
             // Only backgrounding the app closes the live connection. Switching
             // tabs must not: doing so restarted the SSE stream and refetched
             // both lists every time the user came back to this tab.
-            if phase == .active { Task { await store.refreshTvStreams() } }
-            else { store.stopTvLiveUpdates() }
+            if phase == .active { Task { await tv.refresh() } }
+            else { tv.stopLive() }
         }
-        .onChange(of: store.tvStreams) { _, streams in
+        .onChange(of: tv.streams) { _, streams in
             // During playback, keep the selected media snapshot stable. A
             // foreground refresh must not replace it or pick another channel.
             guard !isPlayerPresented else { return }
@@ -424,8 +424,8 @@ struct TVScreen: View {
             selectedVideoID = nil
             selectedVideoMovieSnapshot = nil
             selectedStreamSnapshot = nil
-            if selectedStreamID == nil || !store.tvStreams.contains(where: { $0.id == selectedStreamID }) {
-                selectedStreamID = store.tvStreams.first?.id
+            if selectedStreamID == nil || !tv.streams.contains(where: { $0.id == selectedStreamID }) {
+                selectedStreamID = tv.streams.first?.id
             }
         }) {
             Group {

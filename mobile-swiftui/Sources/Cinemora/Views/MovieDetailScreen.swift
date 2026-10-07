@@ -84,7 +84,7 @@ struct MovieDetailScreen: View {
             selectedEpisode = 0
             let playableEpisode = loadedMovie.availableServers[playableServerIndex].episodes[0]
             store.recordLocalHistory(movie: loadedMovie, episode: playableEpisode, serverName: loadedMovie.availableServers[playableServerIndex].name)
-            showPlayer = true
+            startPlayback()
         }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
         .fullScreenCover(isPresented: $showPlayer, onDismiss: {
@@ -117,6 +117,13 @@ struct MovieDetailScreen: View {
             }
             .id(relatedMovieRoute?.id ?? "cinemora-player-\(slug)")
         }
+    }
+
+    /// Turns the device to landscape first and only then opens the player, so
+    /// the player never shows up in portrait and rotates a beat later.
+    private func startPlayback() {
+        guard !showPlayer else { return }
+        OrientationSupport.rotateThenPresent { showPlayer = true }
     }
 
     private func dismissDetail() {
@@ -205,7 +212,7 @@ struct MovieDetailScreen: View {
                         Button {
                             selectedEpisode = index
                             store.recordLocalHistory(movie: movie, episode: item, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil)
-                            showPlayer = true
+                            startPlayback()
                         } label: {
                             HStack(spacing: 10) {
                                 Text(String(format: "%02d", index + 1))
@@ -319,7 +326,7 @@ struct MovieDetailScreen: View {
                 }
                 Button {
                     store.recordLocalHistory(movie: movie, episode: episode, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil)
-                    showPlayer = true
+                    startPlayback()
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "play.fill")

@@ -91,7 +91,7 @@ struct ResumeMovieScreen: View {
         }
         loadedMovie = movie
         resumeStarted = true
-        showPlayer = true
+        OrientationSupport.rotateThenPresent { showPlayer = true }
     }
 }
 

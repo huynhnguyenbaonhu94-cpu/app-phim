@@ -365,3 +365,87 @@ thì hiện hộp thoại:
   đăng nhập khi chưa có tài khoản), nút **Để sau** đóng hộp thoại.
 
 Ràng buộc trong store vẫn được giữ nguyên để bảo vệ ở tầng dữ liệu.
+## 12. Vòng sửa thứ sáu: nút "Xem thêm", nguyên nhân gốc của độ trễ, và trình phát
+
+### 12.1 Nút "Xem thêm" mở sai phim
+
+**Nguyên nhân:** trong `HomeScreen.sectionBlock`, nút "Xem thêm" được viết là
+`NavigationLink(value: section.movies.first)`. Nó không mở danh sách của mục mà **mở thẳng
+trang chi tiết của phim đầu tiên trong mục đó**. Với mục "Phim Mới", phim đầu tiên chính là
+phim hero — đúng như hiện tượng bạn gặp: bấm "Xem thêm" ở "Phim Mới" hay "Phim Bộ" đều nhảy
+vào *Juliet và Juliet*.
+
+**Cách sửa:** thêm một tuyến điều hướng riêng cho mục:
+
+```swift
+struct SectionListRoute: Hashable {
+    let kind: String
+    let title: String
+}
+```
+
+`SectionListScreen` hiển thị toàn bộ phim của mục đó trong lưới 2 cột và **tự phân trang khi
+cuộn** qua `CinemaAPI.shared.list(page:kind:)`. Nó tự gọi API thay vì dùng
+`CinemaStore.catalogMovies`, vì trạng thái đó thuộc tab Thư viện — nếu dùng chung, hai màn
+hình sẽ ghi đè danh sách của nhau.
+
+### 12.2 Nguyên nhân gốc của độ trễ nút "Trở lại" (và cảm giác chưa mượt nói chung)
+
+Đây là lỗi quan trọng nhất của vòng này, và nó giải thích đúng hiện tượng "lâu lâu ấn một lần
+là được liền, lâu lâu phải ấn liên tục".
+
+**Nguyên nhân:** trạng thái truyền hình nằm chung trong `CinemaStore`, và `TVScreen` mở một kết
+nối **server-sent events** chạy mãi. Vì các tab là `UIHostingController` chỉ bị `isHidden`, việc
+ẩn một tab **không** kích hoạt `onDisappear` của SwiftUI — nên sau khi bạn ghé tab Truyền hình
+một lần, kết nối live vẫn chạy tiếp. Mỗi bản tin SSE (số người xem thay đổi liên tục) ghi vào
+`@Published` của store dùng chung, mà `@EnvironmentObject` phát thông báo tới **mọi view đang
+quan sát store** — tức là **cả 5 tab cộng mọi màn hình đang mở** đồng loạt dựng lại. Các màn
+hình này rất nặng (hero, dải poster, lưới phim), nên main thread bận đúng vào lúc bạn đang
+chạm vào nút Trở lại — cú chạm bị xử lý muộn, và cảm giác là "phải ấn lại".
+
+**Cách sửa:** tách hẳn trạng thái truyền hình ra một store riêng `TvStore`
+(`State/CinemaStore.swift`), chỉ `TVScreen` quan sát nó:
+
+- `TvStore` giữ `streams`, `videos`, `loading`, `error` cùng hai tác vụ nền.
+- `TVScreen` chỉ dùng `@EnvironmentObject private var tv: TvStore`, không còn quan sát
+  `CinemaStore` — nên màn hình này cũng không còn dựng lại khi dữ liệu phim thay đổi.
+- Bản tin live giờ chỉ làm **một** màn hình dựng lại thay vì toàn app.
+- Kết nối vẫn được giữ qua các lần chuyển tab như trước, nên vào tab Truyền hình vẫn tức thì.
+
+Đây là loại lỗi mà việc "đoán" không tìm ra: nó không nằm ở nút bấm, mà ở chỗ một luồng dữ
+liệu chạy nền đang âm thầm vô hiệu hoá giao diện của cả ứng dụng.
+
+### 12.3 Chuyển tab mượt hơn
+
+Hai thay đổi trong `AuroraTabHostController`:
+
+1. **Làm nóng trước (`prewarm`)** — sau khi khởi động 1,2 giây, các tab còn lại được tạo lần
+   lượt (cách nhau 450ms, vẫn ở trạng thái ẩn). Lần đầu chuyển sang một tab giờ là một cú lật
+   hiển thị thay vì một lượt dựng nguội toàn màn hình. Vì `TvStore` đã tách riêng, việc làm
+   nóng tab Truyền hình không còn ảnh hưởng tới các tab khác.
+2. **Chuyển mờ (cross-fade)** — tab mới hiện lên bằng `UIView.animate` alpha 0 → 1 trong 0,2
+   giây, khớp với chuyển động của thanh tab, thay vì cắt phựt. Chỉ đổi alpha: không layout,
+   không dựng lại view.
+
+### 12.4 Trình phát mở thẳng ở chế độ ngang
+
+**Trước:** `showPlayer = true` được đặt trước, rồi trình phát mới tự gọi `forceLandscape()`
+trong `onAppear` — nên nó hiện ra ở dạng dọc rồi mới xoay.
+
+**Cách sửa:** thêm `OrientationSupport` dùng chung (trước đây mỗi màn hình tự viết một bản
+riêng) và hàm `rotateThenPresent`:
+
+```swift
+OrientationSupport.rotateThenPresent { showPlayer = true }
+```
+
+Nó xoay thiết bị sang ngang trước, chờ 280ms (chính là lúc người dùng thấy màn hình đang xoay),
+rồi mới mở trình phát — nên trình phát xuất hiện **đã ở chế độ ngang**. Ba điểm phát phim trong
+trang chi tiết (nút "Xem phim", chọn tập, và tự phát khi mở từ phim liên quan) cùng nút "Xem
+tiếp" ở màn hình xem tiếp đều dùng chung cách này. `forceLandscape()` trong trình phát vẫn được
+giữ để bảo đảm, vì nó vô hại khi đã ở đúng hướng.
+
+### 12.5 Một chi tiết nhỏ
+
+Dải vuốt-lùi ở mép trái được thu từ 22pt xuống 18pt để không phủ lên 2pt đầu của nút "Trở lại"
+(các nút này đặt cách mép 20pt), tránh mất vùng chạm một cách không cần thiết.

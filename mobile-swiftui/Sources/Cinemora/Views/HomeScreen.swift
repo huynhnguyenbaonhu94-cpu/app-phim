@@ -115,21 +115,21 @@ struct HomeScreen: View {
             HStack(alignment: .lastTextBaseline) {
                 SectionHeading(eyebrow: index == 0 ? "MỚI CẬP NHẬT" : "CINEMORA", title: section.title)
                 Spacer(minLength: 8)
-                if let first = section.movies.first {
-                    NavigationLink(value: first) {
-                        HStack(spacing: 3) {
-                            Text("Xem thêm")
-                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .black))
-                        }
-                        .font(.auroraLabel(11, weight: .bold))
-                        .foregroundStyle(Color.auroraViolet)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.auroraViolet.opacity(0.14)))
-                        .overlay(Capsule().strokeBorder(Color.auroraViolet.opacity(0.28), lineWidth: 0.7))
+                // Opens the whole section. It used to link to `section.movies.first`,
+                // which is why "Xem thêm" kept landing on the hero movie.
+                NavigationLink(value: SectionListRoute(kind: section.id, title: section.title)) {
+                    HStack(spacing: 3) {
+                        Text("Xem thêm")
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .black))
                     }
-                    .buttonStyle(.auroraPress(scale: 0.94))
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(Color.auroraViolet)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.auroraViolet.opacity(0.14)))
+                    .overlay(Capsule().strokeBorder(Color.auroraViolet.opacity(0.28), lineWidth: 0.7))
                 }
+                .buttonStyle(.auroraPress(scale: 0.94))
             }
             .auroraReveal(index + 2)
 
@@ -144,6 +144,105 @@ struct HomeScreen: View {
                     }
                 }
             }
+        }
+    }
+}
+
+
+// MARK: - Section list
+
+/// Route for a home section's "Xem thêm" button. Only the section's kind and
+/// title travel in the navigation path; the movies are loaded by the screen.
+struct SectionListRoute: Hashable {
+    let kind: String
+    let title: String
+}
+
+/// Every movie in one home section, paged in as you scroll.
+///
+/// It pages `CinemaAPI` itself rather than using `CinemaStore.catalogMovies`,
+/// because the library tab owns that state and the two would otherwise overwrite
+/// each other's listings.
+struct SectionListScreen: View {
+    let kind: String
+    let title: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var movies: [Movie] = []
+    @State private var page = 1
+    @State private var loading = false
+    @State private var reachedEnd = false
+    @State private var error: String?
+
+    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+
+    var body: some View {
+        ZStack {
+            CinemaBackground()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    CinemaHeader(eyebrow: "DANH SÁCH PHIM", title: title)
+                        .id("section-list-header")
+                        .auroraReveal(0)
+
+                    if movies.isEmpty && loading {
+                        SkeletonPosterGrid(count: 6)
+                    } else if movies.isEmpty, let error {
+                        StateMessage(icon: "wifi.exclamationmark", title: "Chưa tải được danh sách", detail: error, actionTitle: "Thử lại") {
+                            Task { await load(reset: true) }
+                        }
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 20) {
+                            ForEach(Array(movies.enumerated()), id: \.element.id) { index, movie in
+                                MoviePosterCard(movie: movie, revealIndex: index)
+                                    .id("section-movie-\(movie.id)")
+                            }
+                        }
+                        if !reachedEnd {
+                            ProgressView()
+                                .tint(.auroraViolet)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .onAppear { Task { await load(reset: false) } }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 58)
+                .padding(.bottom, 112)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .overlay(alignment: .topLeading) {
+            AuroraBackButton(title: "Trở lại") { dismiss() }
+                .padding(.leading, 20)
+                .padding(.top, 8)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .task { await load(reset: true) }
+    }
+
+    private func load(reset: Bool) async {
+        guard !loading else { return }
+        if reset {
+            movies = []
+            page = 1
+            reachedEnd = false
+            error = nil
+        }
+        guard !reachedEnd else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let result = try await CinemaAPI.shared.list(page: page, kind: kind)
+            let known = Set(movies.map(\.id))
+            let fresh = result.items.filter { !known.contains($0.id) }
+            movies += fresh
+            page += 1
+            if fresh.isEmpty { reachedEnd = true }
+        } catch {
+            error = error.localizedDescription
+            reachedEnd = true
         }
     }
 }

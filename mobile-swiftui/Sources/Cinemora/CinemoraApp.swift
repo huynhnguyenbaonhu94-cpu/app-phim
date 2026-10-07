@@ -9,16 +9,43 @@ final class CinemoraAppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
+/// Programmatic orientation control, shared by the player and the TV tab.
+enum OrientationSupport {
+    static func rotate(to orientation: UIInterfaceOrientation) {
+        let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else { return }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: isLandscape ? .landscape : .portrait)) { _ in }
+        scene.windows.first(where: { $0.isKeyWindow })?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+    }
+
+    /// Rotates into landscape and only then presents the player, so it opens
+    /// straight into landscape instead of appearing in portrait and spinning
+    /// afterwards. The short wait is the rotation itself, which the user sees.
+    @MainActor
+    static func rotateThenPresent(_ present: @escaping @MainActor () -> Void) {
+        rotate(to: .landscapeRight)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            present()
+        }
+    }
+}
+
 @main
 @MainActor
 struct CinemoraApp: App {
     @UIApplicationDelegateAdaptor(CinemoraAppDelegate.self) private var appDelegate
     @StateObject private var store = CinemaStore()
     @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var tvStore = TvStore()
 
     var body: some Scene {
         WindowGroup {
-            CinemoraTabShell(store: store)
+            CinemoraTabShell(store: store, tvStore: tvStore)
                 .environmentObject(store)
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
@@ -103,13 +130,14 @@ struct CinemoraTabShell: View {
     /// an observed store invalidates this view — and with it the whole tab
     /// container — on every published change.
     let store: CinemaStore
+    let tvStore: TvStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
 
     var body: some View {
         ZStack(alignment: .top) {
-            AuroraTabHost(selection: $selection, store: store, connectivity: connectivity)
+            AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity)
                 .ignoresSafeArea()
 
             if !connectivity.isConnected {
@@ -172,12 +200,35 @@ final class AuroraTabHostController: UIViewController {
     /// Shows the tab at `index`, building its host the first time it is needed.
     func select(_ index: Int) {
         guard index != selectedIndex || hosts[index] == nil else { return }
+        let previous = hosts[selectedIndex]
         selectedIndex = index
         guard let host = host(at: index) else { return }
         for (key, value) in hosts where key != index {
             value.view.isHidden = true
+            value.view.alpha = 1
         }
         host.view.isHidden = false
+        if previous !== host {
+            // Fade the incoming tab in so the swap reads as one motion with the
+            // tab bar instead of a hard cut. Alpha only: no layout, no rebuild.
+            host.view.alpha = 0
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                host.view.alpha = 1
+            }
+        }
+    }
+
+    /// Builds every other tab once, hidden, so the first visit to each is an
+    /// instant visibility flip. Staggered so the launch stays responsive.
+    func prewarm(excluding index: Int) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            for target in 0..<CinemoraTab.allCases.count where target != index {
+                guard let self, !Task.isCancelled else { return }
+                _ = self.host(at: target)
+                try? await Task.sleep(for: .milliseconds(450))
+            }
+        }
     }
 
     private func host(at index: Int) -> UIViewController? {
@@ -200,17 +251,20 @@ final class AuroraTabHostController: UIViewController {
 private struct AuroraTabHost: UIViewControllerRepresentable {
     @Binding var selection: CinemoraTab
     let store: CinemaStore
+    let tvStore: TvStore
     let connectivity: ConnectivityMonitor
 
     func makeUIViewController(context: Context) -> AuroraTabHostController {
         let controller = AuroraTabHostController()
         let store = self.store
+        let tvStore = self.tvStore
         let connectivity = self.connectivity
         controller.makeHost = { index in
             let host = UIHostingController(
                 rootView: AuroraTabScreen(
                     tab: CinemoraTab.allCases[index],
                     store: store,
+                    tvStore: tvStore,
                     connectivity: connectivity
                 )
             )
@@ -220,6 +274,9 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
             host.view.backgroundColor = .clear
             return host
         }
+        // Build the other tabs shortly after launch so the first switch to each
+        // is a visibility flip instead of a cold render.
+        controller.prewarm(excluding: CinemoraTab.allCases.firstIndex(of: selection) ?? 0)
         return controller
     }
 
@@ -237,6 +294,7 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
 private struct AuroraTabScreen: View {
     let tab: CinemoraTab
     let store: CinemaStore
+    let tvStore: TvStore
     let connectivity: ConnectivityMonitor
     @State private var path = NavigationPath()
 
@@ -244,9 +302,13 @@ private struct AuroraTabScreen: View {
         NavigationStack(path: $path) {
             root
                 .environmentObject(store)
+                .environmentObject(tvStore)
                 .environmentObject(connectivity)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
+                }
+                .navigationDestination(for: SectionListRoute.self) { route in
+                    SectionListScreen(kind: route.kind, title: route.title)
                 }
         }
         .overlay(alignment: .leading) { backSwipeEdge }
@@ -267,7 +329,7 @@ private struct AuroraTabScreen: View {
     /// inert while the stack is empty, so it never blocks content on a root tab.
     private var backSwipeEdge: some View {
         Color.clear
-            .frame(width: 22)
+            .frame(width: 18)
             .contentShape(Rectangle())
             .allowsHitTesting(!path.isEmpty)
             .gesture(
