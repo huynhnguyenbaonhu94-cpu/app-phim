@@ -296,6 +296,7 @@ struct TVScreen: View {
     @State private var isMuted = false
     @State private var volume = 1.0
     @State private var isPlayerPresented = false
+    private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     private var selectedStream: TvStream? {
         if let selectedStreamSnapshot { return selectedStreamSnapshot }
@@ -318,17 +319,33 @@ struct TVScreen: View {
         ZStack {
             CinemaBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     CinemaHeader(eyebrow: "CINEMORA LIVE", title: "TRUYỀN HÌNH")
+                        .auroraReveal(0)
+
                     if store.tvLoading && store.tvStreams.isEmpty {
-                        ProgressView().tint(.cinemaAccent).frame(maxWidth: .infinity).padding(.top, 70)
+                        VStack(alignment: .leading, spacing: 16) {
+                            SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Đang tải kênh")
+                            LazyVGrid(columns: columns, spacing: 16) {
+                                ForEach(0..<4, id: \.self) { _ in
+                                    VStack(alignment: .leading, spacing: 9) {
+                                        SkeletonBlock(cornerRadius: 20)
+                                            .aspectRatio(1.5, contentMode: .fit)
+                                        SkeletonBlock(cornerRadius: 6)
+                                            .frame(height: 11)
+                                            .frame(maxWidth: 120, alignment: .leading)
+                                    }
+                                }
+                            }
+                        }
                     } else if store.tvStreams.isEmpty {
                         StateMessage(icon: "tv", title: "Chưa có kênh truyền hình", detail: store.tvError ?? "Admin chưa thêm stream nào.")
                     } else {
                         SectionHeading(eyebrow: "KÊNH TRỰC TUYẾN", title: "Chọn kênh để xem")
-                        LazyVStack(spacing: 10) {
-                            ForEach(store.tvStreams) { stream in
-                                TVStreamRow(stream: stream, isSelected: stream.id == selectedStream?.id) {
+                            .auroraReveal(1)
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(Array(store.tvStreams.enumerated()), id: \.element.id) { index, stream in
+                                TVChannelCard(stream: stream, isSelected: stream.id == selectedStream?.id) {
                                     selectedStreamID = stream.id
                                     selectedStreamSnapshot = stream
                                     selectedVideoID = nil
@@ -336,13 +353,16 @@ struct TVScreen: View {
                                     relatedMovieRoute = nil
                                     isPlayerPresented = true
                                 }
+                                .auroraReveal(index % 8)
                             }
                         }
                     }
+
                     if !store.tvVideos.isEmpty {
                         SectionHeading(eyebrow: "VIDEO", title: "Video đã đăng")
-                        LazyVStack(spacing: 10) {
-                            ForEach(store.tvVideos) { video in
+                            .auroraReveal(2)
+                        LazyVStack(spacing: 11) {
+                            ForEach(Array(store.tvVideos.enumerated()), id: \.element.id) { index, video in
                                 TVVideoRow(video: video) {
                                     selectedVideoID = video.id
                                     selectedVideoMovieSnapshot = nil
@@ -357,11 +377,14 @@ struct TVScreen: View {
                                         isPlayerPresented = true
                                     }
                                 }
+                                .auroraReveal(index % 8)
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 36)
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+                .padding(.bottom, 120)
             }
             .refreshable { await store.refreshTvStreams() }
         }
@@ -516,6 +539,73 @@ private enum TVVideoFit: String, CaseIterable, Identifiable {
 
 private enum TVQuickMenu: Equatable { case videoFit }
 
+// MARK: - Live channel card
+
+private struct TVChannelCard: View {
+    let stream: TvStream
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                PosterArt(url: stream.posterURL)
+                    .aspectRatio(1.5, contentMode: .fit)
+                    .overlay {
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.25), Color.clear, Color.black.opacity(0.55)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 6) {
+                            LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6)
+                            Text(stream.isOnline ? "LIVE" : "CHỜ NGUỒN")
+                                .font(.system(size: 8, weight: .black, design: .rounded))
+                                .tracking(0.8)
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.black.opacity(0.5)))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.7))
+                        .padding(9)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if isSelected {
+                            EqualizerBars(color: .auroraMint, bars: 4)
+                                .padding(10)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? Color.auroraMint.opacity(0.7) : Color.white.opacity(0.1),
+                                lineWidth: isSelected ? 1.4 : 0.8
+                            )
+                    }
+                    .shadow(color: Color.black.opacity(0.4), radius: 14, y: 9)
+                    .shadow(color: isSelected ? Color.auroraMint.opacity(0.3) : .clear, radius: 20, y: 8)
+
+                Text(stream.name)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.auroraPress(scale: 0.97))
+        .animation(Motion.gentle, value: isSelected)
+    }
+}
+
+// MARK: - Live player
+
 private struct TVPlayerView: View {
     let stream: TvStream
     @ObservedObject var playback: TVPlaybackController
@@ -540,7 +630,17 @@ private struct TVPlayerView: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
+                        if playback.isLoading {
+                            HStack(spacing: 10) {
+                                ProgressView().tint(.white)
+                                Text("Đang tải nguồn phát…")
+                                    .font(.auroraBody(12, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 13)
+                            .auroraSmoke(in: Capsule(), strength: 0.6)
+                        }
                         Spacer()
                         centerControls
                         Spacer()
@@ -549,11 +649,18 @@ private struct TVPlayerView: View {
                     .padding(.horizontal, max(18, proxy.safeAreaInsets.leading + 16))
                     .padding(.top, max(14, proxy.safeAreaInsets.top + 7))
                     .padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 7))
-                    .background(LinearGradient(colors: [.black.opacity(0.58), .clear, .clear, .black.opacity(0.62)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+                    .background(
+                        LinearGradient(
+                            colors: [.black.opacity(0.6), .clear, .clear, .black.opacity(0.66)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                    )
                     .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+            .animation(.easeInOut(duration: 0.24), value: controlsVisible)
             .onAppear { scheduleHide() }
             .onDisappear { hideTask?.cancel() }
         }
@@ -562,27 +669,49 @@ private struct TVPlayerView: View {
     }
 
     private var topBar: some View {
-        VStack(alignment: .trailing, spacing: 8) {
+        VStack(alignment: .trailing, spacing: 9) {
             HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "tv.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
+                HStack(spacing: 9) {
+                    LivePulse(color: .auroraMint, size: 7)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(stream.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
-                        Text("TRUYỀN HÌNH TRỰC TIẾP").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.58))
+                        Text(stream.name)
+                            .font(.auroraLabel(12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text("TRUYỀN HÌNH TRỰC TIẾP")
+                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .tracking(1.1)
+                            .foregroundStyle(.white.opacity(0.6))
                     }
                 }
-                .padding(.horizontal, 12).frame(height: 42)
-                .background(.black.opacity(0.36), in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .auroraSmoke(in: Capsule(), strength: 0.4)
+
                 Spacer()
+
                 Button { playback.syncToLiveEdge(); scheduleHide() } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
                 .accessibilityLabel("Đồng bộ về thời gian phát trực tiếp")
+
                 quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue)
                 pipButton
-                Button { isFullscreen = false } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
-                    .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Đóng trình phát")
+
+                Button { isFullscreen = false } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
+                .accessibilityLabel("Đóng trình phát")
             }
             if quickMenu != nil { quickMenuPanel }
         }
@@ -590,110 +719,219 @@ private struct TVPlayerView: View {
 
     private func quickControl(icon: String, title: String, value: String) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.18)) { quickMenu = quickMenu == .videoFit ? nil : .videoFit; volumePopoverOpen = false }
+            withAnimation(Motion.sheet) {
+                quickMenu = quickMenu == .videoFit ? nil : .videoFit
+                volumePopoverOpen = false
+            }
             scheduleHide()
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: icon).font(.system(size: 14, weight: .bold))
                 Text(value).font(.system(size: 9, weight: .black, design: .rounded)).lineLimit(1)
             }
-            .foregroundStyle(quickMenu == .videoFit ? Color.cinemaInk : .white)
-            .frame(width: 52, height: 42)
-            .background(quickMenu == .videoFit ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(quickMenu == .videoFit ? 0.35 : 0.14), lineWidth: 0.8))
+            .foregroundStyle(quickMenu == .videoFit ? Color.auroraVoid : .white)
+            .frame(width: 54, height: 44)
+            .background {
+                if quickMenu == .videoFit {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous).fill(LinearGradient.auroraPrimary)
+                } else {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Color.black.opacity(0.42))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(Color.white.opacity(quickMenu == .videoFit ? 0.32 : 0.16), lineWidth: 0.8)
+            }
         }
-        .buttonStyle(.plain).accessibilityLabel(title).accessibilityValue(value)
+        .buttonStyle(.auroraPress(scale: 0.92))
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 
     private var quickMenuPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("TỶ LỆ KHUNG HÌNH").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
+                Text("TỶ LỆ KHUNG HÌNH")
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.auroraViolet)
                 Spacer(minLength: 20)
-                Button { withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }; scheduleHide() } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 24, height: 24)
-                }.buttonStyle(.plain)
+                Button {
+                    withAnimation(Motion.sheet) { quickMenu = nil }
+                    scheduleHide()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Đóng lựa chọn")
             }
             ForEach(TVVideoFit.allCases) { fit in
                 Button {
-                    videoFit = fit
-                    withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }
+                    withAnimation(Motion.tap) { videoFit = fit }
+                    withAnimation(Motion.sheet) { quickMenu = nil }
                     scheduleHide()
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: fit == videoFit ? "checkmark.circle.fill" : "circle").font(.system(size: 16, weight: .semibold)).foregroundStyle(fit == videoFit ? Color.cinemaAccent : .white.opacity(0.45))
+                        Image(systemName: fit == videoFit ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(fit == videoFit ? Color.auroraViolet : .white.opacity(0.45))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(fit.rawValue).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                            Text(fit == .fit ? "Giữ nguyên khung hình" : fit == .fill ? "Lấp đầy màn hình" : "Phóng phủ toàn màn hình").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.52))
+                            Text(fit.rawValue)
+                                .font(.auroraLabel(12, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text(fit == .fit ? "Giữ nguyên khung hình" : fit == .fill ? "Lấp đầy màn hình" : "Phóng phủ toàn màn hình")
+                                .font(.auroraBody(9))
+                                .foregroundStyle(.white.opacity(0.55))
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(fit == videoFit ? Color.cinemaAccent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 42)
+                    .background(
+                        fit == videoFit ? Color.auroraViolet.opacity(0.16) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(12).frame(width: 260)
-        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+        .padding(13)
+        .frame(width: 266)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.auroraRaised.opacity(0.96))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                }
+                .shadow(color: .black.opacity(0.5), radius: 22, y: 12)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topTrailing)))
     }
 
     private var pipButton: some View {
         Group {
             if pipCoordinator.isSupported {
-                Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start(); scheduleHide() } label: {
+                Button {
+                    pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start()
+                    scheduleHide()
+                } label: {
                     Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
-                        .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(pipCoordinator.isActive ? Color.cinemaInk : .white)
-                .background(pipCoordinator.isActive ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(pipCoordinator.isActive ? Color.auroraVoid : .white)
+                .background {
+                    Circle().fill(pipCoordinator.isActive ? AnyShapeStyle(LinearGradient.auroraPrimary) : AnyShapeStyle(Color.black.opacity(0.42)))
+                }
+                .overlay {
+                    Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8)
+                }
                 .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
             }
         }
     }
 
     private var centerControls: some View {
-        HStack(spacing: 38) {
-            Button { playback.togglePlayback(); scheduleHide() } label: {
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 25, weight: .black)).foregroundStyle(Color.cinemaInk)
-                    .frame(width: 70, height: 70).background(Color.cinemaAccent, in: Circle())
-                    .shadow(color: Color.cinemaAccent.opacity(0.24), radius: 22, y: 8)
-            }
-            .buttonStyle(.plain).accessibilityLabel(playback.isPlaying ? "Tạm dừng" : "Phát")
+        Button {
+            playback.togglePlayback()
+            scheduleHide()
+        } label: {
+            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 26, weight: .black))
+                .foregroundStyle(Color.auroraVoid)
+                .frame(width: 74, height: 74)
+                .background(Circle().fill(LinearGradient.auroraPrimary))
+                .auroraHalo(.auroraViolet, radius: 26, opacity: 0.55)
+                .contentTransition(.symbolEffect(.replace))
         }
+        .buttonStyle(.auroraPress(scale: 0.9))
+        .accessibilityLabel(playback.isPlaying ? "Tạm dừng" : "Phát")
     }
 
     private var bottomControls: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 13) {
             HStack(spacing: 12) {
-                Text("LIVE").font(.system(size: 10, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 8).frame(height: 28).background(Color.cinemaAccent.opacity(0.14), in: Capsule())
-                Capsule().fill(Color.cinemaAccent).frame(height: 3)
-                Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
-                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white).frame(width: 43, height: 43)
+                HStack(spacing: 6) {
+                    LivePulse(color: .auroraMint, size: 6)
+                    Text("LIVE")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
                 }
-                .buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.4)).accessibilityLabel("Điều chỉnh âm lượng")
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Capsule().fill(Color.auroraMint.opacity(0.2)))
+                .overlay(Capsule().strokeBorder(Color.auroraMint.opacity(0.4), lineWidth: 0.8))
+
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.16)).frame(height: 4)
+                    Capsule().fill(LinearGradient.auroraCool).frame(height: 4)
+                }
+                .frame(maxWidth: .infinity)
+                .auroraHalo(.auroraMint, radius: 10, opacity: 0.4)
+
+                Button {
+                    withAnimation(Motion.sheet) { volumePopoverOpen.toggle() }
+                    scheduleHide()
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .auroraSmoke(strength: 0.5)
+                .accessibilityLabel("Điều chỉnh âm lượng")
             }
             .overlay(alignment: .bottomTrailing) {
                 if volumePopoverOpen {
                     HStack(spacing: 10) {
-                        Button { isMuted.toggle() } label: { Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 34, height: 34) }.buttonStyle(.plain)
-                        Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } }).tint(Color.cinemaAccent).frame(width: 142)
+                        Button { isMuted.toggle() } label: {
+                            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.plain)
+                        Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
+                            .tint(Color.auroraViolet)
+                            .frame(width: 150)
                     }
-                    .padding(.horizontal, 11).padding(.vertical, 7).background(.ultraThinMaterial, in: Capsule()).overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.7)).offset(y: -49)
-                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottomTrailing)))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background {
+                        Capsule()
+                            .fill(Color.auroraRaised.opacity(0.96))
+                            .overlay(Capsule().strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9))
+                            .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+                    }
+                    .offset(y: -52)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottomTrailing)))
                 }
             }
-            HStack { Text("CINEMORA LIVE").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.56)); Spacer(); Text(stream.name).font(.system(size: 9, weight: .bold)).foregroundStyle(Color.cinemaAccent).lineLimit(1) }
+
+            HStack {
+                Text("CINEMORA LIVE")
+                    .font(.auroraBody(9))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer()
+                Text(stream.name)
+                    .font(.auroraLabel(9, weight: .bold))
+                    .foregroundStyle(Color.auroraViolet)
+                    .lineLimit(1)
+            }
         }
     }
 
     private func toggleControls() {
-        withAnimation(.easeOut(duration: 0.2)) { controlsVisible.toggle(); if !controlsVisible { volumePopoverOpen = false } }
+        withAnimation(.easeOut(duration: 0.2)) {
+            controlsVisible.toggle()
+            if !controlsVisible { volumePopoverOpen = false }
+        }
         if controlsVisible { scheduleHide() } else { hideTask?.cancel() }
     }
 
@@ -702,7 +940,10 @@ private struct TVPlayerView: View {
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) { controlsVisible = false; volumePopoverOpen = false }
+            withAnimation(.easeOut(duration: 0.2)) {
+                controlsVisible = false
+                volumePopoverOpen = false
+            }
         }
     }
 }
@@ -756,33 +997,76 @@ private struct TVFullscreenPlayer: View {
     }
 }
 
+// MARK: - Posted video row
+
 private struct TVVideoRow: View {
     let video: TvVideo
     let action: () -> Void
     @State private var pulse = false
 
+    private var isFeatured: Bool { video.isFeatured == true }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 13) {
-                PosterArt(url: video.logoURL).frame(width: 76, height: 48).clipped().clipShape(RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) { Text(video.name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white); if video.isFeatured == true { Text("NỔI BẬT").font(.system(size: 8, weight: .black)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 6).padding(.vertical, 3).background(Color.cinemaAccent, in: Capsule()) } }
+                PosterArt(url: video.logoURL)
+                    .frame(width: 88, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
+                    }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text(video.name)
+                            .font(.auroraLabel(14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        if isFeatured {
+                            Text("NỔI BẬT")
+                                .font(.system(size: 8, weight: .black, design: .rounded))
+                                .foregroundStyle(Color.auroraVoid)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(LinearGradient.auroraPrimary))
+                        }
+                    }
                     Text(video.episodes.count > 1 ? "Video bộ · \(video.episodes.count) tập" : "Video · sẵn sàng phát")
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
                 }
-                Spacer()
-                Image(systemName: "play.circle.fill").font(.system(size: 24)).foregroundStyle(Color.cinemaAccent)
+                Spacer(minLength: 0)
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(LinearGradient.auroraPrimary)
+                    .symbolEffect(.pulse, options: .repeating.speed(0.4), isActive: isFeatured)
             }
             .padding(13)
-            .background(video.isFeatured == true ? Color.cinemaAccent.opacity(0.10) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(video.isFeatured == true ? Color.cinemaAccent.opacity(0.62) : .white.opacity(0.08), lineWidth: 1))
-            .shadow(color: video.isFeatured == true && video.featuredEffect == "glow" ? Color.cinemaAccent.opacity(0.45) : .clear, radius: 12)
-            .scaleEffect(video.isFeatured == true && video.featuredEffect == "pulse" && pulse ? 1.015 : 1)
-            .overlay(alignment: .topTrailing) { if video.isFeatured == true && video.featuredEffect == "ribbon" { Text("★").font(.system(size: 12, weight: .black)).foregroundStyle(Color.cinemaInk).padding(7).background(Color.cinemaAccent, in: Circle()).offset(x: -8, y: -8) } }
-            .onAppear { if video.isFeatured == true && video.featuredEffect == "pulse" { withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { pulse = true } } }
-        }.buttonStyle(.plain)
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.auroraPress(scale: 0.98))
+        .auroraCard(cornerRadius: 20, tint: isFeatured ? .auroraViolet : .auroraSky, glow: isFeatured, fill: isFeatured ? 1 : 0.6)
+        .scaleEffect(isFeatured && video.featuredEffect == "pulse" && pulse ? 1.015 : 1)
+        .overlay(alignment: .topTrailing) {
+            if isFeatured && video.featuredEffect == "ribbon" {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(Color.auroraVoid)
+                    .padding(7)
+                    .background(Circle().fill(LinearGradient.auroraPrimary))
+                    .offset(x: -9, y: 9)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            if isFeatured && video.featuredEffect == "pulse" {
+                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
+            }
+        }
     }
 }
+
+// MARK: - Posted video fullscreen player
 
 private struct TVVideoFullscreenPlayer: View {
     let video: TvVideo
@@ -823,17 +1107,64 @@ private struct TVVideoFullscreenPlayer: View {
             Color.black.ignoresSafeArea()
             TVNativeVideoSurface(player: playback.player, fit: fit, pipCoordinator: pipCoordinator).ignoresSafeArea()
             if subtitlePreferences.enabled, let text = subtitles.currentText {
-                VStack { Spacer(); Text(text).font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 24).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth).padding(.bottom, 36) }.allowsHitTesting(false)
+                VStack {
+                    Spacer()
+                    Text(text)
+                        .font(subtitlePreferences.font)
+                        .foregroundStyle(subtitlePreferences.textColor)
+                        .multilineTextAlignment(subtitlePreferences.textAlignment)
+                        .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+                        .padding(.horizontal, 24)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                        .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+                        .padding(.bottom, 36)
+                }
+                .allowsHitTesting(false)
             }
-            Color.clear.contentShape(Rectangle()).onTapGesture { guard !locked, !settingsOpen else { return }; withAnimation { controlsVisible.toggle() }; if controlsVisible { scheduleHide() } }
+            Color.clear.contentShape(Rectangle()).onTapGesture {
+                guard !locked, !settingsOpen else { return }
+                withAnimation { controlsVisible.toggle() }
+                if controlsVisible { scheduleHide() }
+            }
             if controlsVisible && !settingsOpen { playerControls }
-            if locked { VStack { Spacer(); HStack { Spacer(); Button { locked = false; controlsVisible = true; scheduleHide() } label: { Image(systemName: "lock.fill").frame(width: 48, height: 48).background(.black.opacity(0.48), in: Circle()) }.buttonStyle(.plain).foregroundStyle(.white).padding(22) } }.transition(.opacity) }
-            if settingsOpen { settingsOverlay.transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))).zIndex(10) }
+            if locked {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            locked = false
+                            controlsVisible = true
+                            scheduleHide()
+                        } label: {
+                            Image(systemName: "lock.fill")
+                                .frame(width: 50, height: 50)
+                                .background(Color.black.opacity(0.5), in: Circle())
+                        }
+                        .buttonStyle(.auroraPress(scale: 0.9))
+                        .foregroundStyle(.white)
+                        .padding(22)
+                    }
+                }
+                .transition(.opacity)
+            }
+            if settingsOpen {
+                settingsOverlay
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.84, anchor: .topTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)
+                    ))
+                    .zIndex(10)
+            }
         }
-        .preferredColorScheme(.dark).statusBarHidden(true).persistentSystemOverlays(.hidden)
+        .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .onAppear { loadCurrent(); scheduleHide() }
-        .animation(.spring(response: 0.42, dampingFraction: 0.84), value: settingsOpen)
-        .animation(.easeOut(duration: 0.24), value: advancedSettings)
+        .animation(Motion.sheet, value: settingsOpen)
+        .animation(.easeOut(duration: 0.26), value: advancedSettings)
         .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown() }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
@@ -848,70 +1179,272 @@ private struct TVVideoFullscreenPlayer: View {
 
     private var playerControls: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                Button { isPresented = false } label: { Image(systemName: "chevron.down").frame(width: 42, height: 42) }.buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 3) { Text(video.name).font(.system(size: 13, weight: .bold)); Text(episode?.name ?? "Video").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)) }.lineLimit(1)
+            HStack(spacing: 10) {
+                Button { isPresented = false } label: {
+                    Image(systemName: "chevron.down").frame(width: 44, height: 44)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .auroraSmoke(strength: 0.4)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(video.name).font(.auroraLabel(13, weight: .bold))
+                    Text(episode?.name ?? "Video")
+                        .font(.auroraBody(9))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .lineLimit(1)
+
                 Spacer()
-                Button { withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) { settingsOpen = true; advancedSettings = false }; hideTask?.cancel() } label: { Image(systemName: "gearshape.fill").frame(width: 42, height: 42) }.buttonStyle(.plain).foregroundStyle(Color.cinemaInk).background(Color.cinemaAccent, in: Circle()).accessibilityLabel("Cài đặt video")
-                Button { locked = true; controlsVisible = false } label: { Image(systemName: "lock.open").frame(width: 42, height: 42) }.buttonStyle(.plain)
-            }.foregroundStyle(.white).padding(.horizontal, 14).padding(.top, 12)
+
+                Button {
+                    withAnimation(Motion.sheet) { settingsOpen = true; advancedSettings = false }
+                    hideTask?.cancel()
+                } label: {
+                    Image(systemName: "gearshape.fill").frame(width: 44, height: 44)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(Color.auroraVoid)
+                .background(Circle().fill(LinearGradient.auroraPrimary))
+                .auroraHalo(.auroraViolet, radius: 16, opacity: 0.45)
+                .accessibilityLabel("Cài đặt video")
+
+                Button {
+                    locked = true
+                    controlsVisible = false
+                } label: {
+                    Image(systemName: "lock.open").frame(width: 44, height: 44)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .auroraSmoke(strength: 0.4)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
             Spacer()
+
             if playback.isLoading { ProgressView().tint(.white) }
-            HStack(spacing: 28) {
-                Button { skip(-10) } label: { Image(systemName: "gobackward.10").font(.system(size: 22)) }.buttonStyle(.plain)
-                Button { playback.togglePlayback(); scheduleHide() } label: { Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).frame(width: 68, height: 68).background(Color.cinemaAccent, in: Circle()).foregroundStyle(Color.cinemaInk) }.buttonStyle(.plain)
-                Button { skip(10) } label: { Image(systemName: "goforward.10").font(.system(size: 22)) }.buttonStyle(.plain)
-            }.foregroundStyle(.white)
+
+            HStack(spacing: 30) {
+                Button { skip(-10) } label: { skipButton("gobackward.10") }
+                    .buttonStyle(.auroraPress(scale: 0.9))
+                Button {
+                    playback.togglePlayback()
+                    scheduleHide()
+                } label: {
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 28, weight: .black))
+                        .frame(width: 72, height: 72)
+                        .background(Circle().fill(LinearGradient.auroraPrimary))
+                        .foregroundStyle(Color.auroraVoid)
+                        .auroraHalo(.auroraViolet, radius: 24, opacity: 0.5)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                Button { skip(10) } label: { skipButton("goforward.10") }
+                    .buttonStyle(.auroraPress(scale: 0.9))
+            }
+            .foregroundStyle(.white)
+
             Spacer()
-            HStack { if video.episodes.count > 1 { Button { moveEpisode(-1) } label: { Label("Tập trước", systemImage: "backward.end") }.buttonStyle(.plain); Spacer(); Button { moveEpisode(1) } label: { Label("Tập tiếp", systemImage: "forward.end") }.buttonStyle(.plain) } }.font(.system(size: 11, weight: .bold)).foregroundStyle(.white).padding(.horizontal, 16).padding(.bottom, 18)
-        }.background(LinearGradient(colors: [.black.opacity(0.68), .clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+
+            HStack {
+                if video.episodes.count > 1 {
+                    Button { moveEpisode(-1) } label: {
+                        Label("Tập trước", systemImage: "backward.end")
+                            .font(.auroraLabel(11, weight: .bold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.auroraPress(scale: 0.94))
+                    .auroraSmoke(in: Capsule(), strength: 0.35)
+
+                    Spacer()
+
+                    Button { moveEpisode(1) } label: {
+                        Label("Tập tiếp", systemImage: "forward.end")
+                            .font(.auroraLabel(11, weight: .bold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.auroraPress(scale: 0.94))
+                    .auroraSmoke(in: Capsule(), strength: 0.35)
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 20)
+        }
+        .background(
+            LinearGradient(colors: [.black.opacity(0.7), .clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+        )
+    }
+
+    private func skipButton(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 56, height: 56)
+            .auroraSmoke(strength: 0.5)
     }
 
     private var settingsOverlay: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topTrailing) {
-                Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { withAnimation { settingsOpen = false } }
-                VStack(alignment: .leading, spacing: 13) {
-                    HStack { Image(systemName: "gearshape.fill").foregroundStyle(Color.cinemaAccent); Text("Cài đặt video").font(.system(size: 18, weight: .black, design: .rounded)); Spacer(); Button { withAnimation { settingsOpen = false } } label: { Image(systemName: "xmark").frame(width: 30, height: 30).background(.white.opacity(0.08), in: Circle()) }.buttonStyle(.plain) }
-                    Text("QUICK CONTROLS").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1).foregroundStyle(Color.cinemaAccent)
-                    Toggle(isOn: $subtitlePreferences.enabled) { Label("Phụ đề", systemImage: "captions.bubble.fill") }.tint(Color.cinemaAccent)
-                    Toggle(isOn: $autoNext) { Label("Tự động chuyển tập", systemImage: "forward.end.fill") }.tint(Color.cinemaAccent)
-                    Toggle(isOn: $stopAtEpisode) { Label("Dừng ở tập đã chọn", systemImage: "stop.circle.fill") }.tint(Color.cinemaAccent)
-                    if stopAtEpisode { Picker("Tập dừng", selection: $stopAtEpisodeIndex) { ForEach(video.episodes.indices, id: \.self) { index in Text(video.episodes[index].name).tag(index) } }.pickerStyle(.menu).tint(Color.cinemaAccent) }
-                    HStack { Label("Tự dừng phát", systemImage: "moon.zzz.fill"); Spacer(); Picker("Tự dừng", selection: $stopTimer) { ForEach(TVStopTimer.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent) }
-                    Divider().overlay(.white.opacity(0.15))
-                    Button { withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) { advancedSettings.toggle() } } label: { HStack { Label("Advanced Settings", systemImage: "slider.horizontal.3"); Spacer(); Image(systemName: advancedSettings ? "chevron.up" : "chevron.down") } }.buttonStyle(.plain).foregroundStyle(.white)
+                Color.black.opacity(0.5).ignoresSafeArea().onTapGesture {
+                    withAnimation(Motion.sheet) { settingsOpen = false }
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Image(systemName: "gearshape.fill").foregroundStyle(Color.auroraViolet)
+                        Text("Cài đặt video").font(.auroraDisplay(18))
+                        Spacer()
+                        Button { withAnimation(Motion.sheet) { settingsOpen = false } } label: {
+                            Image(systemName: "xmark")
+                                .frame(width: 32, height: 32)
+                                .background(Color.white.opacity(0.08), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text("QUICK CONTROLS")
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(1.1)
+                        .foregroundStyle(Color.auroraViolet)
+                    Toggle(isOn: $subtitlePreferences.enabled) { Label("Phụ đề", systemImage: "captions.bubble.fill") }
+                        .tint(Color.auroraViolet)
+                    Toggle(isOn: $autoNext) { Label("Tự động chuyển tập", systemImage: "forward.end.fill") }
+                        .tint(Color.auroraViolet)
+                    Toggle(isOn: $stopAtEpisode) { Label("Dừng ở tập đã chọn", systemImage: "stop.circle.fill") }
+                        .tint(Color.auroraViolet)
+                    if stopAtEpisode {
+                        Picker("Tập dừng", selection: $stopAtEpisodeIndex) {
+                            ForEach(video.episodes.indices, id: \.self) { index in
+                                Text(video.episodes[index].name).tag(index)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Color.auroraViolet)
+                    }
+                    HStack {
+                        Label("Tự dừng phát", systemImage: "moon.zzz.fill")
+                        Spacer()
+                        Picker("Tự dừng", selection: $stopTimer) {
+                            ForEach(TVStopTimer.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .tint(Color.auroraViolet)
+                    }
+                    Divider().overlay(Color.white.opacity(0.14))
+                    Button {
+                        withAnimation(Motion.sheet) { advancedSettings.toggle() }
+                    } label: {
+                        HStack {
+                            Label("Advanced Settings", systemImage: "slider.horizontal.3")
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .rotationEffect(.degrees(advancedSettings ? 180 : 0))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
                     if advancedSettings {
                         subtitlePreview
-                        ScrollView(.vertical, showsIndicators: false) { SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true) }.frame(maxHeight: 330)
+                        ScrollView(.vertical, showsIndicators: false) {
+                            SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true)
+                        }
+                        .frame(maxHeight: 330)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                }.foregroundStyle(.white).padding(18).frame(width: min(380, max(300, proxy.size.width - 24)), alignment: .topLeading).frame(maxHeight: .infinity, alignment: .topLeading).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous)).background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8)).shadow(color: .black.opacity(0.45), radius: 28, x: -8, y: 12).padding(.top, max(14, proxy.safeAreaInsets.top + 8)).padding(.trailing, max(14, proxy.safeAreaInsets.trailing + 10)).padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 8))
+                }
+                .foregroundStyle(.white)
+                .padding(18)
+                .frame(width: min(390, max(300, proxy.size.width - 24)), alignment: .topLeading)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(Color.auroraRaised.opacity(0.97))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                        }
+                        .shadow(color: .black.opacity(0.55), radius: 30, x: -8, y: 14)
+                }
+                .padding(.top, max(14, proxy.safeAreaInsets.top + 8))
+                .padding(.trailing, max(14, proxy.safeAreaInsets.trailing + 10))
+                .padding(.bottom, max(14, proxy.safeAreaInsets.bottom + 8))
             }
-        }.ignoresSafeArea()
+        }
+        .ignoresSafeArea()
     }
 
     private var subtitlePreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("XEM TRƯỚC REALTIME").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(Color.cinemaAccent)
+        VStack(alignment: .leading, spacing: 7) {
+            Text("XEM TRƯỚC REALTIME")
+                .font(.system(size: 8, weight: .black, design: .rounded))
+                .tracking(1)
+                .foregroundStyle(Color.auroraViolet)
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(height: 92)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(LinearGradient(colors: [Color.auroraSky.opacity(0.4), .black.opacity(0.92)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 96)
                 Text(subtitlePreferences.bilingual ? "Đây là phụ đề xem trước\nThis is a bilingual preview" : "Đây là phụ đề xem trước")
-                    .font(subtitlePreferences.font).foregroundStyle(subtitlePreferences.textColor).multilineTextAlignment(subtitlePreferences.textAlignment).frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center).padding(.horizontal, 12).padding(.bottom, 10)
-                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth).shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
-            }.clipShape(RoundedRectangle(cornerRadius: 14))
+                    .font(subtitlePreferences.font)
+                    .foregroundStyle(subtitlePreferences.textColor)
+                    .multilineTextAlignment(subtitlePreferences.textAlignment)
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
+                    .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 
     private func loadCurrent() {
         guard let episode, episode.qualities.indices.contains(qualityIndex), let quality, let url = quality.streamURL else { return }
-        playback.load(url); playback.setVolume(volume); playback.setMuted(isMuted)
+        playback.load(url)
+        playback.setVolume(volume)
+        playback.setMuted(isMuted)
         subtitles.load(url: quality.subtitleURL ?? quality.languageSubtitleTracks.first?.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
     }
-    private func moveEpisode(_ offset: Int) { let next = episodeIndex + offset; guard video.episodes.indices.contains(next) else { playback.togglePlayback(); return }; episodeIndex = next }
-    private func skip(_ seconds: Double) { let now = playback.player.currentTime().seconds; playback.player.seek(to: CMTime(seconds: max(0, now + seconds), preferredTimescale: 600)) }
-    private func scheduleStop() { stopTask?.cancel(); guard let seconds = stopTimer.seconds else { return }; stopTask = Task { @MainActor in try? await Task.sleep(for: .seconds(seconds)); guard !Task.isCancelled else { return }; playback.pause() } }
-    private func scheduleHide() { hideTask?.cancel(); hideTask = Task { @MainActor in try? await Task.sleep(for: .seconds(4)); guard !Task.isCancelled else { return }; withAnimation { controlsVisible = false } } }
+
+    private func moveEpisode(_ offset: Int) {
+        let next = episodeIndex + offset
+        guard video.episodes.indices.contains(next) else { playback.togglePlayback(); return }
+        episodeIndex = next
+    }
+
+    private func skip(_ seconds: Double) {
+        let now = playback.player.currentTime().seconds
+        playback.player.seek(to: CMTime(seconds: max(0, now + seconds), preferredTimescale: 600))
+    }
+
+    private func scheduleStop() {
+        stopTask?.cancel()
+        guard let seconds = stopTimer.seconds else { return }
+        stopTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            playback.pause()
+        }
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation { controlsVisible = false }
+        }
+    }
 }
+
+// MARK: - Live stream row (legacy list style)
 
 private struct TVStreamRow: View {
     let stream: TvStream
@@ -922,19 +1455,29 @@ private struct TVStreamRow: View {
         Button(action: action) {
             HStack(spacing: 13) {
                 PosterArt(url: stream.posterURL)
-                    .frame(width: 76, height: 48).clipped().clipShape(RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(stream.name).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                    HStack(spacing: 5) { Circle().fill(stream.isOnline ? .green : .orange).frame(width: 6, height: 6); Text(stream.isOnline ? "Trực tiếp" : "Nguồn chưa ổn định") }
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 84, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(stream.name)
+                        .font(.auroraLabel(14, weight: .bold))
+                        .foregroundStyle(.white)
+                    HStack(spacing: 6) {
+                        LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6)
+                        Text(stream.isOnline ? "Trực tiếp" : "Nguồn chưa ổn định")
+                            .font(.auroraBody(11))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    }
                 }
-                Spacer()
-                Image(systemName: isSelected ? "play.circle.fill" : "play.circle").font(.system(size: 24)).foregroundStyle(isSelected ? Color.cinemaAccent : .white.opacity(0.55))
+                Spacer(minLength: 0)
+                Image(systemName: isSelected ? "play.circle.fill" : "play.circle")
+                    .font(.system(size: 24))
+                    .foregroundStyle(isSelected ? Color.auroraViolet : .white.opacity(0.55))
             }
             .padding(13)
-            .background(isSelected ? Color.cinemaAccent.opacity(0.14) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(isSelected ? Color.cinemaAccent.opacity(0.55) : .white.opacity(0.08), lineWidth: 1))
-        }.buttonStyle(.plain)
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.auroraPress(scale: 0.98))
+        .auroraCard(cornerRadius: 20, tint: isSelected ? .auroraViolet : .auroraSky, glow: isSelected, fill: isSelected ? 1 : 0.55)
     }
 }
 
@@ -948,10 +1491,16 @@ private struct TVNativeVideoSurface: UIViewRepresentable {
     let fit: TVVideoFit
     let pipCoordinator: PictureInPictureCoordinator
     func makeUIView(context: Context) -> TVPlayerLayerView {
-        let view = TVPlayerLayerView(); view.backgroundColor = .black; view.playerLayer.player = player; view.playerLayer.videoGravity = fit.gravity
-        pipCoordinator.attach(to: view.playerLayer); return view
+        let view = TVPlayerLayerView()
+        view.backgroundColor = .black
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = fit.gravity
+        pipCoordinator.attach(to: view.playerLayer)
+        return view
     }
     func updateUIView(_ view: TVPlayerLayerView, context: Context) {
-        view.playerLayer.player = player; view.playerLayer.videoGravity = fit.gravity; pipCoordinator.attach(to: view.playerLayer)
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = fit.gravity
+        pipCoordinator.attach(to: view.playerLayer)
     }
 }

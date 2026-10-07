@@ -13,22 +13,22 @@ struct ResumeMovieScreen: View {
 
     var body: some View {
         ZStack {
-            Color.cinemaInk.ignoresSafeArea()
-            if store.detailLoading {
-                ProgressView("Đang tải lại nguồn phát…")
-                    .tint(.cinemaAccent)
-                    .foregroundStyle(.white)
-            } else if let error = resumeError ?? store.detailError {
-                StateMessage(icon: "wifi.exclamationmark", title: "Không thể tải nguồn phát", detail: error, actionTitle: "Thử lại") {
-                    resumeError = nil
-                    resumeStarted = false
-                    store.loadDetail(slug: record.movie.slug)
+            CinemaBackground()
+            Group {
+                if store.detailLoading {
+                    ResumeLoader(title: "Đang tải lại nguồn phát…", subtitle: record.movie.name)
+                } else if let error = resumeError ?? store.detailError {
+                    StateMessage(icon: "wifi.exclamationmark", title: "Không thể tải nguồn phát", detail: error, actionTitle: "Thử lại") {
+                        resumeError = nil
+                        resumeStarted = false
+                        store.loadDetail(slug: record.movie.slug)
+                    }
+                    .padding(.horizontal, 24)
+                } else {
+                    ResumeLoader(title: "Đang mở phim…", subtitle: record.movie.name)
                 }
-            } else {
-                ProgressView("Đang mở phim…")
-                    .tint(.cinemaAccent)
-                    .foregroundStyle(.white)
             }
+            .auroraReveal(0)
         }
         .task(id: record.movie.slug) {
             store.loadDetail(slug: record.movie.slug)
@@ -92,5 +92,52 @@ struct ResumeMovieScreen: View {
         loadedMovie = movie
         resumeStarted = true
         showPlayer = true
+    }
+}
+
+/// Animated "resuming" indicator: a rotating aurora ring around a film glyph.
+private struct ResumeLoader: View {
+    let title: String
+    let subtitle: String
+    @State private var spin = false
+    @State private var breathe = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.1), lineWidth: 3)
+                    .frame(width: 92, height: 92)
+                Circle()
+                    .trim(from: 0, to: 0.32)
+                    .stroke(LinearGradient.auroraPrimary, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 92, height: 92)
+                    .rotationEffect(.degrees(spin ? 360 : 0))
+                Circle()
+                    .fill(Color.auroraViolet.opacity(0.22))
+                    .frame(width: 62, height: 62)
+                    .blur(radius: 12)
+                    .scaleEffect(breathe ? 1.14 : 0.9)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 22, weight: .black))
+                    .foregroundStyle(LinearGradient.auroraPrimary)
+                    .offset(x: 1)
+            }
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.auroraLabel(14, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, 30)
+        .onAppear {
+            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { spin = true }
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { breathe = true }
+        }
     }
 }

@@ -31,13 +31,11 @@ struct MovieDetailScreen: View {
             ZStack {
                 CinemaBackground()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 24) {
                         if let movie {
                             detailContent(movie, width: contentWidth)
                         } else if store.detailLoading {
-                            ProgressView("Đang tải chi tiết phim…")
-                                .tint(.cinemaAccent)
-                                .foregroundStyle(.white.opacity(0.65))
+                            loadingState
                                 .frame(width: contentWidth)
                                 .padding(.top, 150)
                         } else {
@@ -54,19 +52,9 @@ struct MovieDetailScreen: View {
                 .scrollIndicators(.hidden)
             }
             .overlay(alignment: .topLeading) {
-                Button { dismissDetail() } label: {
-                    Label("Trở lại", systemImage: "chevron.left")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(.black.opacity(0.5), in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 0.7))
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 20)
-                .padding(.top, 8)
-                .accessibilityLabel("Trở lại danh sách phim")
+                AuroraBackButton(title: "Trở lại") { dismissDetail() }
+                    .padding(.leading, 20)
+                    .padding(.top, 8)
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 18, coordinateSpace: .global)
@@ -143,115 +131,127 @@ struct MovieDetailScreen: View {
         }
     }
 
+    private var loadingState: some View {
+        VStack(spacing: 16) {
+            SkeletonBlock(cornerRadius: 30)
+                .frame(height: 430)
+            SkeletonPosterGrid(count: 4)
+        }
+    }
+
+    // MARK: - Content
+
     @ViewBuilder private func detailContent(_ movie: Movie, width: CGFloat) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            PosterArt(url: movie.backdropURL).frame(width: width, height: 430)
-            LinearGradient(colors: [.clear, Color.cinemaInk.opacity(0.25), Color.cinemaInk], startPoint: .center, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 9) {
-                if let quality = movie.quality { Text(quality.uppercased()).font(.system(size: 9, weight: .black)).tracking(1).foregroundStyle(Color.cinemaAccent).padding(.horizontal, 9).padding(.vertical, 6).background(.black.opacity(0.42), in: Capsule()) }
-                Text(movie.name).font(.system(size: 30, weight: .black, design: .rounded)).tracking(-0.7).foregroundStyle(.white).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                if let origin = movie.originName, !origin.isEmpty { Text(origin).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.72)).lineLimit(2) }
-                HStack(spacing: 8) {
-                    if let year = movie.year { metaChip(String(year)) }
-                    if let time = movie.time, !time.isEmpty { metaChip(time) }
-                    if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
-                    if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
-                }
-                Button { store.recordLocalHistory(movie: movie, episode: episode, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil); showPlayer = true } label: {
-                    Label(episode == nil ? "Chưa có nguồn phát" : "Xem phim", systemImage: "play.fill")
-                        .font(.system(size: 13, weight: .black, design: .rounded)).foregroundStyle(Color.cinemaInk)
-                        .padding(.horizontal, 20).padding(.vertical, 13).background(Color.cinemaAccent, in: Capsule())
-                }
-                .buttonStyle(.plain).disabled(episode == nil).opacity(episode == nil ? 0.5 : 1).padding(.top, 5)
-            }
-            .padding(22)
-        }
-        .frame(width: width, height: 430, alignment: .bottomLeading)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
-        .overlay(alignment: .topTrailing) {
-            Button { store.toggleFavorite(movie) } label: {
-                Image(systemName: store.isFavorite(movie) ? "heart.fill" : "heart")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(store.isFavorite(movie) ? Color.cinemaAccent : .white)
-                    .frame(width: 46, height: 46)
-                    .background(.black.opacity(0.48), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(16)
-            .accessibilityLabel(store.isFavorite(movie) ? "Bỏ yêu thích" : "Thêm vào yêu thích")
-        }
+        heroSection(movie, width: width)
+            .auroraReveal(0)
 
         if let description = movie.description, !description.isEmpty {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
                 SectionHeading(eyebrow: "CÂU CHUYỆN", title: "Nội dung phim")
                 Text(description)
-                    .font(.system(size: 13))
-                    .lineSpacing(5)
-                    .foregroundStyle(.white.opacity(0.68))
+                    .font(.auroraBody(13))
+                    .lineSpacing(6)
+                    .foregroundStyle(.white.opacity(0.72))
                     .frame(width: width, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(width: width, alignment: .leading)
+            .auroraReveal(1)
         }
 
         HStack(spacing: 8) {
-            if let rating = movie.rating, rating > 0 { metricPill(icon: "star.fill", title: "Đánh giá", value: String(format: "%.1f/10", rating)) }
-            if let views = movie.views { metricPill(icon: "eye.fill", title: "Lượt xem", value: formattedViews(views)) }
-            if let status = movie.status, !status.isEmpty { metricPill(icon: "circle.fill", title: "Cập nhật", value: status) }
+            if let rating = movie.rating, rating > 0 {
+                metricPill(icon: "star.fill", title: "Đánh giá", value: String(format: "%.1f/10", rating), tint: .auroraAmber)
+            }
+            if let views = movie.views {
+                metricPill(icon: "eye.fill", title: "Lượt xem", value: formattedViews(views), tint: .auroraSky)
+            }
+            if let status = movie.status, !status.isEmpty {
+                metricPill(icon: "circle.fill", title: "Cập nhật", value: status, tint: .auroraMint)
+            }
         }
         .frame(width: width, alignment: .leading)
+        .auroraReveal(2)
 
         if let profiles = movie.actorProfiles, !profiles.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 13) {
                 SectionHeading(eyebrow: "DIỄN VIÊN", title: "Dàn diễn viên")
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 13) {
                         ForEach(profiles) { profile in actorCard(profile) }
                     }
+                    .padding(.vertical, 4)
                 }
+                .scrollClipDisabled()
             }
             .frame(width: width, alignment: .leading)
+            .auroraReveal(3)
         }
 
         if !servers.isEmpty {
-            VStack(alignment: .leading, spacing: 13) {
+            VStack(alignment: .leading, spacing: 14) {
                 SectionHeading(eyebrow: "SẴN SÀNG PHÁT", title: "Tập & nguồn")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(servers.indices, id: \.self) { index in
                             let server = servers[index]
-                            Button { selectedServer = index } label: {
-                                Label(server.name, systemImage: server.isAi ? "sparkles" : "play.rectangle")
-                                    .font(.system(size: 10, weight: .bold)).foregroundStyle(selectedServer == index ? Color.cinemaInk : .white.opacity(0.76))
-                                    .padding(.horizontal, 13).padding(.vertical, 10)
-                                    .background(selectedServer == index ? Color.cinemaAccent : Color.white.opacity(0.07), in: Capsule())
-                            }.buttonStyle(.plain)
+                            serverChip(server, selected: selectedServer == index) {
+                                withAnimation(Motion.gentle) { selectedServer = index }
+                            }
                         }
                     }
+                    .padding(.vertical, 2)
                 }
+                .scrollClipDisabled()
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 9) {
                     ForEach(episodes.indices, id: \.self) { index in
                         let item = episodes[index]
-                        Button { selectedEpisode = index; store.recordLocalHistory(movie: movie, episode: item, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil); showPlayer = true } label: {
+                        Button {
+                            selectedEpisode = index
+                            store.recordLocalHistory(movie: movie, episode: item, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil)
+                            showPlayer = true
+                        } label: {
                             HStack(spacing: 10) {
-                                Text(String(format: "%02d", index + 1)).font(.system(size: 11, weight: .black, design: .rounded)).foregroundStyle(selectedEpisode == index ? Color.cinemaInk : Color.cinemaAccent)
-                                Text(item.name).font(.system(size: 11, weight: .bold)).lineLimit(2).multilineTextAlignment(.leading)
+                                Text(String(format: "%02d", index + 1))
+                                    .font(.system(size: 11, weight: .black, design: .rounded))
+                                    .foregroundStyle(selectedEpisode == index ? Color.auroraVoid : Color.auroraViolet)
+                                Text(item.name)
+                                    .font(.auroraLabel(11, weight: .bold))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)
-                                if selectedEpisode == index { Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(Color.cinemaInk) }
+                                if selectedEpisode == index {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Color.auroraVoid)
+                                        .transition(.scale.combined(with: .opacity))
+                                }
                             }
-                            .foregroundStyle(selectedEpisode == index ? Color.cinemaInk : .white.opacity(0.84))
-                            .padding(.horizontal, 12).frame(minHeight: 50)
-                            .background(selectedEpisode == index ? Color.cinemaAccent : Color.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 16))
+                            .foregroundStyle(selectedEpisode == index ? Color.auroraVoid : .white.opacity(0.86))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 52)
+                            .background {
+                                if selectedEpisode == index {
+                                    RoundedRectangle(cornerRadius: 17, style: .continuous).fill(LinearGradient.auroraPrimary)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 17, style: .continuous).fill(Color.white.opacity(0.075))
+                                }
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(selectedEpisode == index ? 0.3 : 0.09), lineWidth: 0.8)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.auroraPress(scale: 0.96))
+                        .animation(Motion.gentle, value: selectedEpisode)
                     }
                 }
             }
             .frame(width: width, alignment: .leading)
+            .auroraReveal(4)
         }
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 13) {
             SectionHeading(eyebrow: "THÔNG TIN", title: "Về bộ phim")
             VStack(spacing: 0) {
                 metadataRow("Thể loại", movie.categories?.map(\.name).joined(separator: ", "))
@@ -262,11 +262,13 @@ struct MovieDetailScreen: View {
                 metadataRow("Lượt xem", movie.views.map { formattedViews($0) })
                 metadataRow("Cập nhật", movie.updatedAt.map { formattedDate($0) })
             }
-            .padding(15).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.045))
+            .padding(16)
+            .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.6)
         }
         .frame(width: width, alignment: .leading)
+        .auroraReveal(5)
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 13) {
             SectionHeading(eyebrow: "THÔNG TIN BỔ SUNG", title: "Thông tin khác")
             VStack(spacing: 0) {
                 metadataRow("Tên khác", movie.alternativeNames?.joined(separator: ", "))
@@ -275,59 +277,191 @@ struct MovieDetailScreen: View {
                 metadataRow("TMDB", movie.tmdbId)
                 metadataRow("IMDB", movie.imdbId)
             }
-            .padding(15).cinemaGlass(in: RoundedRectangle(cornerRadius: 22), tint: .white.opacity(0.045))
+            .padding(16)
+            .auroraCard(cornerRadius: 24, tint: .auroraSky, fill: 0.6)
         }
         .frame(width: width, alignment: .leading)
+        .auroraReveal(6)
+    }
+
+    private func heroSection(_ movie: Movie, width: CGFloat) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            PosterArt(url: movie.backdropURL).frame(width: width, height: 440)
+            LinearGradient(
+                colors: [Color.clear, Color.auroraInk.opacity(0.3), Color.auroraInk],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            VStack(alignment: .leading, spacing: 10) {
+                if let quality = movie.quality {
+                    Text(quality.uppercased())
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(1)
+                        .foregroundStyle(Color.auroraVoid)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(LinearGradient.auroraPrimary))
+                }
+                Text(movie.name)
+                    .font(.auroraDisplay(30))
+                    .tracking(-0.7)
+                    .foregroundStyle(.white)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
+                if let origin = movie.originName, !origin.isEmpty {
+                    Text(origin)
+                        .font(.auroraBody(13))
+                        .foregroundStyle(.white.opacity(0.74))
+                        .lineLimit(2)
+                }
+                HStack(spacing: 8) {
+                    if let year = movie.year { metaChip(String(year)) }
+                    if let time = movie.time, !time.isEmpty { metaChip(time) }
+                    if let lang = movie.lang, !lang.isEmpty { metaChip(lang) }
+                    if let rating = movie.rating, rating > 0 { metaChip(String(format: "★ %.1f", rating)) }
+                }
+                Button {
+                    store.recordLocalHistory(movie: movie, episode: episode, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil)
+                    showPlayer = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                        Text(episode == nil ? "Chưa có nguồn phát" : "Xem phim")
+                    }
+                    .font(.auroraLabel(13, weight: .black))
+                    .foregroundStyle(Color.auroraVoid)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 14)
+                    .background(Capsule().fill(LinearGradient.auroraPrimary))
+                    .auroraHalo(.auroraViolet, radius: 22, opacity: episode == nil ? 0 : 0.5)
+                }
+                .buttonStyle(.auroraPress(scale: 0.96))
+                .disabled(episode == nil)
+                .opacity(episode == nil ? 0.5 : 1)
+                .padding(.top, 6)
+            }
+            .padding(22)
+        }
+        .frame(width: width, height: 440, alignment: .bottomLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .strokeBorder(LinearGradient.auroraVeil, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.5), radius: 24, y: 14)
+        .shadow(color: Color.auroraViolet.opacity(0.22), radius: 28, y: 12)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                withAnimation(Motion.tap) { store.toggleFavorite(movie) }
+            } label: {
+                Image(systemName: store.isFavorite(movie) ? "heart.fill" : "heart")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(store.isFavorite(movie) ? Color.auroraPink : .white)
+                    .frame(width: 46, height: 46)
+                    .contentTransition(.symbolEffect(.replace))
+                    .background {
+                        Circle().fill(Color.black.opacity(0.42))
+                    }
+                    .overlay {
+                        Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8)
+                    }
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .padding(16)
+            .accessibilityLabel(store.isFavorite(movie) ? "Bỏ yêu thích" : "Thêm vào yêu thích")
+        }
+    }
+
+    private func serverChip(_ server: MovieServer, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: server.isAi ? "sparkles" : "play.rectangle.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text(server.name)
+                    .font(.auroraLabel(10, weight: .bold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(selected ? Color.auroraVoid : .white.opacity(0.78))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background {
+                if selected {
+                    Capsule().fill(LinearGradient.auroraPrimary)
+                } else {
+                    Capsule().fill(Color.white.opacity(0.07))
+                }
+            }
+            .overlay {
+                Capsule().strokeBorder(Color.white.opacity(selected ? 0.3 : 0.09), lineWidth: 0.8)
+            }
+        }
+        .buttonStyle(.auroraPress(scale: 0.94))
     }
 
     private func metaChip(_ text: String) -> some View {
-        Text(text).font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.86)).padding(.horizontal, 9).padding(.vertical, 6).background(.white.opacity(0.12), in: Capsule())
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7))
     }
 
-    private func metricPill(icon: String, title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func metricPill(icon: String, title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
             Label(title, systemImage: icon)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white.opacity(0.52))
+                .foregroundStyle(tint.opacity(0.9))
                 .lineLimit(1)
             Text(value)
-                .font(.system(size: 11, weight: .black, design: .rounded))
+                .font(.auroraLabel(11, weight: .black))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15))
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.7)
+        }
     }
 
     private func actorCard(_ profile: MovieActorProfile) -> some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 8) {
             AsyncImage(url: profile.imageURL) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 case .empty, .failure:
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Color.cinemaAccent.opacity(0.72))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.white.opacity(0.08))
+                    ZStack {
+                        Color.white.opacity(0.08)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundStyle(Color.auroraViolet.opacity(0.75))
+                    }
                 @unknown default:
                     EmptyView()
                 }
             }
-            .frame(width: 72, height: 88)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14), lineWidth: 0.7))
+            .frame(width: 76, height: 92)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
+            }
+            .shadow(color: Color.black.opacity(0.35), radius: 12, y: 7)
 
             Text(profile.name)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.84))
+                .font(.auroraLabel(10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.86))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .frame(width: 82)
+                .frame(width: 86)
         }
     }
 
@@ -351,14 +485,19 @@ struct MovieDetailScreen: View {
 
     private func metadataRow(_ label: String, _ value: String?) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.48)).frame(width: 75, alignment: .leading)
+            Text(label)
+                .font(.auroraBody(10, weight: .semibold))
+                .foregroundStyle(Color.auroraTextTertiary)
+                .frame(width: 76, alignment: .leading)
             Text(value?.isEmpty == false ? value! : "Đang cập nhật")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.white.opacity(value?.isEmpty == false ? 0.82 : 0.38))
+                .font(.auroraBody(10))
+                .foregroundStyle(.white.opacity(value?.isEmpty == false ? 0.84 : 0.36))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.07)).frame(height: 0.5) }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+        }
     }
 }

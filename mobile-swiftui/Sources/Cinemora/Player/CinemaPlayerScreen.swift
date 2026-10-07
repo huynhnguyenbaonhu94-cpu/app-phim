@@ -534,7 +534,17 @@ struct CinemaPlayerScreen: View {
                     VStack(spacing: 0) {
                         topBar
                         Spacer()
-                        if playback.isLoading && !playback.isSeeking { ProgressView("Đang tải nguồn phát…").tint(.white).foregroundStyle(.white).padding(18).cinemaGlass(in: Capsule(), tint: .black.opacity(0.42)) }
+                        if playback.isLoading && !playback.isSeeking {
+                            HStack(spacing: 10) {
+                                ProgressView().tint(.white)
+                                Text("Đang tải nguồn phát…")
+                                    .font(.auroraBody(12, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 13)
+                            .auroraSmoke(in: Capsule(), strength: 0.6)
+                        }
                         if let error = playback.errorMessage {
                             errorCard(error)
                         } else if episode?.streamURL == nil && episode?.embedURL == nil {
@@ -598,9 +608,9 @@ struct CinemaPlayerScreen: View {
                     }
                     .onEnded { _ in finishAdjustmentGesture() }
             )
-            .animation(.spring(response: 0.38, dampingFraction: 0.86), value: picker != nil)
-            .animation(.easeInOut(duration: 0.2), value: controlsVisible)
-            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: settingsOpen)
+            .animation(Motion.sheet, value: picker != nil)
+            .animation(.easeInOut(duration: 0.22), value: controlsVisible)
+            .animation(Motion.sheet, value: settingsOpen)
             .onChange(of: episodeIndex) { _, _ in loadCurrentEpisode() }
             .onChange(of: serverIndex) { _, _ in
                 if episodeIndex != 0 { episodeIndex = 0 }
@@ -662,63 +672,106 @@ struct CinemaPlayerScreen: View {
 
     private var topBar: some View {
         VStack(alignment: .trailing, spacing: 9) {
-            HStack(spacing: 10) {
-            Button { dismiss() } label: { Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42) }
-                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Trở lại")
-            VStack(alignment: .leading, spacing: 3) {
-                Text(movie.name).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
-                Text("\(episode?.name ?? "Chọn tập")  ·  \(server?.name ?? "Nguồn")").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.66)).lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            Button { withAnimation { picker = .episodes }; controlsVisible = true } label: { Image(systemName: "list.bullet").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
-                .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Danh sách tập")
-            if servers.count > 1 {
-                Button { withAnimation { picker = .sources }; controlsVisible = true } label: { Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42) }
-                    .buttonStyle(.plain).foregroundStyle(.white).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Chọn nguồn phát")
-            }
-            if pictureInPictureEnabled && movie.allowPip != false && pipCoordinator.isSupported {
-                Button { pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start(); scheduleHide() } label: {
-                    Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
+            HStack(spacing: 9) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 15, weight: .bold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
+                .accessibilityLabel("Trở lại")
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(movie.name).font(.auroraLabel(12, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text("\(episode?.name ?? "Chọn tập")  ·  \(server?.name ?? "Nguồn")")
+                        .font(.auroraBody(9))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 13)
+                .frame(height: 42)
+                .auroraSmoke(in: Capsule(), strength: 0.4)
+
+                Spacer(minLength: 8)
+
+                Button { withAnimation(Motion.sheet) { picker = .episodes }; controlsVisible = true } label: {
+                    Image(systemName: "list.bullet").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
+                .accessibilityLabel("Danh sách tập")
+
+                if servers.count > 1 {
+                    Button { withAnimation(Motion.sheet) { picker = .sources }; controlsVisible = true } label: {
+                        Image(systemName: "square.stack.3d.up").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.auroraPress(scale: 0.9))
+                    .foregroundStyle(.white)
+                    .auroraSmoke(strength: 0.4)
+                    .accessibilityLabel("Chọn nguồn phát")
+                }
+
+                if pictureInPictureEnabled && movie.allowPip != false && pipCoordinator.isSupported {
+                    Button {
+                        pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start()
+                        scheduleHide()
+                    } label: {
+                        Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
+                            .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.auroraPress(scale: 0.9))
+                    .foregroundStyle(pipCoordinator.isActive ? Color.auroraVoid : .white)
+                    .background {
+                        Circle().fill(pipCoordinator.isActive ? AnyShapeStyle(LinearGradient.auroraPrimary) : AnyShapeStyle(Color.black.opacity(0.4)))
+                    }
+                    .overlay { Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8) }
+                    .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
+                }
+
+                Button {
+                    withAnimation(Motion.sheet) { relatedRecommendationsVisible = true }
+                    hideTask?.cancel()
+                } label: {
+                    Image(systemName: "sparkles.rectangle.stack")
                         .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
                 }
-                .buttonStyle(.plain).foregroundStyle(pipCoordinator.isActive ? Color.cinemaInk : .white)
-                .background(pipCoordinator.isActive ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
-                .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
-            }
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = true }
-                hideTask?.cancel()
-            } label: {
-                Image(systemName: "sparkles.rectangle.stack")
-                    .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .buttonStyle(.plain).foregroundStyle(.white)
-            .cinemaGlass(in: Circle(), tint: .black.opacity(0.36))
-            .accessibilityLabel("Video liên quan")
-            quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
-            quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    if !visibleSettingsTabs.contains(settingsTab) {
-                        settingsTab = visibleSettingsTabs[0]
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
+                .accessibilityLabel("Video liên quan")
+
+                quickControl(icon: "rectangle.on.rectangle", title: "Tỷ lệ", value: videoFit.rawValue, menu: .videoFit)
+                quickControl(icon: "speedometer", title: "Tốc độ", value: playbackRateLabel, menu: .playbackRate)
+
+                Button {
+                    withAnimation(Motion.sheet) {
+                        if !visibleSettingsTabs.contains(settingsTab) {
+                            settingsTab = visibleSettingsTabs[0]
+                        }
+                        settingsOpen.toggle()
+                        quickMenu = nil
+                        volumePopoverOpen = false
                     }
-                    settingsOpen.toggle()
-                    quickMenu = nil
-                    volumePopoverOpen = false
+                    if settingsOpen { hideTask?.cancel() } else { scheduleHide() }
+                } label: {
+                    Image(systemName: "gearshape.fill").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
                 }
-                if settingsOpen { hideTask?.cancel() } else { scheduleHide() }
-            } label: {
-                Image(systemName: "gearshape.fill").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .foregroundStyle(settingsOpen ? Color.cinemaInk : .white).buttonStyle(.plain)
-            .background(settingsOpen ? Color.cinemaAccent : Color.black.opacity(0.36), in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(settingsOpen ? 0.35 : 0.14), lineWidth: 0.8))
-            .accessibilityLabel("Cài đặt phát video")
-            Button { lockControls() } label: {
-                Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
-            }
-            .foregroundStyle(.white).buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.36)).accessibilityLabel("Khóa điều khiển")
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(settingsOpen ? Color.auroraVoid : .white)
+                .background {
+                    Circle().fill(settingsOpen ? AnyShapeStyle(LinearGradient.auroraPrimary) : AnyShapeStyle(Color.black.opacity(0.4)))
+                }
+                .overlay { Circle().strokeBorder(Color.white.opacity(settingsOpen ? 0.35 : 0.16), lineWidth: 0.8) }
+                .accessibilityLabel("Cài đặt phát video")
+
+                Button { lockControls() } label: {
+                    Image(systemName: "lock").font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                }
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .foregroundStyle(.white)
+                .auroraSmoke(strength: 0.4)
+                .accessibilityLabel("Khóa điều khiển")
             }
             if let quickMenu { quickMenuPanel(quickMenu) }
         }
@@ -729,10 +782,10 @@ struct CinemaPlayerScreen: View {
             Image(systemName: "sparkles.tv.fill").font(.system(size: 13, weight: .black))
             Text("CINEMORA").font(.system(size: 10, weight: .black, design: .rounded)).tracking(1.1)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12).frame(height: 42)
-        .background(.black.opacity(0.36), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 0.8))
+        .foregroundStyle(LinearGradient.auroraPrimary)
+        .padding(.horizontal, 12)
+        .frame(height: 42)
+        .auroraSmoke(in: Capsule(), strength: 0.4)
         .accessibilityLabel("Cinemora")
     }
 
@@ -741,11 +794,12 @@ struct CinemaPlayerScreen: View {
             Image(systemName: "sparkles.tv.fill").font(.system(size: 12, weight: .black))
             Text("CINEMORA").font(.system(size: 9, weight: .black, design: .rounded)).tracking(1)
         }
-        .foregroundStyle(.white.opacity(0.82))
-        .padding(.horizontal, 10).frame(height: 32)
-        .background(.black.opacity(0.28), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.7))
-        .shadow(color: .black.opacity(0.28), radius: 5)
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .background(Capsule().fill(Color.black.opacity(0.34)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.7))
+        .shadow(color: .black.opacity(0.3), radius: 6)
     }
 
     private var playbackRateLabel: String {
@@ -773,7 +827,7 @@ struct CinemaPlayerScreen: View {
 
     private func quickControl(icon: String, title: String, value: String, menu: QuickMenu) -> some View {
         Button {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(Motion.sheet) {
                 quickMenu = quickMenu == menu ? nil : menu
                 settingsOpen = false
                 volumePopoverOpen = false
@@ -785,26 +839,42 @@ struct CinemaPlayerScreen: View {
                 Image(systemName: icon).font(.system(size: 14, weight: .bold))
                 Text(value).font(.system(size: 9, weight: .black, design: .rounded)).lineLimit(1)
             }
-            .foregroundStyle(quickMenu == menu ? Color.cinemaInk : .white)
-            .frame(width: 52, height: 42)
-            .background(quickMenu == menu ? Color.cinemaAccent : Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(quickMenu == menu ? 0.35 : 0.14), lineWidth: 0.8))
+            .foregroundStyle(quickMenu == menu ? Color.auroraVoid : .white)
+            .frame(width: 54, height: 42)
+            .background {
+                if quickMenu == menu {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(LinearGradient.auroraPrimary)
+                } else {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.4))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(quickMenu == menu ? 0.35 : 0.16), lineWidth: 0.8)
+            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.auroraPress(scale: 0.92))
         .accessibilityLabel(title)
         .accessibilityValue(value)
     }
 
     @ViewBuilder
     private func quickMenuPanel(_ menu: QuickMenu) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text(menu == .videoFit ? "TỶ LỆ KHUNG HÌNH" : "TỐC ĐỘ PHÁT")
-                    .font(.system(size: 9, weight: .black, design: .rounded)).tracking(1.2).foregroundStyle(Color.cinemaAccent)
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.auroraViolet)
                 Spacer(minLength: 20)
-                Button { withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }; scheduleHide() } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 24, height: 24)
-                }.buttonStyle(.plain).accessibilityLabel("Đóng lựa chọn")
+                Button {
+                    withAnimation(Motion.sheet) { quickMenu = nil }
+                    scheduleHide()
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Đóng lựa chọn")
             }
             if menu == .videoFit {
                 ForEach(VideoFit.allCases, id: \.self) { fit in
@@ -820,32 +890,44 @@ struct CinemaPlayerScreen: View {
                 }
             }
         }
-        .padding(12)
-        .frame(width: 260)
-        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+        .padding(13)
+        .frame(width: 266)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.auroraRaised.opacity(0.96))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                }
+                .shadow(color: .black.opacity(0.5), radius: 22, y: 12)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topTrailing)))
     }
 
     private func quickOption(title: String, detail: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button {
             action()
-            withAnimation(.easeOut(duration: 0.18)) { quickMenu = nil }
+            withAnimation(Motion.sheet) { quickMenu = nil }
             scheduleHide()
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(selected ? Color.cinemaAccent : .white.opacity(0.45))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(selected ? Color.auroraViolet : .white.opacity(0.45))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                    Text(detail).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.52))
+                    Text(title).font(.auroraLabel(12, weight: .bold)).foregroundStyle(.white)
+                    Text(detail).font(.auroraBody(9)).foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10).frame(minHeight: 39)
-            .background(selected ? Color.cinemaAccent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }.buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 42)
+            .background(
+                selected ? Color.auroraViolet.opacity(0.16) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func subtitleText(_ text: String) -> some View {
@@ -864,11 +946,11 @@ struct CinemaPlayerScreen: View {
     private var settingsOverlay: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topTrailing) {
-                Color.black.opacity(0.58)
+                Color.black.opacity(0.55)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }
+                        withAnimation(Motion.sheet) { settingsOpen = false }
                         scheduleHide()
                     }
                 settingsPanel(width: min(410, max(300, proxy.size.width - 28)))
@@ -881,44 +963,63 @@ struct CinemaPlayerScreen: View {
     }
 
     private func settingsPanel(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 9) {
-                Image(systemName: "gearshape.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.cinemaAccent)
-                Text("Cài đặt").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(.white)
+                Image(systemName: "gearshape.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.auroraViolet)
+                Text("Cài đặt").font(.auroraDisplay(17)).foregroundStyle(.white)
                 Spacer()
-                Button { withAnimation(.easeOut(duration: 0.18)) { settingsOpen = false }; scheduleHide() } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(width: 28, height: 28)
-                }.buttonStyle(.plain).background(.white.opacity(0.07), in: Circle()).accessibilityLabel("Đóng cài đặt")
+                Button {
+                    withAnimation(Motion.sheet) { settingsOpen = false }
+                    scheduleHide()
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .background(Color.white.opacity(0.08), in: Circle())
+                .accessibilityLabel("Đóng cài đặt")
             }
             settingsTabs
-            Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+            Rectangle().fill(Color.white.opacity(0.09)).frame(height: 1)
             settingsTabContent
         }
         .padding(18)
         .frame(width: width, alignment: .topLeading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.48), radius: 28, x: -8, y: 12)
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.auroraRaised.opacity(0.97))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                }
+                .shadow(color: .black.opacity(0.55), radius: 30, x: -8, y: 14)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .onTapGesture { }
     }
 
     private var settingsTabs: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             ForEach(visibleSettingsTabs) { tab in
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) { settingsTab = tab }
+                    withAnimation(Motion.gentle) { settingsTab = tab }
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: tab.icon).font(.system(size: 11, weight: .bold))
                         Text(tab.rawValue).font(.system(size: 8, weight: .bold, design: .rounded)).lineLimit(1)
                     }
-                    .foregroundStyle(effectiveSettingsTab == tab ? Color.cinemaInk : .white.opacity(0.6))
-                    .frame(maxWidth: .infinity).frame(height: 42)
-                    .background(effectiveSettingsTab == tab ? Color.cinemaAccent : .white.opacity(0.045), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }.buttonStyle(.plain)
+                    .foregroundStyle(effectiveSettingsTab == tab ? Color.auroraVoid : .white.opacity(0.62))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background {
+                        if effectiveSettingsTab == tab {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(LinearGradient.auroraPrimary)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.05))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -929,8 +1030,8 @@ struct CinemaPlayerScreen: View {
         case .audio:
             settingsRow(icon: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", title: "Âm lượng", detail: playback.isMuted ? "Đang tắt tiếng" : "\(Int(volume * 100))%") {
                 HStack(spacing: 7) {
-                    Slider(value: $volume, in: 0...1).tint(Color.cinemaAccent).frame(width: 130).onChange(of: volume) { _, value in playback.setVolume(value) }
-                    Button { playback.toggleMute() } label: { Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(Color.cinemaAccent) }.buttonStyle(.plain)
+                    Slider(value: $volume, in: 0...1).tint(Color.auroraViolet).frame(width: 130).onChange(of: volume) { _, value in playback.setVolume(value) }
+                    Button { playback.toggleMute() } label: { Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(Color.auroraViolet) }.buttonStyle(.plain)
                 }
             }
         case .subtitle:
@@ -938,7 +1039,8 @@ struct CinemaPlayerScreen: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     subtitlePreview
                     SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2)
-                }.frame(minHeight: 245, maxHeight: 390, alignment: .top)
+                }
+                .frame(minHeight: 245, maxHeight: 390, alignment: .top)
             }
         case .display:
             VStack(alignment: .leading, spacing: 10) {
@@ -953,44 +1055,76 @@ struct CinemaPlayerScreen: View {
                 Toggle(isOn: $pictureInPictureEnabled) {
                     settingsLabel(icon: "pip.enter", title: "Picture-in-Picture", detail: "Cho phép phát nổi khi rời trình phát")
                 }
-                .tint(Color.cinemaAccent)
+                .tint(Color.auroraViolet)
             }
         case .speed:
             VStack(alignment: .leading, spacing: 8) {
                 settingsLabel(icon: "speedometer", title: "Tốc độ phát", detail: "Đang chọn \(playbackRateLabel)")
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], spacing: 6) {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                        Button { playback.setPlaybackRate(Float(rate)); scheduleHide() } label: {
-                            Text(rate == 1 ? "Bình thường" : "\(formatRate(Float(rate)))x").font(.system(size: 14, weight: .bold)).foregroundStyle(playback.playbackRate == Float(rate) ? Color.cinemaInk : .white.opacity(0.78)).frame(maxWidth: .infinity).frame(height: 42).background(playback.playbackRate == Float(rate) ? Color.cinemaAccent : .white.opacity(0.06), in: RoundedRectangle(cornerRadius: 11))
-                        }.buttonStyle(.plain)
+                        Button {
+                            playback.setPlaybackRate(Float(rate))
+                            scheduleHide()
+                        } label: {
+                            Text(rate == 1 ? "Bình thường" : "\(formatRate(Float(rate)))x")
+                                .font(.auroraLabel(14, weight: .bold))
+                                .foregroundStyle(playback.playbackRate == Float(rate) ? Color.auroraVoid : .white.opacity(0.8))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background {
+                                    if playback.playbackRate == Float(rate) {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(LinearGradient.auroraPrimary)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06))
+                                    }
+                                }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         case .general:
             VStack(alignment: .leading, spacing: 10) {
-                settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") { Picker("Tự dừng phát", selection: $stopTimer) { ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) } }.labelsHidden().pickerStyle(.menu).tint(Color.cinemaAccent) }
+                settingsRow(icon: "moon.zzz.fill", title: "Tự dừng phát", detail: "Dừng sau một khoảng thời gian") {
+                    Picker("Tự dừng phát", selection: $stopTimer) {
+                        ForEach(StopTimer.allCases) { value in Text(value.rawValue).tag(value) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(Color.auroraViolet)
+                }
                 if let stopTimerRemaining {
-                    HStack(spacing: 7) { Image(systemName: "timer").foregroundStyle(Color.cinemaAccent); Text("Tự dừng sau \(formatCountdown(stopTimerRemaining))").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.white); Spacer() }
+                    HStack(spacing: 7) {
+                        Image(systemName: "timer").foregroundStyle(Color.auroraViolet)
+                        Text("Tự dừng sau \(formatCountdown(stopTimerRemaining))")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
                 }
                 Toggle(isOn: $stopAtEpisodeEnabled) {
                     settingsLabel(icon: "stop.circle.fill", title: "Dừng ở tập đã chọn", detail: "Tự chuyển đến tập mục tiêu rồi dừng")
-                }.tint(Color.cinemaAccent)
+                }
+                .tint(Color.auroraViolet)
                 if stopAtEpisodeEnabled { episodeStopSelector }
-                Toggle(isOn: $autoAdvanceEpisodes) { settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc") }.tint(Color.cinemaAccent)
+                Toggle(isOn: $autoAdvanceEpisodes) {
+                    settingsLabel(icon: "forward.end.fill", title: "Tự động chuyển tập", detail: "Phát tập kế tiếp khi tập hiện tại kết thúc")
+                }
+                .tint(Color.auroraViolet)
             }
         }
     }
 
     private var subtitlePreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text("XEM TRƯỚC REALTIME")
                 .font(.system(size: 8, weight: .black, design: .rounded))
                 .tracking(1)
-                .foregroundStyle(Color.cinemaAccent)
+                .foregroundStyle(Color.auroraViolet)
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(LinearGradient(colors: [.blue.opacity(0.34), .black.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(height: 92)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.auroraSky.opacity(0.38), .black.opacity(0.92)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(height: 96)
                 Text("Đây là phụ đề xem trước")
                     .font(subtitlePreferences.font)
                     .foregroundStyle(subtitlePreferences.textColor)
@@ -1005,21 +1139,30 @@ struct CinemaPlayerScreen: View {
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: -subtitlePreferences.outlineWidth)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
     private func settingsEmpty(icon: String, text: String) -> some View {
-        HStack(spacing: 9) { Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.cinemaAccent); Text(text).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.58)).fixedSize(horizontal: false, vertical: true) }
-            .padding(.vertical, 10)
+        HStack(spacing: 9) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.auroraViolet)
+            Text(text).font(.auroraBody(10)).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 10)
     }
 
     private var episodeStopSelector: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("CHỌN TẬP DỪNG").font(.system(size: 8, weight: .black, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.48)).padding(.leading, 4)
+            Text("CHỌN TẬP DỪNG")
+                .font(.system(size: 8, weight: .black, design: .rounded))
+                .tracking(1)
+                .foregroundStyle(.white.opacity(0.5))
+                .padding(.leading, 4)
             if selectableStopEpisodes.isEmpty {
                 Text("API chưa trả về danh sách tập cho phim này. Hãy đóng trình phát và mở lại phim để tải dữ liệu mới.")
-                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
+                    .font(.auroraBody(9))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 5) {
@@ -1031,12 +1174,16 @@ struct CinemaPlayerScreen: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: stopAtEpisodeID == stopEpisodeKey(item) ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent : .white.opacity(0.42))
-                                    Text(item.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                                        .foregroundStyle(stopAtEpisodeID == stopEpisodeKey(item) ? Color.auroraViolet : .white.opacity(0.42))
+                                    Text(item.name).font(.auroraLabel(10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
                                     Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 9).frame(minHeight: 32)
-                                .background(stopAtEpisodeID == stopEpisodeKey(item) ? Color.cinemaAccent.opacity(0.16) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .padding(.horizontal, 9)
+                                .frame(minHeight: 34)
+                                .background(
+                                    stopAtEpisodeID == stopEpisodeKey(item) ? Color.auroraViolet.opacity(0.18) : Color.white.opacity(0.05),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -1045,7 +1192,7 @@ struct CinemaPlayerScreen: View {
                 // `maxHeight` alone lets SwiftUI collapse this ScrollView to zero
                 // height inside the settings VStack. Keep one row visible and
                 // cap long episode lists so they remain scrollable.
-                .frame(minHeight: 37, maxHeight: 142)
+                .frame(minHeight: 39, maxHeight: 142)
                 .scrollClipDisabled()
             }
         }
@@ -1062,50 +1209,75 @@ struct CinemaPlayerScreen: View {
 
     private func settingsLabel(icon: String, title: String, detail: String) -> some View {
         HStack(spacing: 9) {
-            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.cinemaAccent).frame(width: 24)
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.auroraViolet).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                Text(detail).font(.system(size: 8, weight: .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(2)
+                Text(title).font(.auroraLabel(11, weight: .bold)).foregroundStyle(.white)
+                Text(detail).font(.auroraBody(8)).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
             }
         }
     }
 
     private var centerControls: some View {
         HStack(spacing: 38) {
-            Button { playback.seek(to: max(0, playback.currentTime - 10)); scheduleHide() } label: { skipControl("gobackward.10") }
-                .buttonStyle(.plain).accessibilityLabel("Lùi 10 giây")
-            Button { playback.togglePlayback(); scheduleHide() } label: {
+            Button {
+                playback.seek(to: max(0, playback.currentTime - 10))
+                scheduleHide()
+            } label: {
+                skipControl("gobackward.10")
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .accessibilityLabel("Lùi 10 giây")
+
+            Button {
+                playback.togglePlayback()
+                scheduleHide()
+            } label: {
                 Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 25, weight: .black)).foregroundStyle(Color.cinemaInk)
-                    .frame(width: 70, height: 70).background(Color.cinemaAccent, in: Circle())
-                    .shadow(color: Color.cinemaAccent.opacity(0.24), radius: 22, y: 8)
-            }.buttonStyle(.plain).accessibilityLabel(playback.isPlaying ? "Tạm dừng" : "Phát")
-            Button { playback.seek(to: min(playback.duration, playback.currentTime + 10)); scheduleHide() } label: { skipControl("goforward.10") }
-                .buttonStyle(.plain).accessibilityLabel("Tiến 10 giây")
+                    .font(.system(size: 26, weight: .black))
+                    .foregroundStyle(Color.auroraVoid)
+                    .frame(width: 74, height: 74)
+                    .background(Circle().fill(LinearGradient.auroraPrimary))
+                    .auroraHalo(.auroraViolet, radius: 26, opacity: 0.55)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .accessibilityLabel(playback.isPlaying ? "Tạm dừng" : "Phát")
+
+            Button {
+                playback.seek(to: min(playback.duration, playback.currentTime + 10))
+                scheduleHide()
+            } label: {
+                skipControl("goforward.10")
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .accessibilityLabel("Tiến 10 giây")
         }
     }
 
     private func skipControl(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
-            .frame(width: 52, height: 52).background(.black.opacity(0.35), in: Circle()).cinemaGlass(in: Circle(), tint: .white.opacity(0.06))
+        Image(systemName: symbol)
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 56, height: 56)
+            .auroraSmoke(strength: 0.5)
     }
 
     private func adjustmentHUD(for kind: AdjustmentKind) -> some View {
         VStack(spacing: 9) {
             Image(systemName: kind == .brightness ? "sun.max.fill" : (playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"))
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Color.cinemaAccent)
-                .frame(width: 32, height: 32)
-                .background(Color.cinemaAccent.opacity(0.14), in: Circle())
+                .foregroundStyle(Color.auroraVoid)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(LinearGradient.auroraPrimary))
                 .scaleEffect(adjustmentPulse ? 1.12 : 1)
             GeometryReader { proxy in
                 let fillHeight = max(8, proxy.size.height * adjustmentValue)
                 ZStack(alignment: .bottom) {
-                    Capsule().fill(.white.opacity(0.16)).frame(width: 7)
-                    Capsule().fill(Color.cinemaAccent).frame(width: 7, height: fillHeight)
-                    Circle().fill(Color.cinemaAccent).frame(width: 20, height: 20)
-                        .overlay(Circle().stroke(.white.opacity(0.75), lineWidth: 1))
-                        .shadow(color: Color.cinemaAccent.opacity(0.55), radius: 9)
+                    Capsule().fill(.white.opacity(0.18)).frame(width: 7)
+                    Capsule().fill(LinearGradient.auroraPrimary).frame(width: 7, height: fillHeight)
+                    Circle().fill(Color.auroraViolet).frame(width: 20, height: 20)
+                        .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 1))
+                        .shadow(color: Color.auroraViolet.opacity(0.6), radius: 10)
                         .offset(y: -(fillHeight - 10))
                 }
             }
@@ -1116,9 +1288,15 @@ struct CinemaPlayerScreen: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
-        .background(Color.clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.7))
-        .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.black.opacity(0.42))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.7)
+                }
+                .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
+        }
         .frame(width: 66, height: 174)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kind == .brightness ? .bottomLeading : .bottomTrailing)
         .padding(.horizontal, 34)
@@ -1171,7 +1349,10 @@ struct CinemaPlayerScreen: View {
     private var bottomControls: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                Text(formatTime(isScrubbing ? scrubValue : playback.currentTime)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .leading)
+                Text(formatTime(isScrubbing ? scrubValue : playback.currentTime))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .frame(width: 44, alignment: .leading)
                 Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in
                     if editing {
                         scrubValue = playback.currentTime
@@ -1183,12 +1364,22 @@ struct CinemaPlayerScreen: View {
                         scheduleHide()
                     }
                 })
-                    .tint(Color.cinemaAccent)
-                Text(formatTime(playback.duration)).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.white.opacity(0.8)).frame(width: 42, alignment: .trailing)
-                Button { withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { volumePopoverOpen.toggle() }; scheduleHide() } label: {
-                    Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white).frame(width: 43, height: 43)
+                    .tint(Color.auroraViolet)
+                Text(formatTime(playback.duration))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .frame(width: 44, alignment: .trailing)
+                Button {
+                    withAnimation(Motion.sheet) { volumePopoverOpen.toggle() }
+                    scheduleHide()
+                } label: {
+                    Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain).cinemaGlass(in: Circle(), tint: .black.opacity(0.4))
+                .buttonStyle(.auroraPress(scale: 0.9))
+                .auroraSmoke(strength: 0.5)
                 .accessibilityLabel("Điều chỉnh âm lượng")
             }
             .overlay(alignment: .bottomTrailing) {
@@ -1196,63 +1387,98 @@ struct CinemaPlayerScreen: View {
                     HStack(spacing: 10) {
                         Button { playback.toggleMute() } label: {
                             Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 34, height: 34)
-                        }.buttonStyle(.plain).accessibilityLabel(playback.isMuted ? "Bật âm thanh" : "Tắt âm thanh")
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(playback.isMuted ? "Bật âm thanh" : "Tắt âm thanh")
                         Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
-                            .tint(Color.cinemaAccent).frame(width: 142)
+                            .tint(Color.auroraViolet)
+                            .frame(width: 150)
                             .onChange(of: volume) { _, value in playback.setVolume(value) }
                     }
-                    .padding(.horizontal, 11).padding(.vertical, 7)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.7))
-                    .offset(y: -49)
-                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottomTrailing)))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background {
+                        Capsule()
+                            .fill(Color.auroraRaised.opacity(0.96))
+                            .overlay(Capsule().strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9))
+                            .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+                    }
+                    .offset(y: -52)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottomTrailing)))
                 }
             }
             HStack {
-                Text(movie.name).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.56)).lineLimit(1)
+                Text(movie.name).font(.auroraBody(9)).foregroundStyle(.white.opacity(0.58)).lineLimit(1)
                 Spacer()
-                if let episode { Text(episode.name).font(.system(size: 9, weight: .bold)).foregroundStyle(Color.cinemaAccent).lineLimit(1) }
+                if let episode {
+                    Text(episode.name).font(.auroraLabel(9, weight: .bold)).foregroundStyle(Color.auroraViolet).lineLimit(1)
+                }
             }
         }
     }
 
     private func errorCard(_ message: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "wifi.exclamationmark").font(.system(size: 22)).foregroundStyle(Color.cinemaAccent)
-            Text("Không thể phát video").font(.system(size: 14, weight: .bold, design: .rounded)).foregroundStyle(.white)
-            Text(message).font(.system(size: 10)).foregroundStyle(.white.opacity(0.66)).multilineTextAlignment(.center).lineLimit(3)
-            Button("Trở lại") { dismiss() }.font(.system(size: 11, weight: .bold)).foregroundStyle(Color.cinemaInk).padding(.horizontal, 16).padding(.vertical, 9).background(Color.cinemaAccent, in: Capsule())
+        VStack(spacing: 9) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.auroraViolet)
+            Text("Không thể phát video").font(.auroraLabel(14, weight: .bold)).foregroundStyle(.white)
+            Text(message)
+                .font(.auroraBody(10))
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+            Button { dismiss() } label: {
+                Text("Trở lại")
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(Color.auroraVoid)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(LinearGradient.auroraPrimary))
+            }
+            .buttonStyle(.auroraPress(scale: 0.94))
         }
-        .padding(18).frame(maxWidth: 340).cinemaGlass(in: RoundedRectangle(cornerRadius: 24), tint: .black.opacity(0.54))
+        .padding(18)
+        .frame(maxWidth: 340)
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.black.opacity(0.62))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
+                }
+                .shadow(color: .black.opacity(0.5), radius: 26, y: 14)
+        }
     }
 
     private var relatedRecommendationsOverlay: some View {
         ZStack {
-            Color.black.opacity(0.92).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 14) {
+            CinemaBackground()
+            VStack(alignment: .leading, spacing: 15) {
                 HStack(alignment: .top, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 5) {
                         SectionEyebrow(text: "CINEMORA · FULLSCREEN BROWSING")
                         Text("Video liên quan")
-                            .font(.system(size: 25, weight: .black, design: .rounded))
+                            .font(.auroraDisplay(25))
                             .foregroundStyle(.white)
                         Text("Khám phá thêm phim tương tự mà không cần rời trình phát")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .font(.auroraBody(11))
+                            .foregroundStyle(Color.auroraTextSecondary)
                     }
                     Spacer()
                     Button {
-                        withAnimation(.easeOut(duration: 0.2)) { relatedRecommendationsVisible = false }
+                        withAnimation(Motion.sheet) { relatedRecommendationsVisible = false }
                         scheduleHide()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(.white.opacity(0.1), in: Circle())
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.1), in: Circle())
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.auroraPress(scale: 0.9))
                     .accessibilityLabel("Đóng video liên quan")
                 }
 
@@ -1262,33 +1488,39 @@ struct CinemaPlayerScreen: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 16)], spacing: 18) {
-                            ForEach(relatedMovies) { related in
+                            ForEach(Array(relatedMovies.enumerated()), id: \.element.id) { index, related in
                                 Button {
                                     openRelatedMovie(related)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 7) {
+                                    VStack(alignment: .leading, spacing: 8) {
                                         PosterArt(url: related.posterURL)
-                                            .frame(height: 175)
-                                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.14), lineWidth: 0.7))
+                                            .frame(height: 180)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                    .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
+                                            }
+                                            .shadow(color: .black.opacity(0.4), radius: 14, y: 9)
                                         Text(related.name)
-                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                            .font(.auroraLabel(12, weight: .bold))
                                             .foregroundStyle(.white)
                                             .lineLimit(2)
                                         Text(related.originName ?? "Phim đề xuất")
-                                            .font(.system(size: 9, weight: .medium))
-                                            .foregroundStyle(.white.opacity(0.5))
+                                            .font(.auroraBody(9))
+                                            .foregroundStyle(Color.auroraTextTertiary)
                                             .lineLimit(1)
                                     }
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.auroraPress(scale: 0.97))
+                                .auroraReveal(index % 10)
                             }
                         }
+                        .padding(.bottom, 24)
                     }
                 }
             }
             .padding(.horizontal, 30)
-            .padding(.vertical, 22)
+            .padding(.vertical, 24)
             .frame(maxWidth: 980, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -1300,7 +1532,7 @@ struct CinemaPlayerScreen: View {
         playback.shutdown()
         subtitles.load(url: nil)
         hideTask?.cancel()
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(Motion.sheet) {
             relatedRecommendationsVisible = false
         }
         if let onOpenRelated {
@@ -1314,42 +1546,71 @@ struct CinemaPlayerScreen: View {
 
     private func pickerOverlay(_ kind: PickerKind) -> some View {
         ZStack {
-            Color.black.opacity(0.63).ignoresSafeArea().onTapGesture { withAnimation { picker = nil }; scheduleHide() }
-            VStack(spacing: 14) {
-                Capsule().fill(.white.opacity(0.36)).frame(width: 40, height: 4).padding(.top, 3)
+            Color.black.opacity(0.6).ignoresSafeArea().onTapGesture {
+                withAnimation(Motion.sheet) { picker = nil }
+                scheduleHide()
+            }
+            VStack(spacing: 15) {
+                Capsule().fill(.white.opacity(0.34)).frame(width: 42, height: 4).padding(.top, 4)
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
                         SectionEyebrow(text: kind == .episodes ? "CINEMORA · TẬP PHIM" : "CINEMORA · CHẤT LƯỢNG")
-                        Text(kind == .episodes ? "Danh sách tập" : "Chọn nguồn phát").font(.system(size: 22, weight: .black, design: .rounded)).foregroundStyle(.white)
-                        Text("Đang phát: \(kind == .episodes ? (episode?.name ?? "") : (server?.name ?? ""))").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.57)).lineLimit(1)
+                        Text(kind == .episodes ? "Danh sách tập" : "Chọn nguồn phát")
+                            .font(.auroraDisplay(22))
+                            .foregroundStyle(.white)
+                        Text("Đang phát: \(kind == .episodes ? (episode?.name ?? "") : (server?.name ?? ""))")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .lineLimit(1)
                     }
                     Spacer()
-                    Button { withAnimation { picker = nil }; scheduleHide() } label: { Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white).frame(width: 40, height: 40).background(.white.opacity(0.1), in: Circle()) }.buttonStyle(.plain).accessibilityLabel("Đóng danh sách")
+                    Button {
+                        withAnimation(Motion.sheet) { picker = nil }
+                        scheduleHide()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Color.white.opacity(0.1), in: Circle())
+                    }
+                    .buttonStyle(.auroraPress(scale: 0.9))
+                    .accessibilityLabel("Đóng danh sách")
                 }
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 9)], spacing: 9) {
                         if kind == .episodes {
-                                ForEach(episodes.indices, id: \.self) { index in
-                                    pickerRow(number: index + 1, title: episodes[index].name, selected: index == episodeIndex) {
-                                        episodeIndex = index
-                                        controlsVisible = true
-                                    }
+                            ForEach(episodes.indices, id: \.self) { index in
+                                pickerRow(number: index + 1, title: episodes[index].name, selected: index == episodeIndex) {
+                                    episodeIndex = index
+                                    controlsVisible = true
+                                }
                             }
                         } else {
                             ForEach(servers.indices, id: \.self) { index in
-                                    pickerRow(number: index + 1, title: servers[index].name, selected: index == serverIndex) {
-                                        serverIndex = index
-                                        controlsVisible = true
-                                    }
+                                pickerRow(number: index + 1, title: servers[index].name, selected: index == serverIndex) {
+                                    serverIndex = index
+                                    controlsVisible = true
+                                }
                             }
                         }
                     }
                 }
-                .frame(maxHeight: 330)
+                .frame(maxHeight: 340)
             }
-            .padding(.horizontal, 21).padding(.top, 11).padding(.bottom, 18)
-            .frame(maxWidth: 840).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(.white.opacity(0.22), lineWidth: 0.8))
+            .padding(.horizontal, 22)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
+            .frame(maxWidth: 840)
+            .background {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .fill(Color.auroraRaised.opacity(0.97))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 30, style: .continuous)
+                            .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                    }
+                    .shadow(color: .black.opacity(0.55), radius: 30, y: 16)
+            }
             .padding(.horizontal, 22)
         }
         .zIndex(10)
@@ -1358,14 +1619,37 @@ struct CinemaPlayerScreen: View {
     private func pickerRow(number: Int, title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Text(String(format: "%02d", number)).font(.system(size: 11, weight: .black, design: .rounded)).foregroundStyle(selected ? Color.cinemaInk : Color.cinemaAccent)
-                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(selected ? Color.cinemaInk : .white.opacity(0.84)).lineLimit(2).multilineTextAlignment(.leading)
+                Text(String(format: "%02d", number))
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(selected ? Color.auroraVoid : Color.auroraViolet)
+                Text(title)
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(selected ? Color.auroraVoid : .white.opacity(0.86))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.cinemaInk) }
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.auroraVoid)
+                        .transition(.scale.combined(with: .opacity))
+                }
             }
-            .padding(.horizontal, 12).frame(minHeight: 51)
-            .background(selected ? Color.cinemaAccent : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
-        }.buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 52)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).fill(LinearGradient.auroraPrimary)
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.08))
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(selected ? 0.3 : 0.08), lineWidth: 0.8)
+            }
+        }
+        .buttonStyle(.auroraPress(scale: 0.96))
+        .animation(Motion.gentle, value: selected)
     }
 
     private func loadCurrentEpisode() {

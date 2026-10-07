@@ -13,61 +13,79 @@ struct MovieRequestScreen: View {
     @State private var isSubmitting = false
     @State private var message: String?
     @State private var showSuccess = false
+    @FocusState private var focusedField: String?
 
     private let priorities = ["Thấp", "Bình thường", "Cao", "Khẩn cấp"]
+
+    private var canSubmit: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && !isSubmitting
+    }
 
     var body: some View {
         ZStack {
             CinemaBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 7) {
                         SectionEyebrow(text: "CINEMORA · ĐÓNG GÓP")
-                        Text("Yêu cầu phim")
-                            .font(.system(size: 30, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
+                        AuroraGradientText(text: "Yêu cầu phim", font: .auroraDisplay(29))
                         Text("Gửi yêu cầu phim bạn muốn xem. Chúng tôi sẽ cố gắng cập nhật sớm nhất có thể!")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .font(.auroraBody(12))
+                            .foregroundStyle(Color.auroraTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    .auroraReveal(0)
 
-                    requestField(title: "Tên phim", placeholder: "Tên phim, tên gốc, năm sản xuất, quốc gia…", text: $title)
-                    requestField(title: "Link TMDB hoặc IMDB (nếu có)", placeholder: "https://www.imdb.com/title/…", text: $link)
+                    requestField(title: "Tên phim", placeholder: "Tên phim, tên gốc, năm sản xuất, quốc gia…", text: $title, id: "title", icon: "film")
+                        .auroraReveal(1)
+                    requestField(title: "Link TMDB hoặc IMDB (nếu có)", placeholder: "https://www.imdb.com/title/…", text: $link, id: "link", icon: "link")
+                        .auroraReveal(2)
 
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "MỨC ĐỘ ƯU TIÊN")
-                        Picker("Mức độ ưu tiên", selection: $priority) {
+                        HStack(spacing: 8) {
                             ForEach(priorities, id: \.self) { value in
-                                Text(value).tag(value)
+                                AuroraChip(title: value, selected: priority == value, icon: chipIcon(value)) {
+                                    withAnimation(Motion.gentle) { priority = value }
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        .tint(Color.cinemaAccent)
                     }
+                    .auroraReveal(3)
 
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "GHI CHÚ THÊM (NẾU CÓ)")
                         TextEditor(text: $notes)
-                            .font(.system(size: 13))
+                            .font(.auroraBody(13))
                             .foregroundStyle(.white)
                             .scrollContentBackground(.hidden)
-                            .padding(10)
-                            .frame(minHeight: 125)
-                            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.12), lineWidth: 0.7))
+                            .focused($focusedField, equals: "notes")
+                            .padding(12)
+                            .frame(minHeight: 130)
+                            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(Color.auroraViolet.opacity(focusedField == "notes" ? 0.55 : 0.1), lineWidth: focusedField == "notes" ? 1.2 : 0.8)
+                            }
+                            .animation(Motion.gentle, value: focusedField)
                     }
+                    .auroraReveal(4)
 
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "HÌNH ẢNH (NẾU CÓ)")
                         PhotosPicker(selection: $selectedPhoto, matching: .images, photoLibrary: .shared()) {
-                            Label(imagePreview == nil ? "Chọn hình ảnh" : "Đổi hình ảnh", systemImage: "photo.on.rectangle.angled")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(Color.cinemaInk)
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 11)
-                                .background(Color.cinemaAccent, in: Capsule())
+                            HStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(imagePreview == nil ? "Chọn hình ảnh" : "Đổi hình ảnh")
+                                    .font(.auroraLabel(12, weight: .bold))
+                            }
+                            .foregroundStyle(Color.auroraVoid)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Capsule().fill(LinearGradient.auroraPrimary))
                         }
+                        .buttonStyle(.auroraPress(scale: 0.96))
                         .onChange(of: selectedPhoto) { _, item in
                             guard let item else { return }
                             Task {
@@ -75,63 +93,82 @@ struct MovieRequestScreen: View {
                                       let image = UIImage(data: data),
                                       let compressed = Self.prepareImageData(image) else { return }
                                 await MainActor.run {
-                                    imagePreview = image
-                                    imageData = compressed
+                                    withAnimation(Motion.enter) {
+                                        imagePreview = image
+                                        imageData = compressed
+                                    }
                                 }
                             }
                         }
                         if let preview = imagePreview {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 9) {
                                 Image(uiImage: preview)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(maxHeight: 190)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.15), lineWidth: 0.7))
+                                    .frame(maxHeight: 200)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                                    }
+                                    .shadow(color: Color.black.opacity(0.4), radius: 16, y: 10)
                                 Button {
-                                    selectedPhoto = nil
-                                    imagePreview = nil
-                                    imageData = nil
+                                    withAnimation(Motion.enter) {
+                                        selectedPhoto = nil
+                                        imagePreview = nil
+                                        imageData = nil
+                                    }
                                 } label: {
                                     Label("Gỡ ảnh đã chọn", systemImage: "trash")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.red.opacity(0.9))
+                                        .font(.auroraLabel(11, weight: .bold))
+                                        .foregroundStyle(Color.auroraPink)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.auroraPress(scale: 0.95))
                                 .accessibilityLabel("Xóa ảnh đã chọn")
                             }
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
                     }
+                    .auroraReveal(5)
 
                     if let message {
-                        Text(message)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .top, spacing: 9) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color.auroraAmber)
+                            Text(message)
+                                .font(.auroraBody(11, weight: .medium))
+                                .foregroundStyle(Color.auroraAmber)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.auroraAmber.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color.auroraAmber.opacity(0.28), lineWidth: 0.8)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                    Button {
+                    AuroraPrimaryButton(
+                        title: isSubmitting ? "Đang gửi…" : "Gửi yêu cầu phim",
+                        icon: "paperplane.fill",
+                        loading: isSubmitting,
+                        enabled: canSubmit
+                    ) {
                         submit()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isSubmitting { ProgressView().tint(Color.cinemaInk) }
-                            Text(isSubmitting ? "Đang gửi…" : "Gửi yêu cầu phim")
-                        }
-                        .font(.system(size: 13, weight: .black, design: .rounded))
-                        .foregroundStyle(Color.cinemaInk)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.cinemaAccent, in: Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isSubmitting || title.trimmingCharacters(in: .whitespacesAndNewlines).count < 2)
-                    .opacity(title.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 ? 0.48 : 1)
+                    .auroraReveal(6)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
-                .padding(.bottom, 50)
+                .padding(.bottom, 120)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
+        .animation(Motion.enter, value: message)
+        .animation(Motion.enter, value: imagePreview == nil)
         .navigationTitle("Yêu cầu phim")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Đã gửi yêu cầu", isPresented: $showSuccess) {
@@ -141,17 +178,38 @@ struct MovieRequestScreen: View {
         }
     }
 
-    private func requestField(title: String, placeholder: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+    private func chipIcon(_ value: String) -> String {
+        switch value {
+        case "Thấp": return "arrow.down"
+        case "Cao": return "arrow.up"
+        case "Khẩn cấp": return "exclamationmark.2"
+        default: return "equal"
+        }
+    }
+
+    private func requestField(title: String, placeholder: String, text: Binding<String>, id: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             SectionEyebrow(text: title.uppercased())
-            TextField(placeholder, text: text, axis: .vertical)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
-                .lineLimit(1...3)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 12)
-                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(.white.opacity(0.12), lineWidth: 0.7))
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(focusedField == id ? Color.auroraViolet : Color.white.opacity(0.45))
+                    .frame(width: 20)
+                    .padding(.top, 2)
+                TextField(placeholder, text: text, axis: .vertical)
+                    .font(.auroraBody(13))
+                    .foregroundStyle(.white)
+                    .lineLimit(1...3)
+                    .focused($focusedField, equals: id)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .strokeBorder(Color.auroraViolet.opacity(focusedField == id ? 0.55 : 0.1), lineWidth: focusedField == id ? 1.2 : 0.8)
+            }
+            .animation(Motion.gentle, value: focusedField)
         }
     }
 
@@ -176,6 +234,7 @@ struct MovieRequestScreen: View {
     private func submit() {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleanTitle.count >= 2, !isSubmitting else { return }
+        focusedField = nil
         isSubmitting = true
         message = nil
         Task {

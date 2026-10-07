@@ -18,6 +18,8 @@ struct AccountSettingsScreen: View {
     @State private var qrActionError: String?
     @State private var lastScannedNonce: String?
     @State private var lastScannedAt = Date.distantPast
+    @FocusState private var focusedField: String?
+    @Namespace private var authModeNamespace
 
     var body: some View {
         ZStack {
@@ -32,22 +34,18 @@ struct AccountSettingsScreen: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 58)
-                .padding(.bottom, 45)
+                .padding(.bottom, 120)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
         .overlay(alignment: .topLeading) {
-            Button { dismiss() } label: {
-                Label("Trở lại", systemImage: "chevron.left")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(.black.opacity(0.5), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 20).padding(.top, 8)
+            AuroraBackButton(title: "Trở lại") { dismiss() }
+                .padding(.leading, 20)
+                .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: store.accountUser != nil)
+        .animation(Motion.sheet, value: store.accountUser != nil)
+        .animation(Motion.sheet, value: isRegistering)
         .onAppear {
             if store.accountUser == nil { store.clearAccountError() }
         }
@@ -107,159 +105,332 @@ struct AccountSettingsScreen: View {
         } message: { Text(qrActionError ?? "") }
     }
 
+    // MARK: - Signed out
+
     private var signInContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionEyebrow(text: "CINEMORA ACCOUNT")
-            Text(isRegistering ? "Tạo tài khoản" : "Đăng nhập")
-                .font(.system(size: 29, weight: .black, design: .rounded)).foregroundStyle(.white)
-            Text("Đăng nhập để đồng bộ lịch sử xem và phim yêu thích trên mọi thiết bị. Website vẫn giữ thư viện local riêng.")
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.62))
-            Picker("Chế độ", selection: $isRegistering) {
-                Text("Đăng nhập").tag(false)
-                Text("Đăng ký").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .tint(Color.cinemaAccent)
-            .padding(.vertical, 4)
-            if isRegistering { field("Họ và tên", text: $name, icon: "person.fill") }
-            field("Email", text: $email, icon: "envelope.fill")
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-            SecureField("Mật khẩu", text: $password)
-                .textFieldStyle(.plain)
-                .padding(14)
-                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-            if let error = store.accountError {
-                Text(error)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.red.opacity(0.92))
+            VStack(alignment: .leading, spacing: 7) {
+                SectionEyebrow(text: "CINEMORA ACCOUNT")
+                AuroraGradientText(text: isRegistering ? "Tạo tài khoản" : "Đăng nhập", font: .auroraDisplay(28))
+                Text("Đăng nhập để đồng bộ lịch sử xem và phim yêu thích trên mọi thiết bị. Website vẫn giữ thư viện local riêng.")
+                    .font(.auroraBody(12))
+                    .foregroundStyle(Color.auroraTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            .auroraReveal(0)
+
+            modeSelector
+                .auroraReveal(1)
+
+            VStack(alignment: .leading, spacing: 12) {
+                if isRegistering {
+                    field("Họ và tên", text: $name, icon: "person.fill", id: "name")
+                }
+                field("Email", text: $email, icon: "envelope.fill", id: "email")
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                secureField("Mật khẩu", text: $password, id: "password")
+                if let error = store.accountError {
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.auroraAmber)
+                        Text(error)
+                            .font(.auroraBody(11, weight: .semibold))
+                            .foregroundStyle(Color.auroraAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            Button {
-                submitting = true
-                Task {
-                    do {
-                        if isRegistering { try await store.register(name: name, email: email, password: password) }
-                        else { try await store.login(email: email, password: password) }
-                    } catch {
-                        // CinemaStore publishes the server message; keep the
-                        // failure visible instead of silently swallowing it.
+                    .background(Color.auroraAmber.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.auroraAmber.opacity(0.3), lineWidth: 0.8)
                     }
-                    await MainActor.run { submitting = false }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-            } label: {
-                HStack { Spacer(); if submitting { ProgressView().tint(Color.cinemaInk) }; Text(submitting ? (isRegistering ? "Đang tạo tài khoản…" : "Đang đăng nhập…") : (isRegistering ? "Tạo tài khoản" : "Đăng nhập")); Spacer() }
-                    .font(.system(size: 13, weight: .black)).foregroundStyle(Color.cinemaInk)
-                    .padding(.vertical, 14).background(Color.cinemaAccent, in: Capsule())
             }
-            .buttonStyle(.plain).disabled(submitting || email.isEmpty || password.isEmpty || (isRegistering && name.isEmpty))
-            Button { showQrLogin = true } label: {
-                Label("Đăng nhập bằng QR", systemImage: "qrcode")
-                    .font(.system(size: 12, weight: .bold))
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .auroraReveal(2)
+
+            VStack(spacing: 12) {
+                AuroraPrimaryButton(
+                    title: submitting ? (isRegistering ? "Đang tạo tài khoản…" : "Đang đăng nhập…") : (isRegistering ? "Tạo tài khoản" : "Đăng nhập"),
+                    icon: isRegistering ? "person.badge.plus" : "arrow.right.to.line",
+                    loading: submitting,
+                    enabled: canSubmitAuth
+                ) {
+                    submitAuth()
+                }
+                AuroraGhostButton(title: "Đăng nhập bằng QR", icon: "qrcode", tint: .auroraSky) {
+                    showQrLogin = true
+                }
             }
-            .buttonStyle(.bordered).tint(Color.cinemaAccent)
+            .auroraReveal(3)
         }
         .padding(18)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
+        .auroraCard(cornerRadius: 26, tint: .auroraViolet, fill: 0.75)
     }
+
+    private var canSubmitAuth: Bool {
+        !submitting && !email.isEmpty && !password.isEmpty && (!isRegistering || !name.isEmpty)
+    }
+
+    private var modeSelector: some View {
+        HStack(spacing: 5) {
+            ForEach([false, true], id: \.self) { value in
+                Button {
+                    withAnimation(Motion.sheet) { isRegistering = value }
+                    focusedField = nil
+                } label: {
+                    Text(value ? "Đăng ký" : "Đăng nhập")
+                        .font(.auroraLabel(12, weight: .bold))
+                        .foregroundStyle(isRegistering == value ? Color.auroraVoid : Color.white.opacity(0.65))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background {
+                            if isRegistering == value {
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .fill(LinearGradient.auroraPrimary)
+                                    .matchedGeometryEffect(id: "authModeIndicator", in: authModeNamespace)
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(5)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.8)
+        }
+    }
+
+    private func submitAuth() {
+        guard canSubmitAuth else { return }
+        focusedField = nil
+        submitting = true
+        Task {
+            do {
+                if isRegistering { try await store.register(name: name, email: email, password: password) }
+                else { try await store.login(email: email, password: password) }
+            } catch {
+                // CinemaStore publishes the server message; keep the
+                // failure visible instead of silently swallowing it.
+            }
+            await MainActor.run { submitting = false }
+        }
+    }
+
+    // MARK: - Signed in
 
     private func signedInContent(_ user: RemoteAccountUser) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 SectionEyebrow(text: "ĐÃ ĐĂNG NHẬP")
                 Spacer()
-                Label("Đồng bộ", systemImage: "checkmark.icloud.fill")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.cinemaAccent)
-            }
-            HStack(spacing: 13) {
-                Image(systemName: "person.crop.circle.fill").font(.system(size: 42)).foregroundStyle(Color.cinemaAccent)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(user.displayName).font(.system(size: 18, weight: .black, design: .rounded)).foregroundStyle(.white)
-                    Text(user.email ?? "").font(.system(size: 11)).foregroundStyle(.white.opacity(0.58))
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.icloud.fill").font(.system(size: 10, weight: .bold))
+                    Text("Đồng bộ")
+                        .font(.auroraLabel(10, weight: .bold))
                 }
+                .foregroundStyle(Color.auroraMint)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.auroraMint.opacity(0.14)))
+                .overlay(Capsule().strokeBorder(Color.auroraMint.opacity(0.3), lineWidth: 0.7))
             }
+            .auroraReveal(0)
+
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient.auroraPrimary)
+                        .frame(width: 56, height: 56)
+                        .auroraHalo(.auroraViolet, radius: 18, opacity: 0.45)
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 22, weight: .black))
+                        .foregroundStyle(Color.auroraVoid)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(user.displayName)
+                        .font(.auroraLabel(18, weight: .black))
+                        .foregroundStyle(.white)
+                    Text(user.email ?? "")
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .auroraReveal(1)
+
             infoCard(icon: "arrow.triangle.2.circlepath", title: "Đồng bộ cloud", detail: "Lịch sử và yêu thích được đồng bộ trên các thiết bị đã đăng nhập.")
-            Button { showQrScanner = true } label: {
-                Label("Quét QR để đăng nhập thiết bị khác", systemImage: "qrcode.viewfinder")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.cinemaAccent)
-                    .frame(maxWidth: .infinity).padding(.vertical, 13)
-                    .background(Color.cinemaAccent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.48), lineWidth: 1))
+                .auroraReveal(2)
+
+            AuroraGhostButton(title: "Quét QR để đăng nhập thiết bị khác", icon: "qrcode.viewfinder", tint: .auroraSky) {
+                showQrScanner = true
             }
-            .buttonStyle(.plain)
-            VStack(alignment: .leading, spacing: 12) {
+            .auroraReveal(3)
+
+            VStack(alignment: .leading, spacing: 13) {
                 HStack {
                     SectionEyebrow(text: "THIẾT BỊ ĐÃ ĐĂNG NHẬP")
                     Spacer()
-                    Text("\(store.accountDevices.count) / 5").font(.system(size: 12, weight: .black, design: .monospaced)).foregroundStyle(Color.cinemaAccent)
+                    Text("\(store.accountDevices.count) / 5")
+                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .foregroundStyle(Color.auroraViolet)
                 }
-                ForEach(store.accountDevices) { device in deviceRow(device) }
+                ForEach(Array(store.accountDevices.enumerated()), id: \.element.id) { index, device in
+                    deviceRow(device)
+                        .auroraReveal(index % 6)
+                }
                 if store.accountDevices.isEmpty {
                     HStack(spacing: 9) {
-                        ProgressView().tint(Color.cinemaAccent)
-                        Text("Đang đồng bộ danh sách thiết bị…").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.58))
+                        ProgressView().tint(Color.auroraViolet)
+                        Text("Đang đồng bộ danh sách thiết bị…")
+                            .font(.auroraBody(11))
+                            .foregroundStyle(Color.auroraTextSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 7)
                 }
                 Button("Đăng xuất tất cả thiết bị", role: .destructive) { showLogoutAllAlert = true }
-                    .font(.system(size: 12, weight: .bold)).frame(maxWidth: .infinity).padding(.top, 5)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 5)
             }
             .padding(16)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.14), lineWidth: 0.8))
-            Button { showChangePassword = true } label: {
-                Label("Đổi mật khẩu", systemImage: "key.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.cinemaAccent)
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(Color.cinemaAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.cinemaAccent.opacity(0.35), lineWidth: 0.8))
+            .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.6)
+            .auroraReveal(4)
+
+            AuroraGhostButton(title: "Đổi mật khẩu", icon: "key.fill", tint: .auroraAmber) {
+                showChangePassword = true
             }
-            .buttonStyle(.plain)
-            Button("Đăng xuất tài khoản") { Task { await store.logout() } }
-                .font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.68)).frame(maxWidth: .infinity)
+            .auroraReveal(5)
+
+            Button {
+                Task { await store.logout() }
+            } label: {
+                Text("Đăng xuất tài khoản")
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.auroraPress(scale: 0.97))
+            .auroraReveal(6)
         }
     }
 
-    private func field(_ title: String, text: Binding<String>, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(Color.cinemaAccent)
-            TextField(title, text: text).foregroundStyle(.white)
+    // MARK: - Field builders
+
+    private func field(_ title: String, text: Binding<String>, icon: String, id: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(focusedField == id ? Color.auroraViolet : Color.white.opacity(0.5))
+                .frame(width: 20)
+            TextField(title, text: text)
+                .font(.auroraBody(13))
+                .foregroundStyle(.white)
+                .focused($focusedField, equals: id)
         }
-        .padding(14).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+        .padding(14)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.auroraViolet.opacity(focusedField == id ? 0.6 : 0.1), lineWidth: focusedField == id ? 1.2 : 0.8)
+        }
+        .animation(Motion.gentle, value: focusedField)
+    }
+
+    private func secureField(_ title: String, text: Binding<String>, id: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(focusedField == id ? Color.auroraViolet : Color.white.opacity(0.5))
+                .frame(width: 20)
+            SecureField(title, text: text)
+                .font(.auroraBody(13))
+                .foregroundStyle(.white)
+                .focused($focusedField, equals: id)
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.auroraViolet.opacity(focusedField == id ? 0.6 : 0.1), lineWidth: focusedField == id ? 1.2 : 0.8)
+        }
+        .animation(Motion.gentle, value: focusedField)
     }
 
     private func infoCard(icon: String, title: String, detail: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).foregroundStyle(Color.cinemaAccent).frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) { Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white); Text(detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.58)) }
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.auroraSky.opacity(0.16))
+                    .frame(width: 38, height: 38)
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.auroraSky)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(detail)
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
-        .padding(14).background(Color.cinemaAccent.opacity(0.09), in: RoundedRectangle(cornerRadius: 17))
+        .padding(14)
+        .background(Color.auroraSky.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.auroraSky.opacity(0.2), lineWidth: 0.8)
+        }
     }
 
     private func deviceRow(_ device: RemoteAccountDevice) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: device.isOnline ? "circle.fill" : "circle").font(.system(size: 9)).foregroundStyle(device.isOnline ? .green : .gray)
+        HStack(spacing: 11) {
+            LivePulse(color: device.isOnline ? .auroraMint : .white.opacity(0.35), size: 6)
             VStack(alignment: .leading, spacing: 3) {
-                Text(device.deviceName).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                Text("\(device.ipAddress) · \(device.location) · \(device.isOnline ? "Đang online" : "Offline")").font(.system(size: 9)).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
+                Text(device.deviceName)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("\(device.ipAddress) · \(device.location) · \(device.isOnline ? "Đang online" : "Offline")")
+                    .font(.auroraBody(9))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .lineLimit(2)
             }
-            Spacer()
+            Spacer(minLength: 0)
             Text(device.isOnline ? "ONLINE" : "OFFLINE")
                 .font(.system(size: 8, weight: .black, design: .monospaced))
-                .foregroundStyle(device.isOnline ? Color.cinemaAccent : .white.opacity(0.42))
-            Button { Task { await store.logoutDevice(id: device.id, deviceId: device.deviceId) } } label: { Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(.red.opacity(0.85)) }
-                .buttonStyle(.plain).accessibilityLabel("Đăng xuất thiết bị \(device.deviceName)")
+                .foregroundStyle(device.isOnline ? Color.auroraMint : Color.white.opacity(0.4))
+            Button {
+                Task { await store.logoutDevice(id: device.id, deviceId: device.deviceId) }
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.auroraPink)
+                    .frame(width: 34, height: 34)
+                    .background(Color.auroraPink.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .accessibilityLabel("Đăng xuất thiết bị \(device.deviceName)")
         }
-        .padding(11).background(.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 13))
+        .padding(12)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.7)
+        }
     }
+
+    // MARK: - QR helpers
 
     private func handleScannedQr(_ rawValue: String) {
         let prefix = "cinemora-qr-v1:"
@@ -303,6 +474,8 @@ struct AccountSettingsScreen: View {
     }
 }
 
+// MARK: - Change password
+
 private struct ChangePasswordSheet: View {
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
@@ -323,52 +496,36 @@ private struct ChangePasswordSheet: View {
                 CinemaBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        SectionEyebrow(text: "BẢO MẬT TÀI KHOẢN")
-                        Text("Đổi mật khẩu")
-                            .font(.system(size: 29, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Sau khi đổi, các thiết bị khác sẽ phải đăng nhập lại bằng mật khẩu mới.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.62))
+                        VStack(alignment: .leading, spacing: 7) {
+                            SectionEyebrow(text: "BẢO MẬT TÀI KHOẢN")
+                            AuroraGradientText(text: "Đổi mật khẩu", font: .auroraDisplay(28))
+                            Text("Sau khi đổi, các thiết bị khác sẽ phải đăng nhập lại bằng mật khẩu mới.")
+                                .font(.auroraBody(12))
+                                .foregroundStyle(Color.auroraTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         passwordField("Mật khẩu hiện tại", text: $currentPassword)
                         passwordField("Mật khẩu mới", text: $newPassword)
                         passwordField("Nhập lại mật khẩu mới", text: $confirmPassword)
                         if !newPassword.isEmpty && newPassword.count < 8 {
-                            Text("Mật khẩu mới cần ít nhất 8 ký tự.")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.orange)
+                            notice("Mật khẩu mới cần ít nhất 8 ký tự.", tint: .auroraAmber)
                         } else if !confirmPassword.isEmpty && newPassword != confirmPassword {
-                            Text("Hai mật khẩu mới chưa khớp.")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.orange)
+                            notice("Hai mật khẩu mới chưa khớp.", tint: .auroraAmber)
                         }
                         if let errorMessage {
-                            Text(errorMessage)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.red.opacity(0.92))
-                                .fixedSize(horizontal: false, vertical: true)
+                            notice(errorMessage, tint: .auroraPink)
                         }
                         if didSucceed {
-                            Text("Đổi mật khẩu thành công. Các phiên khác đã được đăng xuất.")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.cinemaAccent)
+                            notice("Đổi mật khẩu thành công. Các phiên khác đã được đăng xuất.", tint: .auroraMint)
                         }
-                        Button {
+                        AuroraPrimaryButton(
+                            title: isSaving ? "Đang cập nhật…" : "Cập nhật mật khẩu",
+                            icon: "checkmark.shield.fill",
+                            loading: isSaving,
+                            enabled: canSubmit && !didSucceed
+                        ) {
                             Task { await save() }
-                        } label: {
-                            HStack {
-                                Spacer()
-                                if isSaving { ProgressView().tint(Color.cinemaInk) }
-                                Text(isSaving ? "Đang cập nhật…" : "Cập nhật mật khẩu")
-                                Spacer()
-                            }
-                            .font(.system(size: 13, weight: .black))
-                            .foregroundStyle(Color.cinemaInk)
-                            .padding(.vertical, 14)
-                            .background(canSubmit ? Color.cinemaAccent : Color.cinemaAccent.opacity(0.35), in: Capsule())
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!canSubmit || didSucceed)
                     }
                     .padding(22)
                 }
@@ -380,11 +537,35 @@ private struct ChangePasswordSheet: View {
         }
     }
 
+    private func notice(_ text: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(tint)
+            Text(text)
+                .font(.auroraBody(11, weight: .semibold))
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(tint.opacity(0.28), lineWidth: 0.8)
+        }
+    }
+
     private func passwordField(_ title: String, text: Binding<String>) -> some View {
         SecureField(title, text: text)
             .textFieldStyle(.plain)
+            .font(.auroraBody(13))
             .padding(14)
-            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.8)
+            }
             .foregroundStyle(.white)
     }
 

@@ -5,15 +5,13 @@ struct SubtitlePreferencesEditor: View {
     var compact = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 11 : 15) {
+        VStack(alignment: .leading, spacing: compact ? 12 : 16) {
             if !compact {
                 SectionEyebrow(text: "SUBTITLE")
-                Text("Tùy chỉnh phụ đề")
-                    .font(.system(size: 25, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                AuroraGradientText(text: "Tùy chỉnh phụ đề", font: .auroraDisplay(26))
                 Text("Thay đổi sẽ áp dụng ngay khi đang xem và được lưu trên thiết bị.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraTextSecondary)
                 preview
                 fullControls
             } else {
@@ -26,36 +24,36 @@ struct SubtitlePreferencesEditor: View {
 
     @ViewBuilder
     private var fullControls: some View {
-        row(title: "Hiển thị phụ đề", detail: "Bật hoặc tắt subtitle") {
-            Toggle("", isOn: $preferences.enabled).labelsHidden().tint(Color.cinemaAccent)
+        row(icon: "captions.bubble.fill", tint: .auroraViolet, title: "Hiển thị phụ đề", detail: "Bật hoặc tắt subtitle") {
+            Toggle("", isOn: $preferences.enabled).labelsHidden().tint(Color.auroraViolet)
         }
-        row(title: "Phông chữ", detail: preferences.fontName) {
+        row(icon: "textformat", tint: .auroraSky, title: "Phông chữ", detail: preferences.fontName) {
             fontPicker
         }
-        row(title: "Chữ đậm", detail: "Tăng độ tương phản") {
-            Toggle("", isOn: $preferences.bold).labelsHidden().tint(Color.cinemaAccent)
+        row(icon: "bold", tint: .auroraMint, title: "Chữ đậm", detail: "Tăng độ tương phản") {
+            Toggle("", isOn: $preferences.bold).labelsHidden().tint(Color.auroraViolet)
         }
-        sliderRow(title: "Cỡ chữ", value: $preferences.fontSize, range: 12...34, suffix: "pt")
-        sliderRow(title: "Khoảng cách phía dưới", value: $preferences.bottomSpacing, range: 20...180, suffix: "pt")
+        sliderRow(icon: "textformat.size", tint: .auroraViolet, title: "Cỡ chữ", value: $preferences.fontSize, range: 12...34, suffix: "pt")
+        sliderRow(icon: "arrow.down.to.line", tint: .auroraSky, title: "Khoảng cách phía dưới", value: $preferences.bottomSpacing, range: 20...180, suffix: "pt")
         alignmentRow
-        colorRow(title: "Màu chữ", value: preferences.textColorHex) {
+        colorRow(icon: "paintpalette.fill", tint: .auroraPink, title: "Màu chữ", value: preferences.textColorHex) {
             ColorPicker("", selection: colorBinding(for: \.textColorHex)).labelsHidden()
         }
-        colorRow(title: "Màu viền", value: preferences.outlineColorHex) {
+        colorRow(icon: "scribble", tint: .auroraAmber, title: "Màu viền", value: preferences.outlineColorHex) {
             ColorPicker("", selection: colorBinding(for: \.outlineColorHex)).labelsHidden()
         }
-        sliderRow(title: "Độ dày viền chữ", value: $preferences.outlineWidth, range: 0...5, suffix: "px")
+        sliderRow(icon: "lineweight", tint: .auroraAmber, title: "Độ dày viền chữ", value: $preferences.outlineWidth, range: 0...5, suffix: "px")
         resetButton
     }
 
     private var alignmentRow: some View {
-        row(title: "Căn chỉnh", detail: "Trái · giữa · phải") {
+        row(icon: "text.aligncenter", tint: .auroraMint, title: "Căn chỉnh", detail: "Trái · giữa · phải") {
             Picker("Căn chỉnh", selection: $preferences.alignment) {
                 ForEach(["Trái", "Giữa", "Phải"], id: \.self) { Text($0).tag($0) }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: compact ? 145 : 180)
+            .frame(width: compact ? 150 : 185)
         }
     }
 
@@ -65,11 +63,11 @@ struct SubtitlePreferencesEditor: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
-        .tint(Color.cinemaAccent)
+        .tint(Color.auroraViolet)
     }
 
-    private func colorRow(title: String, value: String, @ViewBuilder content: () -> some View) -> some View {
-        row(title: title, detail: value, content: content)
+    private func colorRow(icon: String, tint: Color, title: String, value: String, @ViewBuilder content: () -> some View) -> some View {
+        row(icon: icon, tint: tint, title: title, detail: value, content: content)
     }
 
     private func colorBinding(for keyPath: WritableKeyPath<SubtitlePreferences, String>) -> Binding<Color> {
@@ -80,33 +78,31 @@ struct SubtitlePreferencesEditor: View {
     }
 
     private var resetButton: some View {
-        Button { preferences.reset() } label: {
-            Label("Đặt lại mặc định", systemImage: "arrow.counterclockwise")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color.cinemaAccent)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.cinemaAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        AuroraGhostButton(title: "Đặt lại mặc định", icon: "arrow.counterclockwise", tint: .auroraViolet) {
+            withAnimation(Motion.gentle) { preferences.reset() }
         }
-        .buttonStyle(.plain)
     }
 
     private var preview: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("XEM TRƯỚC REALTIME")
                 .font(.system(size: 8, weight: .black, design: .rounded))
                 .tracking(1)
-                .foregroundStyle(Color.cinemaAccent)
+                .foregroundStyle(Color.auroraViolet)
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(LinearGradient(colors: [.gray.opacity(0.45), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom))
-                    .frame(height: 128)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.auroraSky.opacity(0.34), .black.opacity(0.92)], startPoint: .top, endPoint: .bottom))
+                    .frame(height: 136)
                 subtitleSample
                     // Thu nhỏ theo preview nhưng vẫn phản ánh đúng chiều
                     // hướng của khoảng cách phía dưới trong player.
                     .padding(.bottom, min(max(preferences.bottomSpacing * 0.55, 4), 100))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
+            }
         }
     }
 
@@ -123,27 +119,49 @@ struct SubtitlePreferencesEditor: View {
             .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: -preferences.outlineWidth)
     }
 
-    private func row<Content: View>(title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 12) {
+    private func iconTile(_ icon: String, tint: Color) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.opacity(0.16))
+                .frame(width: compact ? 28 : 32, height: compact ? 28 : 32)
+            Image(systemName: icon)
+                .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+    }
+
+    private func row<Content: View>(icon: String, tint: Color, title: String, detail: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 11) {
+            iconTile(icon, tint: tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: compact ? 11 : 11, weight: .bold)).foregroundStyle(.white)
-                Text(detail).font(.system(size: compact ? 8 : 8)).foregroundStyle(.white.opacity(0.48)).lineLimit(1)
+                Text(title)
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(detail)
+                    .font(.auroraBody(8))
+                    .foregroundStyle(Color.auroraTextTertiary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 4)
             content()
         }
     }
 
-    private func sliderRow(title: String, value: Binding<Double>, range: ClosedRange<Double>, suffix: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+    private func sliderRow(icon: String, tint: Color, title: String, value: Binding<Double>, range: ClosedRange<Double>, suffix: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 11) {
+                iconTile(icon, tint: tint)
+                Text(title)
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(.white)
                 Spacer()
                 Text("\(Int(value.wrappedValue))\(suffix)")
-                    .font(.system(size: compact ? 10 : 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.cinemaAccent)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.auroraViolet)
             }
-            Slider(value: value, in: range, step: 1).tint(Color.cinemaAccent)
+            Slider(value: value, in: range, step: 1)
+                .tint(Color.auroraViolet)
+                .padding(.leading, compact ? 0 : 43)
         }
     }
 }
@@ -160,21 +178,13 @@ struct SubtitlePreferencesScreen: View {
                 SubtitlePreferencesEditor(preferences: $preferences)
                     .padding(.horizontal, 20)
                     .padding(.top, 58)
-                    .padding(.bottom, 42)
+                    .padding(.bottom, 120)
             }
         }
         .overlay(alignment: .topLeading) {
-            Button { dismiss() } label: {
-                Label("Trở lại", systemImage: "chevron.left")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.5), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 20)
-            .padding(.top, 8)
+            AuroraBackButton(title: "Trở lại") { dismiss() }
+                .padding(.leading, 20)
+                .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
         .onAppear { preferences = store.playbackDefaults.subtitlePreferences }

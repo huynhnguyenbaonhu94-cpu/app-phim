@@ -12,7 +12,9 @@ struct QRCodeImage: View {
             .resizable()
             .scaledToFit()
             .padding(16)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.4), radius: 20, y: 12)
+            .shadow(color: Color.auroraViolet.opacity(0.3), radius: 26, y: 8)
     }
 
     private static func makeImage(payload: String) -> UIImage {
@@ -113,6 +115,8 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
     deinit { if session.isRunning { session.stopRunning() } }
 }
 
+// MARK: - QR login sheet
+
 struct QRLoginSheet: View {
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.dismiss) private var dismiss
@@ -122,34 +126,124 @@ struct QRLoginSheet: View {
     @State private var errorMessage: String?
     @State private var remainingSeconds = 0
     @State private var sessionID = UUID()
+    @State private var scanOffset: CGFloat = -1
+
+    private var isSuccess: Bool { statusText.contains("thành công") }
 
     var body: some View {
         ZStack {
             CinemaBackground()
-            VStack(spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
                         SectionEyebrow(text: "CINEMORA ACCOUNT")
-                        Text("Đăng nhập bằng QR").font(.system(size: 26, weight: .black, design: .rounded)).foregroundStyle(.white)
+                        AuroraGradientText(text: "Đăng nhập bằng QR", font: .auroraDisplay(24))
                     }
                     Spacer()
-                    Button("Đóng") { dismiss() }.foregroundStyle(Color.cinemaAccent)
+                    Button("Đóng") { dismiss() }
+                        .font(.auroraLabel(13, weight: .bold))
+                        .foregroundStyle(Color.auroraViolet)
                 }
+
+                Spacer(minLength: 0)
+
                 if let challenge {
-                    QRCodeImage(payload: challenge.payload).frame(width: 260, height: 260)
-                    Text(statusText).font(.system(size: 12, weight: .semibold)).foregroundStyle(statusText.contains("thành công") ? Color.cinemaAccent : .white.opacity(0.7)).multilineTextAlignment(.center)
-                    Text(remainingSeconds > 0 ? "Mã QR còn hiệu lực: \(remainingSeconds) giây" : "Mã QR đã hết hạn")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(remainingSeconds > 15 ? Color.cinemaAccent : .orange)
-                    Text("Mở Cinemora trên thiết bị đã đăng nhập, chọn Quét QR, rồi xác nhận thiết bị này.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.58)).multilineTextAlignment(.center)
+                    ZStack {
+                        QRCodeImage(payload: challenge.payload)
+                            .frame(width: 250, height: 250)
+                            .overlay {
+                                GeometryReader { proxy in
+                                    LinearGradient(
+                                        colors: [Color.clear, Color.auroraViolet.opacity(0.65), Color.clear],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                    .frame(height: 46)
+                                    .offset(y: (scanOffset + 1) / 2 * max(proxy.size.height - 46, 0))
+                                    .blendMode(.plusLighter)
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .allowsHitTesting(false)
+                            }
+                            .scaleEffect(isSuccess ? 1.04 : 1)
+                            .animation(Motion.enter, value: isSuccess)
+
+                        if isSuccess {
+                            ZStack {
+                                Circle().fill(Color.auroraMint.opacity(0.22)).frame(width: 110, height: 110).blur(radius: 18)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 44, weight: .black))
+                                    .foregroundStyle(Color.auroraMint)
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+
+                    VStack(spacing: 9) {
+                        Text(statusText)
+                            .font(.auroraBody(12, weight: .semibold))
+                            .foregroundStyle(isSuccess ? Color.auroraMint : .white.opacity(0.78))
+                            .multilineTextAlignment(.center)
+                            .contentTransition(.opacity)
+
+                        HStack(spacing: 7) {
+                            Image(systemName: "timer").font(.system(size: 10, weight: .bold))
+                            Text(remainingSeconds > 0 ? "Mã QR còn hiệu lực \(remainingSeconds)s" : "Mã QR đã hết hạn")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundStyle(remainingSeconds > 15 ? Color.auroraViolet : Color.auroraAmber)
+
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.12))
+                                Capsule()
+                                    .fill(remainingSeconds > 15 ? LinearGradient.auroraPrimary : LinearGradient.auroraWarm)
+                                    .frame(width: max(4, proxy.size.width * min(1, Double(remainingSeconds) / 120)))
+                            }
+                        }
+                        .frame(height: 4)
+                        .padding(.horizontal, 34)
+                        .animation(.linear(duration: 1), value: remainingSeconds)
+                    }
                 } else if isLoading {
-                    ProgressView().tint(Color.cinemaAccent).padding(50)
+                    VStack(spacing: 14) {
+                        ProgressView().tint(Color.auroraViolet)
+                        Text("Đang tạo mã QR…")
+                            .font(.auroraBody(12))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    }
+                    .padding(50)
                 }
+
                 if let errorMessage {
-                    Text(errorMessage).font(.system(size: 11, weight: .semibold)).foregroundStyle(.red).multilineTextAlignment(.center)
-                    Button("Tạo mã mới") { Task { await runLoginLoop() } }.buttonStyle(.borderedProminent).tint(Color.cinemaAccent)
+                    VStack(spacing: 12) {
+                        Text(errorMessage)
+                            .font(.auroraBody(11, weight: .semibold))
+                            .foregroundStyle(Color.auroraPink)
+                            .multilineTextAlignment(.center)
+                        AuroraGhostButton(title: "Tạo mã mới", icon: "arrow.clockwise", tint: .auroraPink) {
+                            Task { await runLoginLoop() }
+                        }
+                    }
                 }
-                Spacer()
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.auroraSky)
+                    Text("Mở Cinemora trên thiết bị đã đăng nhập, chọn Quét QR, rồi xác nhận thiết bị này.")
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(13)
+                .background(Color.auroraSky.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.auroraSky.opacity(0.2), lineWidth: 0.8)
+                }
             }
             .padding(22)
         }
@@ -161,7 +255,10 @@ struct QRLoginSheet: View {
             statusText = "Đang tạo mã QR…"
             errorMessage = nil
             sessionID = UUID()
+            scanOffset = -1
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { scanOffset = 1 }
         }
+        .animation(Motion.enter, value: isSuccess)
         .task(id: sessionID) { await runLoginLoop() }
     }
 
@@ -184,7 +281,7 @@ struct QRLoginSheet: View {
                         statusText = "Đã xác nhận. Đang đăng nhập…"
                         try await store.completeQrLogin(nonce: created.nonce)
                         statusText = "Đăng nhập thành công."
-                        try? await Task.sleep(for: .milliseconds(250))
+                        try? await Task.sleep(for: .milliseconds(650))
                         dismiss()
                         return
                     case "denied":
@@ -208,7 +305,9 @@ struct QRLoginSheet: View {
 
     private static func parseDate(_ value: String) -> Date? {
         ISO8601DateFormatter().date(from: value) ?? {
-            let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter.date(from: value)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.date(from: value)
         }()
     }
 }

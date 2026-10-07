@@ -14,6 +14,7 @@ struct LibraryScreen: View {
     @State private var country = ""
     @State private var year: Int?
     @State private var scrollPosition: String?
+    @State private var filtersExpanded = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
     private let kinds = [
         LibraryFilterOption(title: "Phim Mới", value: "latest"),
@@ -30,70 +31,55 @@ struct LibraryScreen: View {
         LibraryFilterOption(title: "Phim Chiếu Rạp", value: "theatrical"),
     ]
 
+    private var activeFilterCount: Int {
+        [category, country].filter { !$0.isEmpty }.count + (year == nil ? 0 : 1)
+    }
+
     var body: some View {
         ZStack {
             CinemaBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     CinemaHeader(eyebrow: "KHÁM PHÁ THEO GU", title: "THƯ VIỆN")
                         .id("library-header")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 9) {
-                            ForEach(kinds) { option in
-                                Button { selectKind(option.value) } label: { filterChip(option.title, selected: kind == option.value) }
-                                    .buttonStyle(.plain)
-                            }
-                        }
+                        .auroraReveal(0)
+
+                    kindsRow
                         .id("library-kinds")
+                        .auroraReveal(1)
+
+                    filterToggle
+                        .auroraReveal(2)
+
+                    if filtersExpanded {
+                        filterPanel
+                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                     }
-                    if let meta = store.catalogMeta {
-                        filterGroup("THỂ LOẠI", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: category) { value in
-                            category = category == value ? "" : value
-                            load()
-                        }
-                        filterGroup("QUỐC GIA", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: country) { value in
-                            country = country == value ? "" : value
-                            load()
-                        }
-                        filterGroup("NĂM", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: year.map { String($0) } ?? "") { value in
-                            year = year == Int(value) ? nil : Int(value)
-                            load()
-                        }
-                    } else if store.catalogLoading {
-                        ProgressView().tint(.cinemaAccent)
-                    }
+
                     HStack(alignment: .lastTextBaseline) {
                         SectionHeading(eyebrow: "TUYỂN CHỌN CINEMORA", title: "Phim dành cho bạn")
                         Spacer()
-                        if store.catalogLoading { ProgressView().tint(.cinemaAccent).scaleEffect(0.8) }
-                    }
-                    if let error = store.catalogError, store.catalogMovies.isEmpty {
-                        StateMessage(icon: "wifi.exclamationmark", title: "Không tải được thư viện", detail: error, actionTitle: "Thử lại") { load() }
-                    } else if !store.catalogLoading && store.catalogMovies.isEmpty {
-                        StateMessage(icon: "film", title: "Chưa có kết quả", detail: "Hãy đổi bộ lọc để khám phá thêm phim.")
-                    } else {
-                        LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(store.catalogMovies) { movie in
-                                MoviePosterCard(movie: movie)
-                                    .id("library-movie-\(movie.id)")
-                                    .task {
-                                        if store.catalogHasMore && store.catalogMovies.suffix(4).contains(where: { $0.id == movie.id }) {
-                                            store.loadCatalog(kind: kind, category: category.isEmpty ? nil : category, country: country.isEmpty ? nil : country, year: year, reset: false)
-                                        }
-                                }
-                            }
+                        if store.catalogLoading && !store.catalogMovies.isEmpty {
+                            ProgressView().tint(.auroraViolet).scaleEffect(0.8)
+                        } else if !store.catalogMovies.isEmpty {
+                            Text("\(store.catalogMovies.count) phim")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraTextTertiary)
                         }
-                        .id("library-results-\(kind)-\(category)-\(country)-\(year.map(String.init) ?? "all")")
-                        if store.catalogLoading && !store.catalogMovies.isEmpty { ProgressView().tint(.cinemaAccent).frame(maxWidth: .infinity).padding() }
-                        if !store.catalogHasMore && !store.catalogMovies.isEmpty { Text("Đã hiển thị hết kết quả.").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4)).frame(maxWidth: .infinity).padding(.top, 12) }
                     }
+                    .auroraReveal(3)
+
+                    results
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 38)
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+                .padding(.bottom, 120)
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $scrollPosition)
             .refreshable { load() }
         }
+        .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadMeta(); load() }
         .onChange(of: scenePhase) { _, phase in
@@ -101,8 +87,163 @@ struct LibraryScreen: View {
         }
     }
 
+    // MARK: - Kind selector
+
+    private var kindsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                ForEach(kinds) { option in
+                    AuroraChip(title: option.title, selected: kind == option.value) {
+                        selectKind(option.value)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+    }
+
+    // MARK: - Filter disclosure
+
+    private var filterToggle: some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(Motion.sheet) { filtersExpanded.toggle() }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Bộ lọc nâng cao")
+                        .font(.auroraLabel(12, weight: .bold))
+                    if activeFilterCount > 0 {
+                        Text("\(activeFilterCount)")
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.auroraVoid)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(LinearGradient.auroraPrimary))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .black))
+                        .rotationEffect(.degrees(filtersExpanded ? 180 : 0))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 14)
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.auroraPress(scale: 0.98))
+            .auroraCard(cornerRadius: 18, tint: .auroraSky, fill: 0.75)
+
+            if activeFilterCount > 0 {
+                Button {
+                    withAnimation(Motion.gentle) { resetFilters() }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundStyle(Color.auroraPink)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.auroraPress(scale: 0.92))
+                .auroraCard(in: Circle(), tint: .auroraPink, fill: 0.85)
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityLabel("Xóa bộ lọc")
+            }
+        }
+        .animation(Motion.gentle, value: activeFilterCount)
+    }
+
+    @ViewBuilder
+    private var filterPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let meta = store.catalogMeta {
+                filterGroup("THỂ LOẠI", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: category) { value in
+                    category = category == value ? "" : value
+                    load()
+                }
+                filterGroup("QUỐC GIA", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: country) { value in
+                    country = country == value ? "" : value
+                    load()
+                }
+                filterGroup("NĂM", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: year.map { String($0) } ?? "") { value in
+                    year = year == Int(value) ? nil : Int(value)
+                    load()
+                }
+            } else if store.catalogLoading {
+                HStack(spacing: 10) {
+                    ProgressView().tint(.auroraViolet)
+                    Text("Đang tải bộ lọc…")
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+            } else {
+                Text("Chưa tải được bộ lọc từ máy chủ.")
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+        }
+        .padding(16)
+        .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.7)
+    }
+
+    // MARK: - Results
+
+    @ViewBuilder
+    private var results: some View {
+        if let error = store.catalogError, store.catalogMovies.isEmpty {
+            StateMessage(icon: "wifi.exclamationmark", title: "Không tải được thư viện", detail: error, actionTitle: "Thử lại") { load() }
+        } else if store.catalogLoading && store.catalogMovies.isEmpty {
+            SkeletonPosterGrid(count: 6)
+        } else if store.catalogMovies.isEmpty {
+            StateMessage(icon: "film", title: "Chưa có kết quả", detail: "Hãy đổi bộ lọc để khám phá thêm phim.")
+        } else {
+            LazyVGrid(columns: columns, spacing: 20) {
+                ForEach(Array(store.catalogMovies.enumerated()), id: \.element.id) { index, movie in
+                    MoviePosterCard(movie: movie, revealIndex: index % 12)
+                        .id("library-movie-\(movie.id)")
+                        .task {
+                            if store.catalogHasMore && store.catalogMovies.suffix(4).contains(where: { $0.id == movie.id }) {
+                                store.loadCatalog(kind: kind, category: category.isEmpty ? nil : category, country: country.isEmpty ? nil : country, year: year, reset: false)
+                            }
+                        }
+                }
+            }
+            .id("library-results-\(kind)-\(category)-\(country)-\(year.map(String.init) ?? "all")")
+
+            if store.catalogLoading {
+                HStack(spacing: 9) {
+                    ProgressView().tint(.auroraViolet).scaleEffect(0.85)
+                    Text("Đang tải thêm…")
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraTextTertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
+            } else if !store.catalogHasMore {
+                Text("Đã hiển thị hết kết quả.")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 14)
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
     private func selectKind(_ value: String) {
-        kind = value
+        withAnimation(Motion.gentle) { kind = value }
+        load()
+    }
+
+    private func resetFilters() {
+        category = ""
+        country = ""
+        year = nil
         load()
     }
 
@@ -116,22 +257,14 @@ struct LibraryScreen: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(values) { option in
-                        Button { action(option.value) } label: { filterChip(option.title, selected: selected == option.value) }.buttonStyle(.plain)
+                        AuroraChip(title: option.title, selected: selected == option.value) {
+                            action(option.value)
+                        }
                     }
                 }
+                .padding(.vertical, 2)
             }
+            .scrollClipDisabled()
         }
     }
-
-    private func filterChip(_ title: String, selected: Bool) -> some View {
-        HStack(spacing: 5) {
-            if selected { Image(systemName: "checkmark").font(.system(size: 9, weight: .black)) }
-            Text(title).font(.system(size: 10, weight: .bold, design: .rounded)).lineLimit(1)
-        }
-        .foregroundStyle(selected ? Color.cinemaInk : .white.opacity(0.74))
-        .padding(.horizontal, 13).padding(.vertical, 10)
-        .background(selected ? Color.cinemaAccent : Color.white.opacity(0.065), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(selected ? 0.42 : 0.1), lineWidth: 0.7))
-    }
-
 }

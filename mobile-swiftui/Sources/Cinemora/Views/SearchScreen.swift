@@ -20,6 +20,7 @@ struct SearchScreen: View {
     @State private var sortField: SearchSortField = .updated
     @State private var newestFirst = true
     @State private var scrollPosition: String?
+    @State private var filtersExpanded = false
     @FocusState private var focused: Bool
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -58,68 +59,226 @@ struct SearchScreen: View {
         }
     }
 
+    private var hasActiveFilters: Bool {
+        !language.isEmpty || !category.isEmpty || !country.isEmpty || !year.isEmpty || sortField != .updated || !newestFirst
+    }
+
+    private var activeFilterCount: Int {
+        [language, category, country, year].filter { !$0.isEmpty }.count + (sortField == .updated ? 0 : 1) + (newestFirst ? 0 : 1)
+    }
+
     var body: some View {
         ZStack {
             CinemaBackground()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     CinemaHeader(eyebrow: "TÌM THEO TÊN VIỆT HOẶC TÊN GỐC", title: "TÌM KIẾM")
                         .id("search-header")
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .semibold)).foregroundStyle(Color.cinemaAccent)
-                        TextField("Tên phim bạn muốn xem…", text: $keyword)
-                            .font(.system(size: 14, weight: .medium)).foregroundStyle(.white)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
-                            .focused($focused).onSubmit { runSearch() }
-                        if !keyword.isEmpty {
-                            Button { keyword = ""; submitted = ""; store.clearSearch() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.5)) }.buttonStyle(.plain)
-                        }
-                        Button(action: runSearch) {
-                            Image(systemName: "arrow.right").font(.system(size: 13, weight: .black)).foregroundStyle(Color.cinemaInk)
-                                .frame(width: 38, height: 38).background(Color.cinemaAccent, in: Circle())
-                        }
-                        .buttonStyle(.plain).disabled(keyword.trimmingCharacters(in: .whitespacesAndNewlines).count < 2)
-                    }
-                    .padding(.leading, 16).padding(.trailing, 8).frame(height: 58)
-                    .cinemaGlass(in: RoundedRectangle(cornerRadius: 21), tint: .white.opacity(0.07))
-                    .id("search-box")
+                        .auroraReveal(0)
+
+                    searchField
+                        .id("search-box")
+                        .auroraReveal(1)
 
                     HStack(alignment: .lastTextBaseline) {
                         SectionHeading(eyebrow: "KẾT QUẢ", title: submitted.isEmpty ? "Bạn đang tìm gì?" : "“\(submitted)”")
                         Spacer()
-                        if !store.searchResults.isEmpty { Text("\(filteredResults.count)/\(store.searchResults.count) phim").font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55)) }
+                        if !store.searchResults.isEmpty {
+                            Text("\(filteredResults.count)/\(store.searchResults.count) phim")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraTextTertiary)
+                                .contentTransition(.numericText())
+                                .animation(Motion.gentle, value: filteredResults.count)
+                        }
                     }
                     .id("search-results-header")
-                    if store.searchLoading {
-                        ProgressView("Đang tìm phim…").tint(.cinemaAccent).foregroundStyle(.white.opacity(0.65)).frame(maxWidth: .infinity).padding(.vertical, 60)
-                    } else if let error = store.searchError {
-                        StateMessage(icon: "wifi.exclamationmark", title: "Tìm kiếm chưa hoàn tất", detail: error, actionTitle: "Thử lại") { runSearch() }
-                    } else if !submitted.isEmpty && store.searchResults.isEmpty {
-                        StateMessage(icon: "text.magnifyingglass", title: "Chưa tìm thấy phim", detail: "Thử tên khác hoặc kiểm tra lại chính tả.")
-                    } else if !store.searchResults.isEmpty {
-                        quickFilters
-                        if filteredResults.isEmpty {
-                            StateMessage(icon: "line.3.horizontal.decrease.circle", title: "Không có phim phù hợp", detail: "Hãy nới lỏng một hoặc nhiều bộ lọc.")
-                        } else {
-                            LazyVGrid(columns: columns, spacing: 20) {
-                                ForEach(filteredResults) { movie in
-                                    MoviePosterCard(movie: movie)
-                                        .id("search-movie-\(movie.id)")
-                                }
-                            }
-                            .id("search-results-\(submitted)")
-                        }
-                    } else {
-                        StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự rồi chạm nút tìm kiếm.")
-                    }
+                    .auroraReveal(2)
+
+                    results
                 }
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 40)
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+                .padding(.bottom, 120)
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $scrollPosition)
             .scrollDismissesKeyboard(.interactively)
         }
+        .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    // MARK: - Search field
+
+    private var searchField: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(focused ? Color.auroraViolet : Color.white.opacity(0.5))
+            TextField("Tên phim bạn muốn xem…", text: $keyword)
+                .font(.auroraBody(14))
+                .foregroundStyle(.white)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($focused)
+                .onSubmit { runSearch() }
+            if !keyword.isEmpty {
+                Button {
+                    withAnimation(Motion.gentle) {
+                        keyword = ""
+                        submitted = ""
+                        store.clearSearch()
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
+            }
+            Button(action: runSearch) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(canSubmit ? Color.auroraVoid : Color.white.opacity(0.4))
+                    .frame(width: 40, height: 40)
+                    .background {
+                        if canSubmit {
+                            Circle().fill(LinearGradient.auroraPrimary)
+                        } else {
+                            Circle().fill(Color.white.opacity(0.08))
+                        }
+                    }
+            }
+            .buttonStyle(.auroraPress(scale: 0.92))
+            .disabled(!canSubmit)
+            .accessibilityLabel("Tìm kiếm")
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .frame(height: 58)
+        .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: focused ? 1 : 0.7)
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.auroraViolet.opacity(focused ? 0.6 : 0), lineWidth: 1.2)
+        }
+        .scaleEffect(focused ? 1.012 : 1)
+        .animation(Motion.gentle, value: focused)
+        .animation(Motion.gentle, value: keyword.isEmpty)
+    }
+
+    private var canSubmit: Bool {
+        keyword.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
+    }
+
+    // MARK: - Results
+
+    @ViewBuilder
+    private var results: some View {
+        if store.searchLoading {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    ProgressView().tint(.auroraViolet)
+                    Text("Đang tìm phim…")
+                        .font(.auroraBody(12))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                }
+                SkeletonPosterGrid(count: 4)
+            }
+        } else if let error = store.searchError {
+            StateMessage(icon: "wifi.exclamationmark", title: "Tìm kiếm chưa hoàn tất", detail: error, actionTitle: "Thử lại") { runSearch() }
+        } else if !submitted.isEmpty && store.searchResults.isEmpty {
+            StateMessage(icon: "text.magnifyingglass", title: "Chưa tìm thấy phim", detail: "Thử tên khác hoặc kiểm tra lại chính tả.")
+        } else if !store.searchResults.isEmpty {
+            quickFilters
+            if filteredResults.isEmpty {
+                StateMessage(icon: "line.3.horizontal.decrease.circle", title: "Không có phim phù hợp", detail: "Hãy nới lỏng một hoặc nhiều bộ lọc.")
+            } else {
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(Array(filteredResults.enumerated()), id: \.element.id) { index, movie in
+                        MoviePosterCard(movie: movie, revealIndex: index % 12)
+                            .id("search-movie-\(movie.id)")
+                    }
+                }
+                .id("search-results-\(submitted)")
+            }
+        } else {
+            StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự rồi chạm nút tìm kiếm.")
+        }
+    }
+
+    private var quickFilters: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button {
+                withAnimation(Motion.sheet) { filtersExpanded.toggle() }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Bộ lọc & sắp xếp")
+                        .font(.auroraLabel(12, weight: .bold))
+                    if activeFilterCount > 0 {
+                        Text("\(activeFilterCount)")
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .foregroundStyle(Color.auroraVoid)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(LinearGradient.auroraPrimary))
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .black))
+                        .rotationEffect(.degrees(filtersExpanded ? 180 : 0))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 14)
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.auroraPress(scale: 0.98))
+            .auroraCard(cornerRadius: 18, tint: .auroraSky, fill: 0.75)
+
+            if filtersExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    filterGroup("SẮP XẾP", options: SearchSortField.allCases.map(\.rawValue), selected: sortField.rawValue) { value in
+                        sortField = SearchSortField(rawValue: value) ?? .updated
+                    }
+                    filterGroup("THỨ TỰ", options: ["Mới nhất", "Cũ nhất"], selected: newestFirst ? "Mới nhất" : "Cũ nhất") { value in
+                        newestFirst = value == "Mới nhất"
+                    }
+                    filterGroup("NGÔN NGỮ", options: ["Vietsub", "Thuyết minh", "Lồng tiếng"], selected: language) { value in
+                        language = language == value ? "" : value
+                    }
+                    if !filterCategories.isEmpty {
+                        filterGroup("THỂ LOẠI", options: filterCategories, selected: category) { value in
+                            category = category == value ? "" : value
+                        }
+                    }
+                    if !filterCountries.isEmpty {
+                        filterGroup("QUỐC GIA", options: filterCountries, selected: country) { value in
+                            country = country == value ? "" : value
+                        }
+                    }
+                    if !filterYears.isEmpty {
+                        filterGroup("NĂM SẢN XUẤT", options: filterYears, selected: year) { value in
+                            year = year == value ? "" : value
+                        }
+                    }
+                    if hasActiveFilters {
+                        Button {
+                            withAnimation(Motion.gentle) { resetFilters() }
+                        } label: {
+                            Label("Xóa bộ lọc", systemImage: "arrow.counterclockwise")
+                                .font(.auroraLabel(11, weight: .bold))
+                                .foregroundStyle(Color.auroraPink)
+                        }
+                        .buttonStyle(.auroraPress(scale: 0.95))
+                    }
+                }
+                .padding(16)
+                .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: 0.65)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+        }
     }
 
     private func runSearch() {
@@ -130,60 +289,30 @@ struct SearchScreen: View {
         Task { await store.search(value) }
     }
 
-    private var quickFilters: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            filterGroup("SẮP XẾP", options: SearchSortField.allCases.map(\.rawValue), selected: sortField.rawValue) { value in
-                sortField = SearchSortField(rawValue: value) ?? .updated
-            }
-            filterGroup("THỨ TỰ", options: ["Mới nhất", "Cũ nhất"], selected: newestFirst ? "Mới nhất" : "Cũ nhất") { value in
-                newestFirst = value == "Mới nhất"
-            }
-            filterGroup("NGÔN NGỮ", options: ["Vietsub", "Thuyết minh", "Lồng tiếng"], selected: language) { value in
-                language = language == value ? "" : value
-            }
-            if !filterCategories.isEmpty { filterGroup("THỂ LOẠI", options: filterCategories, selected: category) { value in category = category == value ? "" : value } }
-            if !filterCountries.isEmpty { filterGroup("QUỐC GIA", options: filterCountries, selected: country) { value in country = country == value ? "" : value } }
-            if !filterYears.isEmpty { filterGroup("NĂM SẢN XUẤT", options: filterYears, selected: year) { value in year = year == value ? "" : value } }
-            if hasActiveFilters {
-                Button("Xóa bộ lọc", action: resetFilters)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.cinemaAccent)
-                    .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var hasActiveFilters: Bool {
-        !language.isEmpty || !category.isEmpty || !country.isEmpty || !year.isEmpty || sortField != .updated || !newestFirst
-    }
-
     private func resetFilters() {
-        language = ""; category = ""; country = ""; year = ""; sortField = .updated; newestFirst = true
+        language = ""
+        category = ""
+        country = ""
+        year = ""
+        sortField = .updated
+        newestFirst = true
     }
 
     private func filterGroup(_ title: String, options: [String], selected: String, action: @escaping (String) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             SectionEyebrow(text: title)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(options, id: \.self) { option in
-                        Button { action(option) } label: { filterChip(option, selected: selected == option) }
-                            .buttonStyle(.plain)
+                        AuroraChip(title: option, selected: selected == option) {
+                            action(option)
+                        }
                     }
                 }
+                .padding(.vertical, 2)
             }
+            .scrollClipDisabled()
         }
-    }
-
-    private func filterChip(_ title: String, selected: Bool) -> some View {
-        HStack(spacing: 5) {
-            if selected { Image(systemName: "checkmark").font(.system(size: 9, weight: .black)) }
-            Text(title).font(.system(size: 10, weight: .bold, design: .rounded)).lineLimit(1)
-        }
-        .foregroundStyle(selected ? Color.cinemaInk : .white.opacity(0.74))
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(selected ? Color.cinemaAccent : Color.white.opacity(0.065), in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(selected ? 0.42 : 0.1), lineWidth: 0.7))
     }
 
     private func dateValue(_ value: String?) -> Date {
