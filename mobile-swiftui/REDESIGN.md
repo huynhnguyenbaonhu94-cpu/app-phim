@@ -236,3 +236,60 @@ Ngoài ra `CinemoraTabShell` nay nhận `store` qua tham số (`let store: Cinem
 | 3 | `.scrollPosition(id:)` ở Trang chủ, Thư viện, Tìm kiếm: binding bị ghi lại liên tục khi cuộn, mỗi lần ghi đánh giá lại cả màn hình | Bỏ ở Thư viện/Tìm kiếm (không dùng đến); Trang chủ chuyển sang `ScrollViewReader` với lệnh cuộn lên đầu tường minh |
 | 4 | `.onAppear` của shimmer, LivePulse, equalizer, OfflineBanner ghi state mỗi lần view xuất hiện lại | Thêm guard, không ghi lại giá trị đã đúng |
 | 5 | `PosterArt` ghi `image = cached` mỗi lần `.task` chạy lại (tức mỗi lần tab hiện ra) | Chỉ ghi khi ảnh thực sự khác |
+## 10. Vòng sửa thứ tư: lỗi hiển thị và tìm kiếm tức thì
+
+### 10.1 Lỗi hiển thị: nền gradient làm tràn layout cả màn hình
+
+**Triệu chứng:** sau khi chuyển tab mượt, giao diện Trang chủ vỡ: tiêu đề "CINEMORA" ở
+header biến mất, thẻ hero tràn viền không còn bo góc, dòng phim bên dưới bị đẩy lệch sang trái.
+
+**Nguyên nhân:** ở vòng 9, `CinemaBackground` được đổi từ `GeometryReader` sang các blob
+kích thước cố định. Nhưng blob được đặt **trực tiếp trong `ZStack`**, và mỗi blob có
+`frame(width: diameter, height: diameter)` với `diameter = size * 2.2`, tức blob lớn nhất lên
+tới **836pt** — trong khi màn hình chỉ rộng ~390pt.
+
+`ZStack` lấy kích thước bằng kích thước lớn nhất trong các con, nên cả khối nền bị đẩy lên
+836pt. Vì nền nằm chung `ZStack` với `ScrollView` của màn hình, `ScrollView` bị đề xuất bề
+rộng đó, kéo theo `LazyVStack` rộng ~800pt, header bị căn giữa ra ngoài màn hình và thẻ hero
+bị kéo giãn hết cỡ.
+
+**Cách sửa:** đưa toàn bộ blob và vignette vào `.overlay { … }`. `overlay` được định kích
+thước bởi view mà nó trang trí và **không bao giờ đẩy kích thước của chính nó trở lại layout**,
+nên các blob khổng lồ không còn ảnh hưởng tới bố cục của bất kỳ màn hình nào:
+
+```swift
+LinearGradient(colors: [.auroraVoid, .auroraInk, .auroraVoid], startPoint: .top, endPoint: .bottom)
+    .overlay { ZStack { /* ba blob + vignette */ } }
+    .allowsHitTesting(false)
+    .ignoresSafeArea()
+```
+
+**Gia cố thêm:** `HeroParallax` cũng được cấp bề rộng xác định bằng
+`.containerRelativeFrame(.horizontal) { length, _ in max(length - 40, 0) }`. Trước đó thẻ chỉ
+có `.frame(height:)`; khi chỉ ràng buộc chiều cao, bề rộng *lý tưởng* của tiêu đề (một dòng,
+cỡ chữ 28) có thể kéo giãn cả `LazyVStack`. `containerRelativeFrame` lấy bề rộng từ
+`ScrollView` nên vẫn giữ được `.visualEffect`, không cần `GeometryReader` và không sinh thêm
+lượt layout mỗi frame cuộn.
+
+Đã rà lại toàn bộ dự án: không còn phần tử trang trí nào có `frame(width:)` từ 280pt trở lên
+nằm trực tiếp trong `ZStack` của màn hình.
+
+### 10.2 Tìm kiếm tức thì (không cần bấm Enter)
+
+**Trước:** phải gõ tên rồi bấm Enter hoặc nút mũi tên mới chạy tìm kiếm.
+
+**Sau:** kết quả tự động hiện theo từng nhịp gõ.
+
+- `TextField` thêm `.onChange(of: keyword) { _, value in scheduleLiveSearch(value) }`.
+- `scheduleLiveSearch` **debounce 300ms**: mỗi lần gõ lại huỷ tác vụ đang chờ và hẹn lại, nên
+  chỉ có một request cho mỗi cụm từ thay vì một request cho mỗi ký tự.
+- Từ 2 ký tự trở lên mới gọi API, đúng như ràng buộc sẵn có của `CinemaStore.search`.
+- Xoá hết nội dung ô tìm kiếm thì tự động xoá kết quả.
+- Enter và nút mũi tên vẫn hoạt động: chúng **huỷ debounce và tìm ngay**, đồng thời thu bàn phím.
+
+Vì `CinemaStore.search` đã tự bỏ qua các phản hồi đến sai thứ tự (`searchRequestID`), một
+request cũ về muộn không thể ghi đè kết quả mới hơn.
+
+Về phần hiển thị, khung xương tải (skeleton) chỉ chiếm màn hình khi **chưa có kết quả nào**.
+Khi đang gõ mà đã có kết quả cũ, kết quả cũ được giữ nguyên và chỉ hiện một `ProgressView`
+nhỏ cạnh bộ đếm — tránh nhấp nháy toàn màn hình theo từng ký tự.

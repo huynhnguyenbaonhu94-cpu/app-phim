@@ -91,32 +91,33 @@ extension Font {
 /// every frame of every tab and make switching tabs feel laggy.
 struct CinemaBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.auroraVoid, Color.auroraInk, Color.auroraVoid],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // Fixed-size, centred blobs instead of a `GeometryReader` with
-            // size-relative offsets: the background now has a static layout, so
-            // showing a screen never triggers extra layout work, and there are
-            // two fewer full-screen gradient layers to composite.
-            blob(Color.auroraViolet.opacity(0.34), size: 380)
-                .offset(x: -110, y: -300)
-            blob(Color.auroraPink.opacity(0.24), size: 320)
-                .offset(x: 130, y: -40)
-            blob(Color.auroraSky.opacity(0.18), size: 340)
-                .offset(x: 60, y: 340)
-
-            RadialGradient(
-                colors: [Color.clear, Color.auroraVoid.opacity(0.62)],
-                center: .center,
-                startRadius: 90,
-                endRadius: 520
-            )
-            .ignoresSafeArea()
+        LinearGradient(
+            colors: [Color.auroraVoid, Color.auroraInk, Color.auroraVoid],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        // The glow blobs live in an `overlay`, which is sized by the view it
+        // decorates and never feeds its own size back into the layout. That
+        // matters because each blob is roughly 800pt across: as direct children
+        // of a `ZStack` their frames widened the whole screen, which pushed the
+        // header off-centre and stretched the hero card to full bleed.
+        .overlay {
+            ZStack {
+                blob(Color.auroraViolet.opacity(0.34), size: 380)
+                    .offset(x: -110, y: -300)
+                blob(Color.auroraPink.opacity(0.24), size: 320)
+                    .offset(x: 130, y: -40)
+                blob(Color.auroraSky.opacity(0.18), size: 340)
+                    .offset(x: 60, y: 340)
+                RadialGradient(
+                    colors: [Color.clear, Color.auroraVoid.opacity(0.62)],
+                    center: .center,
+                    startRadius: 90,
+                    endRadius: 520
+                )
+            }
         }
+        .allowsHitTesting(false)
         .ignoresSafeArea()
         // No `drawingGroup()` here on purpose: the stack is static, so Core
         // Animation already caches the layers, while an offscreen group would

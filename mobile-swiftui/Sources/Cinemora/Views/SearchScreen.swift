@@ -13,6 +13,7 @@ struct SearchScreen: View {
     @EnvironmentObject private var store: CinemaStore
     @State private var keyword = ""
     @State private var submitted = ""
+    @State private var searchTask: Task<Void, Never>?
     @State private var language = ""
     @State private var category = ""
     @State private var country = ""
@@ -82,7 +83,11 @@ struct SearchScreen: View {
                     HStack(alignment: .lastTextBaseline) {
                         SectionHeading(eyebrow: "KẾT QUẢ", title: submitted.isEmpty ? "Bạn đang tìm gì?" : "“\(submitted)”")
                         Spacer()
-                        if !store.searchResults.isEmpty {
+                        if store.searchLoading && !store.searchResults.isEmpty {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.auroraViolet)
+                        } else if !store.searchResults.isEmpty {
                             Text("\(filteredResults.count)/\(store.searchResults.count) phim")
                                 .font(.auroraBody(10))
                                 .foregroundStyle(Color.auroraTextTertiary)
@@ -120,8 +125,10 @@ struct SearchScreen: View {
                 .submitLabel(.search)
                 .focused($focused)
                 .onSubmit { runSearch() }
+                .onChange(of: keyword) { _, value in scheduleLiveSearch(value) }
             if !keyword.isEmpty {
                 Button {
+                    searchTask?.cancel()
                     withAnimation(Motion.gentle) {
                         keyword = ""
                         submitted = ""
@@ -172,7 +179,9 @@ struct SearchScreen: View {
 
     @ViewBuilder
     private var results: some View {
-        if store.searchLoading {
+        // Only take over the screen with skeletons when there is nothing to
+        // show yet; while typing, the previous results stay put.
+        if store.searchLoading && store.searchResults.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
                     ProgressView().tint(.auroraViolet)
@@ -200,7 +209,7 @@ struct SearchScreen: View {
                 .id("search-results-\(submitted)")
             }
         } else {
-            StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự rồi chạm nút tìm kiếm.")
+            StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự, kết quả sẽ hiện ngay khi bạn gõ.")
         }
     }
 
@@ -278,12 +287,39 @@ struct SearchScreen: View {
         }
     }
 
+    /// Enter or the arrow button: search at once instead of waiting out the
+    /// debounce.
     private func runSearch() {
         let value = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { return }
+        searchTask?.cancel()
         focused = false
         submitted = value
         Task { await store.search(value) }
+    }
+
+    /// Live search: results follow what you type.
+    private func scheduleLiveSearch(_ value: String) {
+        searchTask?.cancel()
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            withAnimation(Motion.gentle) {
+                submitted = ""
+                store.clearSearch()
+            }
+            return
+        }
+        guard trimmed.count >= 2 else { return }
+        searchTask = Task { @MainActor in
+            // Wait for a pause in typing, so one request runs per word instead of
+            // one per keystroke. `CinemaStore.search` already drops out-of-order
+            // responses, so a slower earlier request can never overwrite a newer
+            // result.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            submitted = trimmed
+            await store.search(trimmed)
+        }
     }
 
     private func resetFilters() {

@@ -590,7 +590,12 @@ struct HeroParallax: View {
         // `visualEffect` reads the scroll geometry in the render tree instead of
         // through a `GeometryReader`, so scrolling no longer forces a SwiftUI
         // layout pass of this card on every frame.
+        // The card also needs a definite width: given only a height, the title's
+        // ideal (single-line) width would widen the whole lazy stack. Resolving
+        // it from the scroll container keeps `visualEffect`, so no extra layout
+        // pass is needed on every scroll frame.
         FeaturedMovieCard(movie: movie)
+            .containerRelativeFrame(.horizontal) { length, _ in max(length - 40, 0) }
             .frame(height: height)
             .visualEffect { content, proxy in
                 let minY = proxy.frame(in: .named(coordinateSpace)).minY
