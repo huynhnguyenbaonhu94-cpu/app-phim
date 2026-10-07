@@ -48,7 +48,9 @@ struct AuroraReveal: ViewModifier {
             .onAppear {
                 guard !shown else { return }
                 guard !reduceMotion else { shown = true; return }
-                withAnimation(Motion.enter.delay(Double(min(index, 14)) * 0.045)) {
+                // Short, tightly capped stagger: a long cascade kept the whole
+                // screen animating while a tab was still settling in.
+                withAnimation(Motion.enter.delay(Double(min(index, 8)) * 0.028)) {
                     shown = true
                 }
             }

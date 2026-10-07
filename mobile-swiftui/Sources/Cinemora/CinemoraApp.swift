@@ -38,17 +38,25 @@ private struct LaunchLoader: View {
 
             VStack(spacing: 10) {
                 ZStack {
-                    Circle()
-                        .fill(Color.auroraViolet.opacity(0.3))
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 38)
-                        .scaleEffect(glow ? 1.15 : 0.82)
-                    Circle()
-                        .fill(Color.auroraPink.opacity(0.22))
-                        .frame(width: 110, height: 110)
-                        .blur(radius: 30)
-                        .offset(x: 26, y: -18)
-                        .scaleEffect(glow ? 0.9 : 1.1)
+                    // Soft radial gradients instead of blurred circles: same
+                    // glow, but no offscreen blur pass while the app boots.
+                    RadialGradient(
+                        colors: [Color.auroraViolet.opacity(0.5), Color.auroraViolet.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 150
+                    )
+                    .frame(width: 300, height: 300)
+                    .scaleEffect(glow ? 1.12 : 0.86)
+                    RadialGradient(
+                        colors: [Color.auroraPink.opacity(0.4), Color.auroraPink.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 110
+                    )
+                    .frame(width: 220, height: 220)
+                    .offset(x: 26, y: -18)
+                    .scaleEffect(glow ? 0.92 : 1.08)
                     Image(systemName: "sparkles.tv.fill")
                         .font(.system(size: 44, weight: .black))
                         .foregroundStyle(LinearGradient.auroraPrimary)
@@ -91,7 +99,6 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
-    @EnvironmentObject private var store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
@@ -143,17 +150,7 @@ struct CinemoraTabShell: View {
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.45)) { showLaunchLoader = false }
         }
-        .task {
-            // Session restore runs in the background; the launch screen must
-            // never wait for a slow/unavailable API before showing the app.
-            await store.restoreAccount()
-        }
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                if !Task.isCancelled { await store.checkAccountSession() }
-            }
-        }
+        .background { AccountSessionWatcher() }
     }
 
     private func tabRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -167,6 +164,37 @@ struct CinemoraTabShell: View {
 }
 
 // MARK: - Offline banner
+
+/// Owns the account-session work for the whole app.
+///
+/// It deliberately lives in its own tiny view instead of on the tab shell: an
+/// `@EnvironmentObject` invalidates its view on *every* published change, so
+/// observing the store on the shell re-created the whole `TabView` (and all five
+/// tab roots) whenever the store changed. Here only this zero-sized view is
+/// invalidated, which keeps tab switching smooth.
+private struct AccountSessionWatcher: View {
+    @EnvironmentObject private var store: CinemaStore
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .task {
+                // Session restore runs in the background; the launch screen must
+                // never wait for a slow/unavailable API before showing the app.
+                await store.restoreAccount()
+            }
+            .task {
+                // Session checks only need to catch revoked sessions, so a slow
+                // timer is enough. Every poll that changes state makes each tab
+                // re-render, so keep the interval generous.
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(20))
+                    if !Task.isCancelled { await store.checkAccountSession() }
+                }
+            }
+    }
+}
 
 private struct OfflineBanner: View {
     @State private var pulse = false

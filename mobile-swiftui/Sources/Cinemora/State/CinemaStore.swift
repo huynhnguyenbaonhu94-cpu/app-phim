@@ -82,24 +82,33 @@ final class CinemaStore: ObservableObject {
 
     func startTvLiveUpdates() async {
         guard tvEventsTask == nil else { return }
-        tvLoading = tvStreams.isEmpty
+        let needsLoading = tvStreams.isEmpty
+        if tvLoading != needsLoading { tvLoading = needsLoading }
         do {
             async let streams = api.tvStreams()
             async let videos = api.tvVideos()
-            tvStreams = try await streams
-            tvVideos = (try? await videos) ?? []
-            tvError = nil
+            // Every assignment to a @Published property invalidates every tab
+            // that observes the store, so only write when the value changed.
+            let fetchedStreams = try await streams
+            let fetchedVideos = (try? await videos) ?? []
+            if fetchedStreams != tvStreams { tvStreams = fetchedStreams }
+            if fetchedVideos != tvVideos { tvVideos = fetchedVideos }
+            if tvError != nil { tvError = nil }
         } catch {
             tvError = error.localizedDescription
         }
-        tvLoading = false
+        if tvLoading { tvLoading = false }
         tvVideoRefreshTask?.cancel()
         tvVideoRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(12))
+                // Posted videos change rarely; a slower poll keeps the shared
+                // store quiet while the user is on other tabs.
+                try? await Task.sleep(for: .seconds(45))
                 guard !Task.isCancelled else { return }
-                if let videos = try? await self.api.tvVideos() { self.tvVideos = videos }
+                if let videos = try? await self.api.tvVideos(), videos != self.tvVideos {
+                    self.tvVideos = videos
+                }
             }
         }
         tvEventsTask = Task { @MainActor [weak self] in
@@ -136,9 +145,11 @@ final class CinemaStore: ObservableObject {
         do {
             async let streams = api.tvStreams()
             async let videos = api.tvVideos()
-            tvStreams = try await streams
-            tvVideos = (try? await videos) ?? tvVideos
-            tvError = nil
+            let fetchedStreams = try await streams
+            let fetchedVideos = (try? await videos) ?? tvVideos
+            if fetchedStreams != tvStreams { tvStreams = fetchedStreams }
+            if fetchedVideos != tvVideos { tvVideos = fetchedVideos }
+            if tvError != nil { tvError = nil }
         } catch {
             tvError = error.localizedDescription
         }
@@ -152,8 +163,10 @@ final class CinemaStore: ObservableObject {
     private func applyTvEvent(_ payload: String) {
         guard let data = payload.data(using: .utf8),
               let snapshot = try? JSONDecoder().decode(TvStreamSnapshot.self, from: data) else { return }
-        tvStreams = snapshot.streams
-        tvError = nil
+        // Server-sent snapshots often repeat the current state; skipping the
+        // no-op write avoids re-rendering every tab on each event.
+        if snapshot.streams != tvStreams { tvStreams = snapshot.streams }
+        if tvError != nil { tvError = nil }
     }
 
     func isFavorite(_ movie: Movie) -> Bool {
@@ -227,7 +240,11 @@ final class CinemaStore: ObservableObject {
         guard accountUser != nil else { return }
         do {
             let response = try await api.me()
-            if let user = response.value { accountUser = user }
+            if let user = response.value {
+                // This runs on a timer in the tab shell. Writing an identical
+                // value would still invalidate every tab, so compare first.
+                if user != accountUser { accountUser = user }
+            }
             else {
                 clearAccountState()
             }
@@ -374,7 +391,7 @@ final class CinemaStore: ObservableObject {
         do {
             let devices = try await api.accountDevices()
             guard accountUser?.id == expectedUserID else { return }
-            accountDevices = devices
+            if devices != accountDevices { accountDevices = devices }
         }
         catch {
             if accountUser != nil { accountError = error.localizedDescription }

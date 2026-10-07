@@ -15,6 +15,8 @@ struct LibraryScreen: View {
     @State private var year: Int?
     @State private var scrollPosition: String?
     @State private var filtersExpanded = false
+    @State private var loadedSignature: String?
+    @State private var lastLoadAt: Date?
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
     private let kinds = [
         LibraryFilterOption(title: "Phim Mới", value: "latest"),
@@ -81,9 +83,9 @@ struct LibraryScreen: View {
         }
         .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)
-        .task { await store.loadMeta(); load() }
+        .task { await store.loadMeta(); loadIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { load() }
+            if phase == .active { loadIfNeeded() }
         }
     }
 
@@ -248,7 +250,27 @@ struct LibraryScreen: View {
     }
 
     private func load() {
+        loadedSignature = filterSignature
+        lastLoadAt = Date()
         store.loadCatalog(kind: kind, category: category.isEmpty ? nil : category, country: country.isEmpty ? nil : country, year: year)
+    }
+
+    private var filterSignature: String {
+        "\(kind)|\(category)|\(country)|\(year.map(String.init) ?? "-")"
+    }
+
+    /// `TabView` re-runs `.task` every time the tab becomes visible again.
+    /// Reloading unconditionally cleared the grid and showed skeletons on every
+    /// switch, so re-appearance now reuses what is already loaded unless the
+    /// filters changed, the grid is empty, or the data went stale.
+    private func loadIfNeeded() {
+        if loadedSignature == filterSignature,
+           !store.catalogMovies.isEmpty,
+           let lastLoadAt,
+           Date().timeIntervalSince(lastLoadAt) < 180 {
+            return
+        }
+        load()
     }
 
     private func filterGroup(_ title: String, values: [LibraryFilterOption], selected: String, action: @escaping (String) -> Void) -> some View {

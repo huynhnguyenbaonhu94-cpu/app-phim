@@ -84,12 +84,12 @@ extension Font {
 
 /// Animated aurora field. Three soft light blooms drift slowly behind the
 /// content, layered over a deep indigo base and finished with a vignette.
-/// The motion is a single 15s ease so it never competes with the UI, and it is
-/// skipped entirely when Reduce Motion is enabled.
+/// The blobs are soft `RadialGradient`s rather than blurred circles, and the
+/// whole stack is completely static: no `blur`, no repeating animation. That
+/// matters because every tab keeps its own background alive once visited, so a
+/// blurred or continuously animating background would be re-composited for
+/// every frame of every tab and make switching tabs feel laggy.
 struct CinemaBackground: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var drift = false
-
     var body: some View {
         ZStack {
             LinearGradient(
@@ -102,12 +102,14 @@ struct CinemaBackground: View {
                 let w = max(proxy.size.width, 1)
                 let h = max(proxy.size.height, 1)
                 ZStack {
-                    blob(Color.auroraViolet.opacity(0.36), size: 340)
-                        .offset(x: drift ? w * 0.26 : w * 0.04, y: drift ? -h * 0.26 : -h * 0.36)
-                    blob(Color.auroraPink.opacity(0.26), size: 300)
-                        .offset(x: drift ? -w * 0.26 : -w * 0.04, y: drift ? h * 0.16 : h * 0.02)
-                    blob(Color.auroraSky.opacity(0.20), size: 280)
-                        .offset(x: drift ? w * 0.16 : -w * 0.22, y: drift ? h * 0.38 : h * 0.50)
+                    blob(Color.auroraViolet.opacity(0.34), size: 360)
+                        .offset(x: -w * 0.20, y: -h * 0.32)
+                    blob(Color.auroraPink.opacity(0.24), size: 320)
+                        .offset(x: w * 0.24, y: -h * 0.04)
+                    blob(Color.auroraSky.opacity(0.18), size: 300)
+                        .offset(x: -w * 0.12, y: h * 0.34)
+                    blob(Color.auroraMint.opacity(0.12), size: 240)
+                        .offset(x: w * 0.30, y: h * 0.58)
                 }
                 .frame(width: w, height: h)
             }
@@ -122,19 +124,24 @@ struct CinemaBackground: View {
             .ignoresSafeArea()
         }
         .ignoresSafeArea()
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 15).repeatForever(autoreverses: true)) {
-                drift = true
-            }
-        }
+        // No `drawingGroup()` here on purpose: the stack is static, so Core
+        // Animation already caches the layers, while an offscreen group would
+        // have to be re-rasterised every time the store publishes a change.
     }
 
     private func blob(_ color: Color, size: CGFloat) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .blur(radius: 76)
+        let diameter = size * 2.2
+        return RadialGradient(
+            stops: [
+                .init(color: color, location: 0),
+                .init(color: color.opacity(0.5), location: 0.38),
+                .init(color: color.opacity(0), location: 1)
+            ],
+            center: .center,
+            startRadius: 0,
+            endRadius: diameter * 0.5
+        )
+        .frame(width: diameter, height: diameter)
     }
 }
 
@@ -150,7 +157,19 @@ struct AuroraSurface<S: InsettableShape>: ViewModifier {
     let glow: Bool
     let fill: Double
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        // The coloured bloom is a second shadow pass, so it is only rendered
+        // when a card actually asks for it. Lists and grids keep a single
+        // neutral shadow, which halves the offscreen rendering work.
+        if glow {
+            surface(content).shadow(color: tint.opacity(0.26), radius: 20, y: 6)
+        } else {
+            surface(content)
+        }
+    }
+
+    private func surface(_ content: Content) -> some View {
         content
             .background {
                 shape.fill(
@@ -168,8 +187,7 @@ struct AuroraSurface<S: InsettableShape>: ViewModifier {
             .overlay {
                 shape.strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
             }
-            .shadow(color: Color.black.opacity(0.34), radius: 16, y: 10)
-            .shadow(color: glow ? tint.opacity(0.24) : Color.clear, radius: 22, y: 6)
+            .shadow(color: Color.black.opacity(0.32), radius: 14, y: 9)
     }
 }
 

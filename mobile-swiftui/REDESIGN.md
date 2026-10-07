@@ -129,3 +129,24 @@ Lần archive đầu tiên thất bại với 3 lỗi biên dịch, đều nằm
 Mọi nơi gọi `.auroraCard(in:)` / `.auroraSmoke(in:)` đều truyền `Circle()`, `Capsule()` hoặc `RoundedRectangle(...)` — tất cả đều là `InsettableShape` nên không cần sửa call site.
 
 Sau khi sửa, đã quét lại toàn bộ project: 23/23 file hợp lệ về cú pháp, và mọi token thiết kế được dùng (`Color.aurora*`, `LinearGradient.aurora*`, `Font.aurora*`, `Motion.*`, modifier `aurora*`) đều tồn tại trong định nghĩa.
+
+## 7. Sửa hiện tượng lag khi chuyển tab
+
+`TabView` giữ **tất cả** tab đã mở trong bộ nhớ, nên mọi thứ đặt trong màn hình vẫn tiếp tục được vẽ và cập nhật kể cả khi tab đó không hiển thị. Có 6 nguồn gây lag, đã sửa hết:
+
+| # | Nguyên nhân | Vì sao gây lag | Cách sửa |
+| --- | --- | --- | --- |
+| 1 | `CinemaBackground` dùng 3 hình tròn `.blur(radius: 76)` + animation `repeatForever` 15s | Blur phải render offscreen, và animation chạy **mãi mãi, ở mọi tab đã mở**. Đây là nguyên nhân nặng nhất | Thay bằng `RadialGradient` (cùng vẻ mềm, không cần blur) và bỏ hoàn toàn animation nền → nền tĩnh, Core Animation cache được |
+| 2 | Màn khởi động dùng 2 hình tròn `.blur()` | Blur chạy đúng lúc app đang dựng màn hình đầu | Đổi sang `RadialGradient`, giữ nguyên hiệu ứng phóng nhẹ |
+| 3 | `checkAccountSession()` gán `accountUser` mỗi **5 giây** | Gán lại giá trị y hệt vẫn phát `objectWillChange`, khiến **cả 5 tab re-render** mỗi 5 giây | Chỉ gán khi user thật sự đổi; giãn chu kỳ 5s → 20s |
+| 4 | `tvVideoRefreshTask` gán `tvVideos` mỗi **12 giây**; `applyTvEvent` gán `tvStreams` mỗi sự kiện SSE | Cùng cơ chế: publish → mọi tab re-render, kể cả khi dữ liệu không đổi | Chỉ gán khi dữ liệu khác (`!=`); giãn chu kỳ 12s → 45s |
+| 5 | `LibraryScreen` gọi `loadCatalog(reset: true)` mỗi lần tab hiện lại | `.task` chạy lại mỗi lần tab được chọn → **xoá sạch lưới phim**, hiện skeleton rồi tải lại | Thêm `loadIfNeeded()`: chỉ tải lại khi bộ lọc đổi, lưới rỗng, hoặc dữ liệu cũ hơn 180s |
+| 6 | `TVScreen.onDisappear` gọi `stopTvLiveUpdates()` | Rời tab là ngắt SSE; quay lại tab là fetch lại 2 danh sách + mở lại SSE | Chỉ ngắt kết nối khi app xuống background (`scenePhase != .active`), không ngắt khi đổi tab |
+
+Thêm hai thay đổi về cấu trúc và chi phí vẽ:
+
+- **`CinemoraTabShell` không còn `@EnvironmentObject store`.** Một `@EnvironmentObject` làm view chứa nó bị invalidate mỗi khi store publish, bất kể body có đọc thuộc tính đó hay không. Trước đây điều này tái tạo toàn bộ `TabView` cùng 5 tab root mỗi lần store đổi. Phần restore/kiểm tra session được chuyển sang `AccountSessionWatcher` — một view 0×0 riêng biệt, nên chỉ nó bị invalidate.
+- **`.auroraCard` chỉ vẽ 1 bóng thay vì 2.** Quầng màu (bóng thứ hai) chỉ được thêm khi `glow: true`; trước đây bóng thứ hai luôn tồn tại với màu trong suốt, vẫn tốn một lượt render offscreen cho mỗi card trong danh sách/lưới.
+- **Hiệu ứng xuất hiện so le được rút ngắn**: delay tối đa từ `14 × 45ms = 630ms` xuống `8 × 28ms = 224ms`, nên nội dung "đứng yên" nhanh hơn nhiều sau khi chuyển tab.
+
+Kết quả: khi chuyển tab, không còn blur toàn màn hình phải vẽ lại, không còn fetch lại dữ liệu, không còn vòng publish định kỳ 5–12 giây, và không còn re-render cả cây `TabView` mỗi khi store thay đổi. Các hiệu ứng chuyển động vẫn giữ nguyên: chỉ báo tab trượt, icon bounce, press scale, reveal, shimmer, skeleton, pulse/equalizer ở tab Truyền hình.

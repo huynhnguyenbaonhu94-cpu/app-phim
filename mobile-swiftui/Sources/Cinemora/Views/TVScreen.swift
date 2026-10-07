@@ -391,7 +391,11 @@ struct TVScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.startTvLiveUpdates() }
         .onChange(of: scenePhase) { _, phase in
+            // Only backgrounding the app closes the live connection. Switching
+            // tabs must not: doing so restarted the SSE stream and refetched
+            // both lists every time the user came back to this tab.
             if phase == .active { Task { await store.refreshTvStreams() } }
+            else { store.stopTvLiveUpdates() }
         }
         .onChange(of: store.tvStreams) { _, streams in
             // During playback, keep the selected media snapshot stable. A
@@ -412,7 +416,7 @@ struct TVScreen: View {
                 playback.shutdown()
             }
         }
-        .onDisappear { playback.shutdown(); store.stopTvLiveUpdates() }
+        .onDisappear { playback.shutdown() }
         .fullScreenCover(isPresented: $isPlayerPresented, onDismiss: {
             if relatedMovieRoute != nil {
                 relatedMovieRoute = nil
