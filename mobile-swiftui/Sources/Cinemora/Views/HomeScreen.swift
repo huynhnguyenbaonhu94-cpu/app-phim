@@ -172,7 +172,7 @@ struct SectionListScreen: View {
     @State private var page = 1
     @State private var loading = false
     @State private var reachedEnd = false
-    @State private var error: String?
+    @State private var loadError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -187,8 +187,8 @@ struct SectionListScreen: View {
 
                     if movies.isEmpty && loading {
                         SkeletonPosterGrid(count: 6)
-                    } else if movies.isEmpty, let error {
-                        StateMessage(icon: "wifi.exclamationmark", title: "Chưa tải được danh sách", detail: error, actionTitle: "Thử lại") {
+                    } else if movies.isEmpty, let loadError {
+                        StateMessage(icon: "wifi.exclamationmark", title: "Chưa tải được danh sách", detail: loadError, actionTitle: "Thử lại") {
                             Task { await load(reset: true) }
                         }
                     } else {
@@ -228,7 +228,7 @@ struct SectionListScreen: View {
             movies = []
             page = 1
             reachedEnd = false
-            error = nil
+            loadError = nil
         }
         guard !reachedEnd else { return }
         loading = true
@@ -241,7 +241,7 @@ struct SectionListScreen: View {
             page += 1
             if fresh.isEmpty { reachedEnd = true }
         } catch {
-            error = error.localizedDescription
+            loadError = error.localizedDescription
             reachedEnd = true
         }
     }

@@ -283,6 +283,10 @@ private final class TVPlaybackController: ObservableObject {
 }
 
 struct TVScreen: View {
+    /// Held, not observed. `TVScreen` must not re-render whenever the shared
+    /// store publishes, so the store is passed in as a plain property and only
+    /// forwarded to the detail screen inside the player cover.
+    let store: CinemaStore
     @EnvironmentObject private var tv: TvStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = TVPlaybackController()
@@ -371,7 +375,15 @@ struct TVScreen: View {
                                     selectedStreamSnapshot = nil
                                     relatedMovieRoute = nil
                                     Task { @MainActor in
-                                        let snapshot = await Task.detached(priority: .userInitiated) { video.asPlayerMovie }.value
+                                        // Build the TvVideo -> Movie snapshot off the
+                                        // main thread. The value and its type are
+                                        // spelled out so the type checker does not
+                                        // have to solve the whole async expression at
+                                        // once (that was a hard compile error).
+                                        let source = video
+                                        let snapshot: Movie = await Task.detached(priority: .userInitiated) {
+                                            source.asPlayerMovie
+                                        }.value
                                         guard selectedVideoID == video.id else { return }
                                         selectedVideoMovieSnapshot = snapshot
                                         isPlayerPresented = true

@@ -25,13 +25,11 @@ enum OrientationSupport {
     /// Rotates into landscape and only then presents the player, so it opens
     /// straight into landscape instead of appearing in portrait and spinning
     /// afterwards. The short wait is the rotation itself, which the user sees.
-    @MainActor
-    static func rotateThenPresent(_ present: @escaping @MainActor () -> Void) {
+    /// `DispatchQueue.main` rather than a task: it keeps the helper free of any
+    /// actor-isolation requirement, so every call site stays simple.
+    static func rotateThenPresent(_ present: @escaping () -> Void) {
         rotate(to: .landscapeRight)
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(280))
-            present()
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { present() }
     }
 }
 
@@ -318,7 +316,7 @@ private struct AuroraTabScreen: View {
     private var root: some View {
         switch tab {
         case .home: HomeScreen()
-        case .tv: TVScreen()
+        case .tv: TVScreen(store: store)
         case .library: LibraryScreen()
         case .search: SearchScreen()
         case .saved: SavedHubScreen()

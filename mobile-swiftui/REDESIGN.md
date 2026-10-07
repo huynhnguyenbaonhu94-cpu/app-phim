@@ -449,3 +449,70 @@ giữ để bảo đảm, vì nó vô hại khi đã ở đúng hướng.
 
 Dải vuốt-lùi ở mép trái được thu từ 22pt xuống 18pt để không phủ lên 2pt đầu của nút "Trở lại"
 (các nút này đặt cách mép 20pt), tránh mất vùng chạm một cách không cần thiết.
+## 13. Sửa lỗi build IPA (Xcode 26.6)
+
+### 13.1 `HomeScreen.swift:244` — `'error' is immutable`
+
+Trong `SectionListScreen.load`, khối `catch` của Swift **tự sinh một biến tên `error`** trỏ tới
+lỗi vừa bắt được. Biến đó che mất thuộc tính `@State private var error` khai báo cùng phạm vi,
+nên dòng `error = error.localizedDescription` bị hiểu là đang gán vào giá trị bất biến vừa bắt
+được:
+
+```
+error = error.localizedDescription
+^~~~~  cannot assign to value: 'error' is immutable
+```
+
+**Cách sửa:** đổi tên thuộc tính trạng thái thành `loadError` (cả khai báo, chỗ dùng trong
+`body`, chỗ reset và trong `catch`). Đây là cái bẫy rất dễ mắc khi đặt tên trạng thái trùng với
+tên biến ẩn của `catch`.
+
+### 13.2 `TVScreen.swift:438` — `cannot find 'store' in scope`
+
+Khi tách `TvStore`, tôi đã bỏ `@EnvironmentObject private var store: CinemaStore` khỏi
+`TVScreen`. Nhưng màn hình này vẫn cần store ở đúng một chỗ: nó truyền `.environmentObject(store)`
+cho `MovieDetailScreen` bên trong `fullScreenCover` của trình phát.
+
+**Cách sửa:** thêm lại store nhưng **dưới dạng thuộc tính thường**, không phải `@EnvironmentObject`:
+
+```swift
+struct TVScreen: View {
+    /// Giữ, không quan sát. `TVScreen` không được dựng lại mỗi khi store chung
+    /// phát thông báo, nên store được truyền vào như một thuộc tính thường.
+    let store: CinemaStore
+    @EnvironmentObject private var tv: TvStore
+```
+
+Và `AuroraTabScreen` truyền vào: `case .tv: TVScreen(store: store)`.
+
+Điểm quan trọng: **`let store` không tạo đăng ký quan sát**. Nếu dùng lại `@EnvironmentObject`,
+tab Truyền hình sẽ lại dựng lại mỗi khi dữ liệu phim ở store chung thay đổi — đúng thứ vừa được
+gỡ ở vòng trước.
+
+### 13.3 `TVScreen.swift:374` — compiler không suy luận nổi kiểu
+
+```
+let snapshot = await Task.detached(priority: .userInitiated) { video.asPlayerMovie }.value
+the compiler is unable to type-check this expression in reasonable time
+```
+
+Đây là giới hạn của bộ suy luận kiểu Swift với biểu thức `async` lồng trong closure `@MainActor`:
+nó phải giải đồng thời kiểu trả về của `Task.detached`, của `.value`, và của phép gán. Dòng này
+vốn có từ trước, nhưng thay đổi xung quanh đã đẩy nó vượt ngưỡng.
+
+**Cách sửa:** tách thành hai câu và ghi rõ kiểu:
+
+```swift
+let source = video
+let snapshot: Movie = await Task.detached(priority: .userInitiated) {
+    source.asPlayerMovie
+}.value
+```
+
+### 13.4 Phòng ngừa thêm
+
+- `OrientationSupport.rotateThenPresent` được viết lại bằng `DispatchQueue.main.asyncAfter`
+  thay cho `Task { @MainActor in … }`, để hàm không mang yêu cầu cô lập actor — mọi chỗ gọi
+  đều đơn giản và không phụ thuộc ngữ cảnh.
+- Đã rà lại toàn bộ dự án: chỉ có đúng một chỗ mắc lỗi che tên `error` (13.1), các chỗ còn lại
+  dùng `self.error` nên không bị ảnh hưởng.
