@@ -11,9 +11,7 @@ private enum SearchSortField: String, CaseIterable, Identifiable {
 
 struct SearchScreen: View {
     @EnvironmentObject private var store: CinemaStore
-    @State private var keyword = ""
     @State private var submitted = ""
-    @State private var searchTask: Task<Void, Never>?
     @State private var language = ""
     @State private var category = ""
     @State private var country = ""
@@ -21,7 +19,6 @@ struct SearchScreen: View {
     @State private var sortField: SearchSortField = .updated
     @State private var newestFirst = true
     @State private var filtersExpanded = false
-    @FocusState private var focused: Bool
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     private var filterCategories: [String] {
@@ -76,8 +73,17 @@ struct SearchScreen: View {
                         .id("search-header")
                         .auroraReveal(0)
 
-                    searchField
-                        .id("search-box")
+                    SearchField(
+                        onQuery: { query in
+                            submitted = query
+                            Task { await store.search(query) }
+                        },
+                        onClear: {
+                            submitted = ""
+                            store.clearSearch()
+                        }
+                    )
+                    .id("search-box")
                         .auroraReveal(1)
 
                     HStack(alignment: .lastTextBaseline) {
@@ -110,71 +116,6 @@ struct SearchScreen: View {
         .toolbar(.hidden, for: .navigationBar)
     }
 
-    // MARK: - Search field
-
-    private var searchField: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(focused ? Color.auroraViolet : Color.white.opacity(0.5))
-            TextField("Tên phim bạn muốn xem…", text: $keyword)
-                .font(.auroraBody(14))
-                .foregroundStyle(.white)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .focused($focused)
-                .onSubmit { runSearch() }
-                .onChange(of: keyword) { _, value in scheduleLiveSearch(value) }
-            if !keyword.isEmpty {
-                Button {
-                    searchTask?.cancel()
-                    withAnimation(Motion.gentle) {
-                        keyword = ""
-                        submitted = ""
-                        store.clearSearch()
-                    }
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.white.opacity(0.45))
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-            }
-            Button(action: runSearch) {
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(canSubmit ? Color.auroraVoid : Color.white.opacity(0.4))
-                    .frame(width: 40, height: 40)
-                    .background {
-                        if canSubmit {
-                            Circle().fill(LinearGradient.auroraPrimary)
-                        } else {
-                            Circle().fill(Color.white.opacity(0.08))
-                        }
-                    }
-            }
-            .buttonStyle(.auroraPress(scale: 0.92))
-            .disabled(!canSubmit)
-            .accessibilityLabel("Tìm kiếm")
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .frame(height: 58)
-        .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: focused ? 1 : 0.7)
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.auroraViolet.opacity(focused ? 0.6 : 0), lineWidth: 1.2)
-        }
-        .scaleEffect(focused ? 1.012 : 1)
-        .animation(Motion.gentle, value: focused)
-        .animation(Motion.gentle, value: keyword.isEmpty)
-    }
-
-    private var canSubmit: Bool {
-        keyword.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
-    }
-
     // MARK: - Results
 
     @ViewBuilder
@@ -192,7 +133,11 @@ struct SearchScreen: View {
                 SkeletonPosterGrid(count: 4)
             }
         } else if let error = store.searchError {
-            StateMessage(icon: "wifi.exclamationmark", title: "Tìm kiếm chưa hoàn tất", detail: error, actionTitle: "Thử lại") { runSearch() }
+            // Retry re-runs whatever is currently in the field.
+            StateMessage(icon: "wifi.exclamationmark", title: "Tìm kiếm chưa hoàn tất", detail: error, actionTitle: "Thử lại") {
+                guard !submitted.isEmpty else { return }
+                Task { await store.search(submitted) }
+            }
         } else if !submitted.isEmpty && store.searchResults.isEmpty {
             StateMessage(icon: "text.magnifyingglass", title: "Chưa tìm thấy phim", detail: "Thử tên khác hoặc kiểm tra lại chính tả.")
         } else if !store.searchResults.isEmpty {
@@ -287,41 +232,6 @@ struct SearchScreen: View {
         }
     }
 
-    /// Enter or the arrow button: search at once instead of waiting out the
-    /// debounce.
-    private func runSearch() {
-        let value = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.count >= 2 else { return }
-        searchTask?.cancel()
-        focused = false
-        submitted = value
-        Task { await store.search(value) }
-    }
-
-    /// Live search: results follow what you type.
-    private func scheduleLiveSearch(_ value: String) {
-        searchTask?.cancel()
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            withAnimation(Motion.gentle) {
-                submitted = ""
-                store.clearSearch()
-            }
-            return
-        }
-        guard trimmed.count >= 2 else { return }
-        searchTask = Task { @MainActor in
-            // Wait for a pause in typing, so one request runs per word instead of
-            // one per keystroke. `CinemaStore.search` already drops out-of-order
-            // responses, so a slower earlier request can never overwrite a newer
-            // result.
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            submitted = trimmed
-            await store.search(trimmed)
-        }
-    }
-
     private func resetFilters() {
         language = ""
         category = ""
@@ -353,5 +263,111 @@ struct SearchScreen: View {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value) ?? .distantPast
+    }
+}
+
+/// The query field.
+///
+/// It owns `keyword` itself on purpose. While the text lived on `SearchScreen`,
+/// every keystroke re-evaluated that whole screen — the result grid, the filter
+/// chip rows, the sorting — and the typing lagged behind the keyboard. Here only
+/// this small field re-renders per keystroke, and the screen hears about the
+/// query once typing pauses.
+private struct SearchField: View {
+    /// Called with the query after a typing pause, and at once on Enter or the
+    /// arrow button.
+    let onQuery: (String) -> Void
+    let onClear: () -> Void
+
+    @State private var keyword = ""
+    @State private var debounce: Task<Void, Never>?
+    @FocusState private var focused: Bool
+
+    private var trimmed: String {
+        keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmit: Bool { trimmed.count >= 2 }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(focused ? Color.auroraViolet : Color.white.opacity(0.5))
+            TextField("Tên phim bạn muốn xem…", text: $keyword)
+                .font(.auroraBody(14))
+                .foregroundStyle(.white)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($focused)
+                .onSubmit { searchNow() }
+                .onChange(of: keyword) { _, value in schedule(value) }
+            if !keyword.isEmpty {
+                Button {
+                    debounce?.cancel()
+                    keyword = ""
+                    onClear()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
+            }
+            Button(action: searchNow) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(canSubmit ? Color.auroraVoid : Color.white.opacity(0.4))
+                    .frame(width: 40, height: 40)
+                    .background {
+                        if canSubmit {
+                            Circle().fill(LinearGradient.auroraPrimary)
+                        } else {
+                            Circle().fill(Color.white.opacity(0.08))
+                        }
+                    }
+            }
+            .buttonStyle(.auroraPress(scale: 0.92))
+            .disabled(!canSubmit)
+            .accessibilityLabel("Tìm kiếm")
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .frame(height: 58)
+        .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: focused ? 1 : 0.7)
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.auroraViolet.opacity(focused ? 0.6 : 0), lineWidth: 1.2)
+        }
+        .scaleEffect(focused ? 1.012 : 1)
+        .animation(Motion.gentle, value: focused)
+        .animation(Motion.gentle, value: keyword.isEmpty)
+    }
+
+    /// Enter or the arrow button: search immediately, skipping the debounce.
+    private func searchNow() {
+        debounce?.cancel()
+        guard canSubmit else { return }
+        focused = false
+        onQuery(trimmed)
+    }
+
+    /// Live search: one request per typing pause, not per keystroke. The store
+    /// already drops out-of-order responses, so a slower earlier request can
+    /// never overwrite a newer result.
+    private func schedule(_ value: String) {
+        debounce?.cancel()
+        let query = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            onClear()
+            return
+        }
+        guard query.count >= 2 else { return }
+        debounce = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            onQuery(query)
+        }
     }
 }

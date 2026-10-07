@@ -163,8 +163,9 @@ final class AuroraTabHostController: UIViewController {
         super.viewDidLayoutSubviews()
         // The first host is built before the container has a size, so pin every
         // host to the container on each layout pass.
-        for host in hosts.values {
-            host.view.frame = view.bounds
+        let bounds = view.bounds
+        for host in hosts.values where host.view.frame != bounds {
+            host.view.frame = bounds
         }
     }
 
@@ -206,15 +207,13 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
         let store = self.store
         let connectivity = self.connectivity
         controller.makeHost = { index in
-            let root = NavigationStack {
-                AuroraTabScreen(tab: CinemoraTab.allCases[index])
-                    .environmentObject(store)
-                    .environmentObject(connectivity)
-                    .navigationDestination(for: Movie.self) { movie in
-                        MovieDetailScreen(slug: movie.slug)
-                    }
-            }
-            let host = UIHostingController(rootView: root)
+            let host = UIHostingController(
+                rootView: AuroraTabScreen(
+                    tab: CinemoraTab.allCases[index],
+                    store: store,
+                    connectivity: connectivity
+                )
+            )
             // A hosting controller created by hand does not inherit the SwiftUI
             // environment, so the app's dark appearance is applied explicitly.
             host.overrideUserInterfaceStyle = .dark
@@ -229,11 +228,32 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
     }
 }
 
-/// The five tab roots.
+/// A tab's root: its own navigation stack, plus a swipe way back.
+///
+/// The stack lives here rather than in the host controller so the gesture below
+/// can pop it. Every screen in this app hides the navigation bar, and with the
+/// bar hidden UIKit disables the system interactive-pop gesture — which is why
+/// going back used to mean reaching for the button.
 private struct AuroraTabScreen: View {
     let tab: CinemoraTab
+    let store: CinemaStore
+    let connectivity: ConnectivityMonitor
+    @State private var path = NavigationPath()
 
     var body: some View {
+        NavigationStack(path: $path) {
+            root
+                .environmentObject(store)
+                .environmentObject(connectivity)
+                .navigationDestination(for: Movie.self) { movie in
+                    MovieDetailScreen(slug: movie.slug)
+                }
+        }
+        .overlay(alignment: .leading) { backSwipeEdge }
+    }
+
+    @ViewBuilder
+    private var root: some View {
         switch tab {
         case .home: HomeScreen()
         case .tv: TVScreen()
@@ -241,6 +261,25 @@ private struct AuroraTabScreen: View {
         case .search: SearchScreen()
         case .saved: SavedHubScreen()
         }
+    }
+
+    /// Invisible strip along the left edge: drag right from it to go back. It is
+    /// inert while the stack is empty, so it never blocks content on a root tab.
+    private var backSwipeEdge: some View {
+        Color.clear
+            .frame(width: 22)
+            .contentShape(Rectangle())
+            .allowsHitTesting(!path.isEmpty)
+            .gesture(
+                DragGesture(minimumDistance: 14, coordinateSpace: .global)
+                    .onEnded { value in
+                        let horizontal = value.translation.width
+                        guard !path.isEmpty,
+                              horizontal > 55,
+                              horizontal > abs(value.translation.height) else { return }
+                        path.removeLast()
+                    }
+            )
     }
 }
 

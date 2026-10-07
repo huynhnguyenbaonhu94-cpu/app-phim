@@ -11,7 +11,8 @@ struct MovieDetailScreen: View {
     @State private var showPlayer = false
     @State private var relatedMovieRoute: Movie?
     @State private var didAutoStartPlayback = false
-    @State private var edgeBackProgress: CGFloat = 0
+    @State private var showLoginPrompt = false
+    @State private var showLogin = false
 
     init(slug: String, autoPlayOnLoad: Bool = false, onExitRelated: (() -> Void)? = nil) {
         self.slug = slug
@@ -56,25 +57,20 @@ struct MovieDetailScreen: View {
                     .padding(.leading, 20)
                     .padding(.top, 8)
             }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 18, coordinateSpace: .global)
-                    .onChanged { value in
-                        guard value.startLocation.x <= 36,
-                              value.translation.width > 0,
-                              abs(value.translation.width) > abs(value.translation.height) else { return }
-                        edgeBackProgress = min(1, value.translation.width / 120)
-                    }
-                    .onEnded { value in
-                        let horizontal = value.translation.width
-                        let vertical = abs(value.translation.height)
-                        let shouldDismiss = value.startLocation.x <= 36 && horizontal >= 90 && horizontal > vertical * 1.25
-                        edgeBackProgress = 0
-                        if shouldDismiss { dismissDetail() }
-                    }
-            )
-            .offset(x: edgeBackProgress * 18)
+            .modifier(EdgeBackDrag(onBack: { dismissDetail() }))
         }
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Cần đăng nhập", isPresented: $showLoginPrompt) {
+            Button("Đăng nhập") { showLogin = true }
+            Button("Để sau", role: .cancel) { }
+        } message: {
+            Text("Bạn cần đăng nhập để lưu phim vào danh sách yêu thích. Danh sách yêu thích được đồng bộ theo tài khoản của bạn.")
+        }
+        .sheet(isPresented: $showLogin) {
+            AccountSettingsScreen()
+                .environmentObject(store)
+                .preferredColorScheme(.dark)
+        }
         .task(id: slug) { store.loadDetail(slug: slug) }
         .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
         .onChange(of: store.detailMovie?.slug) { _, loadedSlug in
@@ -353,6 +349,12 @@ struct MovieDetailScreen: View {
         .shadow(color: Color.auroraViolet.opacity(0.22), radius: 28, y: 12)
         .overlay(alignment: .topTrailing) {
             Button {
+                // Favourites live on the account, so ask for a sign-in instead
+                // of silently doing nothing.
+                guard store.accountUser != nil else {
+                    showLoginPrompt = true
+                    return
+                }
                 withAnimation(Motion.tap) { store.toggleFavorite(movie) }
             } label: {
                 Image(systemName: store.isFavorite(movie) ? "heart.fill" : "heart")

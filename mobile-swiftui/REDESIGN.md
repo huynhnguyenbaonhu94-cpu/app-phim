@@ -293,3 +293,75 @@ request cũ về muộn không thể ghi đè kết quả mới hơn.
 Về phần hiển thị, khung xương tải (skeleton) chỉ chiếm màn hình khi **chưa có kết quả nào**.
 Khi đang gõ mà đã có kết quả cũ, kết quả cũ được giữ nguyên và chỉ hiện một `ProgressView`
 nhỏ cạnh bộ đếm — tránh nhấp nháy toàn màn hình theo từng ký tự.
+## 11. Vòng sửa thứ năm: gõ tìm kiếm, vuốt để quay lại, và yêu cầu đăng nhập
+
+### 11.1 Gõ trong ô tìm kiếm bị lag
+
+**Nguyên nhân:** `keyword` là `@State` của `SearchScreen`, nên **mỗi ký tự gõ vào làm cả màn
+hình được đánh giá lại**: lọc và sắp xếp lại `filteredResults`, dựng lại ba `Set` cho bộ lọc
+(`filterCategories`, `filterCountries`, `filterYears`), dựng lại toàn bộ dãy chip bộ lọc và cả
+`LazyVGrid` kết quả. Bàn phím iOS rất nhạy với công việc trên main thread trong lúc gõ, nên
+điều đó hiện ra thành độ trễ.
+
+**Cách sửa:** tách ô nhập thành một view riêng `SearchField`, **tự giữ `keyword` của nó**:
+
+- Mỗi ký tự gõ chỉ đánh giá lại `SearchField` — một view nhỏ.
+- `SearchScreen` chỉ được thông báo khi người dùng dừng gõ (`onQuery`) hoặc bấm xoá (`onClear`).
+- Debounce 300ms chuyển vào bên trong `SearchField`; Enter và nút mũi tên vẫn huỷ debounce và
+  tìm ngay.
+- Nút "Thử lại" ở trạng thái lỗi nay chạy lại truy vấn hiện tại thay vì gọi hàm cũ.
+
+### 11.2 Vuốt từ mép trái để quay lại
+
+**Nguyên nhân:** mọi màn hình trong app đều gọi `.toolbar(.hidden, for: .navigationBar)`. Khi
+thanh điều hướng bị ẩn, UIKit **tắt luôn cử chỉ vuốt-lùi của hệ thống**, nên chỉ còn cách bấm
+nút. Trước đây chỉ riêng `MovieDetailScreen` có cử chỉ vuốt riêng, nên các màn hình đẩy khác
+(như Tài khoản, Thư viện đã lưu, Tuỳ chọn phụ đề) hoàn toàn không vuốt được.
+
+**Cách sửa:** đưa `NavigationStack` (và `NavigationPath`) vào `AuroraTabScreen` — view gốc của
+từng tab — rồi phủ một dải mỏng 22pt ở mép trái:
+
+```swift
+.overlay(alignment: .leading) { backSwipeEdge }
+```
+
+Dải này chỉ nhận cảm ứng khi `!path.isEmpty` (nên ở tab gốc nó hoàn toàn vô hình với nội dung),
+và khi kéo sang phải hơn 55pt theo chiều ngang thì gọi `path.removeLast()` — dùng đúng hiệu ứng
+lùi của `NavigationStack`, giống hệt khi bấm nút. Nhờ đặt ở tầng container, **mọi màn hình đẩy
+trong cả 5 tab đều vuốt lùi được**.
+
+`MovieDetailScreen` vẫn giữ cử chỉ riêng của nó (cần thiết khi nó được đẩy trong
+`fullScreenCover` của trình phát, nơi dải mép trái không với tới). Hai cử chỉ không tranh nhau:
+cảm ứng rơi vào dải 0–22pt do dải xử lý, phần 22–36pt do cử chỉ trong màn hình xử lý, và mỗi
+lần chạm chỉ một cử chỉ nhận được nên không thể lùi hai bước.
+
+### 11.3 Nút "Trở lại" và thao tác bấm mượt hơn
+
+**Nguyên nhân:** trong `MovieDetailScreen`, tiến độ kéo `edgeBackProgress` là `@State` **của
+chính màn hình**. Mỗi frame của thao tác kéo làm `body` của màn hình chi tiết được chạy lại —
+tức là dựng lại toàn bộ nội dung nặng (hero, danh sách tập, thẻ đề xuất). Đó chính là cảm giác
+"chưa mượt".
+
+**Cách sửa:** chuyển cử chỉ lùi vào một `ViewModifier` nhỏ `EdgeBackDrag`
+(`Design/AuroraMotion.swift`) tự giữ tiến độ kéo. `@State` đổi thì chỉ `body` của modifier chạy
+lại, còn nội dung màn hình là giá trị đã dựng sẵn nên SwiftUI không dựng lại — thao tác kéo
+không còn kéo theo cả màn hình.
+
+Kèm theo: `AuroraTabHostController.viewDidLayoutSubviews` nay chỉ gán lại frame cho những host
+có kích thước thật sự thay đổi, thay vì gán lại cả năm host ở mọi lượt layout.
+
+### 11.4 Yêu cầu đăng nhập khi bấm yêu thích
+
+**Trước:** `CinemaStore.toggleFavorite` có `guard accountUser != nil else { return }` — bấm trái
+tim khi chưa đăng nhập thì không có gì xảy ra, người dùng không biết vì sao.
+
+**Sau:** nút yêu thích trong `MovieDetailScreen` kiểm tra tài khoản trước, và nếu chưa đăng nhập
+thì hiện hộp thoại:
+
+- Tiêu đề: **Cần đăng nhập**
+- Nội dung: "Bạn cần đăng nhập để lưu phim vào danh sách yêu thích. Danh sách yêu thích được
+  đồng bộ theo tài khoản của bạn."
+- Nút **Đăng nhập** mở `AccountSettingsScreen` dạng sheet (màn hình này đã tự hiện biểu mẫu
+  đăng nhập khi chưa có tài khoản), nút **Để sau** đóng hộp thoại.
+
+Ràng buộc trong store vẫn được giữ nguyên để bảo vệ ở tầng dữ liệu.

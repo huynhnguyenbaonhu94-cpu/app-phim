@@ -35,6 +35,42 @@ extension ButtonStyle where Self == AuroraPressStyle {
     static func auroraPress(scale: CGFloat) -> AuroraPressStyle { AuroraPressStyle(scale: scale) }
 }
 
+// MARK: - Edge-back drag
+
+/// "Drag in from the left edge to go back" for screens that hide the navigation
+/// bar, where UIKit disables the system gesture.
+///
+/// The drag progress lives in this modifier instead of on the screen itself: a
+/// `@State` change only re-runs this small body, whereas keeping it on the
+/// screen re-built the whole (heavy) detail layout on every frame of the drag.
+struct EdgeBackDrag: ViewModifier {
+    let onBack: () -> Void
+    @State private var progress: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: progress * 18)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 18, coordinateSpace: .global)
+                    .onChanged { value in
+                        guard value.startLocation.x <= 36,
+                              value.translation.width > 0,
+                              abs(value.translation.width) > abs(value.translation.height) else { return }
+                        progress = min(1, value.translation.width / 120)
+                    }
+                    .onEnded { value in
+                        let horizontal = value.translation.width
+                        let vertical = abs(value.translation.height)
+                        let shouldDismiss = value.startLocation.x <= 36
+                            && horizontal >= 90
+                            && horizontal > vertical * 1.25
+                        progress = 0
+                        if shouldDismiss { onBack() }
+                    }
+            )
+    }
+}
+
 // MARK: - Entrance reveal
 
 /// Staggered fade + rise used when a screen's content first appears.
