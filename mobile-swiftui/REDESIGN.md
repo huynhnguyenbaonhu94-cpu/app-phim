@@ -174,3 +174,65 @@ Ngoài ra toàn bộ spring đã được rút ngắn vì chúng đi kèm thao t
 | `Motion.gentle` | `0.32s` | `0.26s` |
 
 Kết quả: bấm tab là nội dung đổi ngay (không còn cross-fade toàn màn hình), ảnh poster được giải mã ở luồng nền với dung lượng nhỏ hơn khoảng 8–10 lần, không còn lớp blur nào trong lưới, không còn hàng chục animation chạy vô hạn, và việc cuộn ở tab Trang chủ không còn sinh layout pass mỗi frame.
+
+## 9. Vòng sửa thứ ba: nguyên nhân gốc của việc chuyển tab bị lag
+
+Hai vòng trước đã cắt được phần lớn chi phí render, nhưng cảm giác lag khi bấm tab vẫn còn.
+Nguyên nhân thật nằm ở **chính hệ thống**, không phải ở code của app.
+
+### Nguyên nhân
+
+Từ **iOS 18**, `UITabBarController` mặc định chạy một hiệu ứng chuyển tab của hệ thống
+(cross-dissolve kèm zoom) mỗi lần đổi tab. Trước iOS 18, đổi tab là tức thì và không có
+animation nào. `TabView` của SwiftUI được dựng trên `UITabBarController`, nên nó thừa hưởng
+hiệu ứng này — và **SwiftUI không có API nào để tắt nó**.
+
+Với các màn hình nặng như của Cinemora, hiệu ứng đó tạo đúng cảm giác "lag, không mượt":
+toàn bộ màn hình mới bị scale và fade trong lúc cây view của nó vẫn đang được dựng lần đầu.
+
+Đã kiểm chứng bằng tài liệu và báo cáo của cộng đồng (xem `NOTES-tab-transition.md` trong repo):
+
+- Medium — *New TabBarController Transition Animation in iOS 18 and Xcode 16*: xác nhận
+  animation mới và cách tắt ở tầng UIKit.
+- Reddit r/SwiftUI — *Persistent "Jump" animation glitch in SwiftUI TabView*: mô tả đúng
+  triệu chứng này và xác nhận **không** sửa được bằng bất kỳ modifier SwiftUI nào
+  (`.animation(nil, value:)`, `.transaction { $0.animation = nil }`,
+  `.toolbar(.hidden, for: .tabBar)`, `UITabBar.appearance().isHidden`, bỏ `ignoresSafeArea()`).
+- Apple Developer Forums — *Liquid Glass TabBar animations causes Hangs*: trên iOS 26,
+  animation của tab bar còn gây treo app.
+
+### Cách sửa
+
+Bỏ hẳn `TabView`, thay bằng container riêng `AuroraTabHostController` (trong `CinemoraApp.swift`).
+Mỗi tab là một `UIHostingController` được thêm làm child view controller **một lần**, và đổi tab
+chỉ là bật/tắt `view.isHidden`:
+
+| | Trước (`TabView`) | Sau (`AuroraTabHostController`) |
+| --- | --- | --- |
+| Đổi tab là gì | `UITabBarController` đổi selected view controller | `isHidden` của hai hosting view |
+| Animation | Hiệu ứng cross-dissolve + zoom của hệ thống | Không có |
+| Dựng lại cây view | Có thể, mỗi lần đổi | Không |
+| State, vị trí cuộn, `NavigationStack` | Giữ | Giữ |
+| `.toolbar(.hidden, for: .tabBar)` | Cần, để giấu tab bar hệ thống | Không cần, vì không còn tab bar hệ thống |
+
+Thanh tab dưới vẫn là `AuroraTabBar` tự vẽ, giữ nguyên viên chỉ báo morph, icon bounce và haptic.
+
+### Lưu ý khi bảo trì
+
+`UIHostingController` tạo thủ công **không** thừa hưởng environment của SwiftUI, nên trong
+`AuroraTabHost.makeUIViewController` phải tự gán `.environmentObject(store)`,
+`.environmentObject(connectivity)` và `overrideUserInterfaceStyle = .dark`.
+
+Ngoài ra `CinemoraTabShell` nay nhận `store` qua tham số (`let store: CinemaStore`) thay vì
+`@EnvironmentObject`: nếu shell quan sát store thì mỗi lần store publish, cả shell và container
+đều bị đánh giá lại.
+
+### Các tối ưu kèm theo trong vòng này
+
+| # | Vấn đề | Cách sửa |
+| --- | --- | --- |
+| 1 | `CinemaBackground` dùng `GeometryReader` với offset theo tỉ lệ kích thước, và 6 lớp gradient toàn màn hình | Bỏ `GeometryReader`, dùng blob kích thước cố định đặt giữa; còn 4 lớp |
+| 2 | `MoviePosterCard`, `MovieShelfCard`, thẻ lịch sử mỗi thẻ 2 lớp shadow (một đen, một màu) | Còn 1 shadow mỗi thẻ, giảm bán kính 16 → 12 |
+| 3 | `.scrollPosition(id:)` ở Trang chủ, Thư viện, Tìm kiếm: binding bị ghi lại liên tục khi cuộn, mỗi lần ghi đánh giá lại cả màn hình | Bỏ ở Thư viện/Tìm kiếm (không dùng đến); Trang chủ chuyển sang `ScrollViewReader` với lệnh cuộn lên đầu tường minh |
+| 4 | `.onAppear` của shimmer, LivePulse, equalizer, OfflineBanner ghi state mỗi lần view xuất hiện lại | Thêm guard, không ghi lại giá trị đã đúng |
+| 5 | `PosterArt` ghi `image = cached` mỗi lần `.task` chạy lại (tức mỗi lần tab hiện ra) | Chỉ ghi khi ảnh thực sự khác |

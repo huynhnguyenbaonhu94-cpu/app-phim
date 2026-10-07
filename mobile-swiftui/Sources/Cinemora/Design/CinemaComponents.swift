@@ -126,8 +126,11 @@ struct PosterArt: View {
 
         if let cached = PosterImageCache.shared.object(forKey: url as NSURL),
            cached.size.width * cached.scale >= neededPixels * 0.9 {
-            image = cached
-            isLoading = false
+            // `.task` re-runs whenever the view re-appears, so never write a
+            // value that is already set: each write would invalidate this view
+            // again immediately after a tab switch.
+            if image !== cached { image = cached }
+            if isLoading { isLoading = false }
             return
         }
 
@@ -223,8 +226,9 @@ struct MoviePosterCard: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                 }
-                .shadow(color: Color.black.opacity(0.4), radius: 16, y: 10)
-                .shadow(color: Color.auroraViolet.opacity(0.14), radius: 20, y: 8)
+                // A single shadow per grid cell: a second, coloured shadow
+                // doubled the offscreen blur work for every poster on screen.
+                .shadow(color: Color.black.opacity(0.38), radius: 12, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(movie.name)
@@ -289,8 +293,7 @@ struct MovieShelfCard: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                 }
-                .shadow(color: Color.black.opacity(0.4), radius: 16, y: 10)
-                .shadow(color: Color.auroraSky.opacity(0.14), radius: 20, y: 8)
+                .shadow(color: Color.black.opacity(0.38), radius: 12, y: 8)
             }
             .frame(width: width)
             .contentShape(Rectangle())

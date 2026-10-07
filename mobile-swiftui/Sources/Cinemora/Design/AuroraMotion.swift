@@ -93,6 +93,7 @@ struct AuroraShimmerOverlay: View {
         }
         .allowsHitTesting(false)
         .onAppear {
+            guard phase < 0 else { return }
             withAnimation(.linear(duration: 1.7).repeatForever(autoreverses: false)) {
                 phase = 1.2
             }
@@ -195,7 +196,7 @@ struct LivePulse: View {
         }
         .frame(width: size * 2.4, height: size * 2.4)
         .onAppear {
-            guard animated, !reduceMotion else { return }
+            guard animated, !reduceMotion, !animate else { return }
             withAnimation(.easeOut(duration: 1.5).repeatForever(autoreverses: false)) {
                 animate = true
             }
@@ -226,7 +227,7 @@ struct EqualizerBars: View {
         }
         .frame(height: 15, alignment: .bottom)
         .onAppear {
-            guard !reduceMotion else { return }
+            guard !reduceMotion, !animate else { return }
             animate = true
         }
     }
@@ -338,11 +339,10 @@ struct AuroraTabBar: View {
                 Button {
                     guard selection != tab else { return }
                     // Plain assignment on purpose. Wrapping this in
-                    // `withAnimation` also animated the `TabView`'s content
-                    // swap, cross-fading two full screens for the length of the
-                    // spring — that is what made every switch feel laggy and
-                    // delayed. The pill still morphs, because the animation is
-                    // applied to this bar's own subtree at the bottom.
+                    // `withAnimation` also animated the content swap, cross-fading
+                    // two full screens for the length of the spring. The pill
+                    // still morphs, because the animation is applied to this
+                    // bar's own subtree at the bottom.
                     selection = tab
                 } label: {
                     VStack(spacing: 5) {

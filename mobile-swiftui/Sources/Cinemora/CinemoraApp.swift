@@ -18,7 +18,7 @@ struct CinemoraApp: App {
 
     var body: some Scene {
         WindowGroup {
-            CinemoraTabShell()
+            CinemoraTabShell(store: store)
                 .environmentObject(store)
                 .environmentObject(connectivity)
                 .preferredColorScheme(.dark)
@@ -99,34 +99,18 @@ private struct LaunchLoader: View {
 
 @MainActor
 struct CinemoraTabShell: View {
+    /// Handed in explicitly instead of being observed with `@EnvironmentObject`:
+    /// an observed store invalidates this view — and with it the whole tab
+    /// container — on every published change.
+    let store: CinemaStore
     @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
 
     var body: some View {
         ZStack(alignment: .top) {
-            TabView(selection: $selection) {
-                tabRoot { HomeScreen() }
-                    .tag(CinemoraTab.home)
-                    .toolbar(.hidden, for: .tabBar)
-
-                tabRoot { TVScreen() }
-                    .tag(CinemoraTab.tv)
-                    .toolbar(.hidden, for: .tabBar)
-
-                tabRoot { LibraryScreen() }
-                    .tag(CinemoraTab.library)
-                    .toolbar(.hidden, for: .tabBar)
-
-                tabRoot { SearchScreen() }
-                    .tag(CinemoraTab.search)
-                    .toolbar(.hidden, for: .tabBar)
-
-                tabRoot { SavedHubScreen() }
-                    .tag(CinemoraTab.saved)
-                    .toolbar(.hidden, for: .tabBar)
-            }
-            .tint(.auroraViolet)
+            AuroraTabHost(selection: $selection, store: store, connectivity: connectivity)
+                .ignoresSafeArea()
 
             if !connectivity.isConnected {
                 OfflineBanner()
@@ -152,13 +136,110 @@ struct CinemoraTabShell: View {
         }
         .background { AccountSessionWatcher() }
     }
+}
 
-    private func tabRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        NavigationStack {
-            content()
-                .navigationDestination(for: Movie.self) { movie in
-                    MovieDetailScreen(slug: movie.slug)
-                }
+// MARK: - Tab container
+
+/// Hosts the five tab roots in a container we own instead of SwiftUI's `TabView`.
+///
+/// `TabView` is backed by `UITabBarController`, and since iOS 18 that controller
+/// animates every tab switch with a system cross-dissolve plus zoom. On content
+/// as heavy as these screens, that animation is exactly what made switching tabs
+/// feel laggy — and SwiftUI offers no way to turn it off. Here each tab is a
+/// `UIHostingController` whose view is simply hidden or shown, so switching is a
+/// visibility flip: instant, with no animation and no rebuild, while every tab
+/// keeps its own state, scroll position and navigation stack.
+final class AuroraTabHostController: UIViewController {
+    private var hosts: [Int: UIViewController] = [:]
+    private var selectedIndex = 0
+    var makeHost: ((Int) -> UIViewController)?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The first host is built before the container has a size, so pin every
+        // host to the container on each layout pass.
+        for host in hosts.values {
+            host.view.frame = view.bounds
+        }
+    }
+
+    /// Shows the tab at `index`, building its host the first time it is needed.
+    func select(_ index: Int) {
+        guard index != selectedIndex || hosts[index] == nil else { return }
+        selectedIndex = index
+        guard let host = host(at: index) else { return }
+        for (key, value) in hosts where key != index {
+            value.view.isHidden = true
+        }
+        host.view.isHidden = false
+    }
+
+    private func host(at index: Int) -> UIViewController? {
+        if let existing = hosts[index] { return existing }
+        guard let makeHost else { return nil }
+        let host = makeHost(index)
+        addChild(host)
+        host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.view.backgroundColor = .clear
+        host.view.isHidden = true
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        hosts[index] = host
+        return host
+    }
+}
+
+/// SwiftUI bridge for `AuroraTabHostController`.
+private struct AuroraTabHost: UIViewControllerRepresentable {
+    @Binding var selection: CinemoraTab
+    let store: CinemaStore
+    let connectivity: ConnectivityMonitor
+
+    func makeUIViewController(context: Context) -> AuroraTabHostController {
+        let controller = AuroraTabHostController()
+        let store = self.store
+        let connectivity = self.connectivity
+        controller.makeHost = { index in
+            let root = NavigationStack {
+                AuroraTabScreen(tab: CinemoraTab.allCases[index])
+                    .environmentObject(store)
+                    .environmentObject(connectivity)
+                    .navigationDestination(for: Movie.self) { movie in
+                        MovieDetailScreen(slug: movie.slug)
+                    }
+            }
+            let host = UIHostingController(rootView: root)
+            // A hosting controller created by hand does not inherit the SwiftUI
+            // environment, so the app's dark appearance is applied explicitly.
+            host.overrideUserInterfaceStyle = .dark
+            host.view.backgroundColor = .clear
+            return host
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AuroraTabHostController, context: Context) {
+        controller.select(CinemoraTab.allCases.firstIndex(of: selection) ?? 0)
+    }
+}
+
+/// The five tab roots.
+private struct AuroraTabScreen: View {
+    let tab: CinemoraTab
+
+    var body: some View {
+        switch tab {
+        case .home: HomeScreen()
+        case .tv: TVScreen()
+        case .library: LibraryScreen()
+        case .search: SearchScreen()
+        case .saved: SavedHubScreen()
         }
     }
 }
@@ -169,9 +250,9 @@ struct CinemoraTabShell: View {
 ///
 /// It deliberately lives in its own tiny view instead of on the tab shell: an
 /// `@EnvironmentObject` invalidates its view on *every* published change, so
-/// observing the store on the shell re-created the whole `TabView` (and all five
-/// tab roots) whenever the store changed. Here only this zero-sized view is
-/// invalidated, which keeps tab switching smooth.
+/// observing the store on the shell would re-evaluate the shell — and with it
+/// the tab container — whenever the store changed. Here only this zero-sized
+/// view is invalidated, which keeps tab switching smooth.
 private struct AccountSessionWatcher: View {
     @EnvironmentObject private var store: CinemaStore
 
@@ -226,6 +307,7 @@ private struct OfflineBanner: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
         .onAppear {
+            guard !pulse else { return }
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true }
         }
     }

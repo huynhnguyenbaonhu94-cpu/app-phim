@@ -3,39 +3,46 @@ import SwiftUI
 struct HomeScreen: View {
     @EnvironmentObject private var store: CinemaStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var scrollPosition: String?
+    @State private var scrollToTopRequest = 0
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
         ZStack {
             CinemaBackground()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
-                    CinemaHeader(eyebrow: "PHIM HAY MỖI NGÀY", title: "CINEMORA")
-                        .id("home-header")
-                        .auroraReveal(0)
+            // `ScrollViewReader` instead of `.scrollPosition(id:)`: that binding
+            // is written back by the scroll view while scrolling, and every write
+            // re-rendered the whole screen — including when the tab was
+            // re-selected. Scrolling to the top is now an explicit command.
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 26) {
+                        CinemaHeader(eyebrow: "PHIM HAY MỖI NGÀY", title: "CINEMORA")
+                            .id("home-header")
+                            .auroraReveal(0)
 
-                    if store.hasNewHomeContent {
-                        newContentPill
-                            .id("home-new")
+                        if store.hasNewHomeContent {
+                            newContentPill
+                                .id("home-new")
+                        }
+
+                        if let hero = store.homeSections.first(where: { $0.id == "latest" })?.movies.first {
+                            HeroParallax(movie: hero, coordinateSpace: "homeScroll")
+                                .id("home-hero")
+                                .auroraReveal(1)
+                        }
+
+                        content
                     }
-
-                    if let hero = store.homeSections.first(where: { $0.id == "latest" })?.movies.first {
-                        HeroParallax(movie: hero, coordinateSpace: "homeScroll")
-                            .id("home-hero")
-                            .auroraReveal(1)
-                    }
-
-                    content
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+                    .padding(.bottom, 120)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 6)
-                .padding(.bottom, 120)
-                .scrollTargetLayout()
+                .coordinateSpace(.named("homeScroll"))
+                .refreshable { await store.refreshHome() }
+                .onChange(of: scrollToTopRequest) { _, _ in
+                    withAnimation(Motion.enter) { scrollProxy.scrollTo("home-header", anchor: .top) }
+                }
             }
-            .coordinateSpace(.named("homeScroll"))
-            .scrollPosition(id: $scrollPosition)
-            .refreshable { await store.refreshHome() }
         }
         .animation(Motion.enter, value: store.hasNewHomeContent)
         .toolbar(.hidden, for: .navigationBar)
@@ -52,7 +59,7 @@ struct HomeScreen: View {
     private var newContentPill: some View {
         Button {
             store.clearNewHomeContent()
-            withAnimation(Motion.enter) { scrollPosition = "home-header" }
+            scrollToTopRequest += 1
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: "sparkles")

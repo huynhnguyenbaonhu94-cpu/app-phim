@@ -13,7 +13,6 @@ struct LibraryScreen: View {
     @State private var category = ""
     @State private var country = ""
     @State private var year: Int?
-    @State private var scrollPosition: String?
     @State private var filtersExpanded = false
     @State private var loadedSignature: String?
     @State private var lastLoadAt: Date?
@@ -76,9 +75,7 @@ struct LibraryScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 6)
                 .padding(.bottom, 120)
-                .scrollTargetLayout()
             }
-            .scrollPosition(id: $scrollPosition)
             .refreshable { load() }
         }
         .animation(Motion.sheet, value: filtersExpanded)

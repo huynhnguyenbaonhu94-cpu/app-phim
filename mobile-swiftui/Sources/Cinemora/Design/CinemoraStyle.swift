@@ -98,22 +98,16 @@ struct CinemaBackground: View {
                 endPoint: .bottom
             )
 
-            GeometryReader { proxy in
-                let w = max(proxy.size.width, 1)
-                let h = max(proxy.size.height, 1)
-                ZStack {
-                    blob(Color.auroraViolet.opacity(0.34), size: 360)
-                        .offset(x: -w * 0.20, y: -h * 0.32)
-                    blob(Color.auroraPink.opacity(0.24), size: 320)
-                        .offset(x: w * 0.24, y: -h * 0.04)
-                    blob(Color.auroraSky.opacity(0.18), size: 300)
-                        .offset(x: -w * 0.12, y: h * 0.34)
-                    blob(Color.auroraMint.opacity(0.12), size: 240)
-                        .offset(x: w * 0.30, y: h * 0.58)
-                }
-                .frame(width: w, height: h)
-            }
-            .ignoresSafeArea()
+            // Fixed-size, centred blobs instead of a `GeometryReader` with
+            // size-relative offsets: the background now has a static layout, so
+            // showing a screen never triggers extra layout work, and there are
+            // two fewer full-screen gradient layers to composite.
+            blob(Color.auroraViolet.opacity(0.34), size: 380)
+                .offset(x: -110, y: -300)
+            blob(Color.auroraPink.opacity(0.24), size: 320)
+                .offset(x: 130, y: -40)
+            blob(Color.auroraSky.opacity(0.18), size: 340)
+                .offset(x: 60, y: 340)
 
             RadialGradient(
                 colors: [Color.clear, Color.auroraVoid.opacity(0.62)],

@@ -19,7 +19,6 @@ struct SearchScreen: View {
     @State private var year = ""
     @State private var sortField: SearchSortField = .updated
     @State private var newestFirst = true
-    @State private var scrollPosition: String?
     @State private var filtersExpanded = false
     @FocusState private var focused: Bool
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
@@ -99,9 +98,7 @@ struct SearchScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 6)
                 .padding(.bottom, 120)
-                .scrollTargetLayout()
             }
-            .scrollPosition(id: $scrollPosition)
             .scrollDismissesKeyboard(.interactively)
         }
         .animation(Motion.sheet, value: filtersExpanded)
