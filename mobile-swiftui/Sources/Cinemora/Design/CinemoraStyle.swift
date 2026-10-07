@@ -144,7 +144,7 @@ struct CinemaBackground: View {
 /// A tinted gradient fill, a hairline top-left highlight and a two-layer shadow
 /// (neutral + coloured bloom) give depth without any backdrop blur, which keeps
 /// scrolling smooth and scrolling-heavy screens cheap to render.
-struct AuroraSurface<S: Shape>: ViewModifier {
+struct AuroraSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     let tint: Color
     let glow: Bool
@@ -174,7 +174,7 @@ struct AuroraSurface<S: Shape>: ViewModifier {
 }
 
 /// Dark "smoke" chrome used over video, where a light surface would wash out.
-struct AuroraSmoke<S: Shape>: ViewModifier {
+struct AuroraSmoke<S: InsettableShape>: ViewModifier {
     let shape: S
     let strength: Double
 
@@ -210,7 +210,7 @@ extension View {
     }
 
     /// Same card, arbitrary shape.
-    func auroraCard<S: Shape>(in shape: S, tint: Color = .auroraViolet, glow: Bool = false, fill: Double = 1) -> some View {
+    func auroraCard<S: InsettableShape>(in shape: S, tint: Color = .auroraViolet, glow: Bool = false, fill: Double = 1) -> some View {
         modifier(AuroraSurface(shape: shape, tint: tint, glow: glow, fill: fill))
     }
 
@@ -219,7 +219,7 @@ extension View {
         modifier(AuroraSmoke(shape: Circle(), strength: strength))
     }
 
-    func auroraSmoke<S: Shape>(in shape: S, strength: Double = 1) -> some View {
+    func auroraSmoke<S: InsettableShape>(in shape: S, strength: Double = 1) -> some View {
         modifier(AuroraSmoke(shape: shape, strength: strength))
     }
 

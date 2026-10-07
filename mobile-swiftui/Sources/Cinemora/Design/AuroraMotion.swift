@@ -354,6 +354,6 @@ struct AuroraTabBar: View {
                 .shadow(color: Color.black.opacity(0.5), radius: 24, y: 14)
         }
         .padding(.horizontal, 16)
-        .sensoryFeedback(.selection, value: selection)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
