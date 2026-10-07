@@ -382,7 +382,7 @@ struct CinemaPlayerScreen: View {
     let resumeTime: Double?
     let subtitleCustomizationEnabled: Bool
     let onOpenRelated: ((Movie) -> Void)?
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = PlaybackController()
@@ -665,7 +665,7 @@ struct CinemaPlayerScreen: View {
                 autoPlayOnLoad: true,
                 onExitRelated: { selectedRelatedMovie = nil }
             )
-                .environmentObject(store)
+                .environment(store)
                 .preferredColorScheme(.dark)
         }
     }

@@ -516,3 +516,64 @@ let snapshot: Movie = await Task.detached(priority: .userInitiated) {
   đều đơn giản và không phụ thuộc ngữ cảnh.
 - Đã rà lại toàn bộ dự án: chỉ có đúng một chỗ mắc lỗi che tên `error` (13.1), các chỗ còn lại
   dùng `self.error` nên không bị ảnh hưởng.
+## 14. Vòng 8 — "Aurora Lite": nhẹ hơn, mượt hơn, và quan sát theo từng thuộc tính
+
+Ba việc, xếp theo mức ảnh hưởng thực tế.
+
+### 14.1 Chuyển store sang `@Observable` (ảnh hưởng lớn nhất)
+
+Trước đây `CinemaStore` là `ObservableObject` với 34 thuộc tính `@Published`, và mọi màn hình đọc
+nó qua `@EnvironmentObject`. Cơ chế đó **không biết màn hình nào đọc thuộc tính nào**: chỉ cần
+*một* thuộc tính đổi (ví dụ `homeMovies`), SwiftUI đánh dấu **mọi** view đang giữ store là cần
+dựng lại — cả 5 tab cộng mọi màn hình đã mở, kể cả những màn hình đang ẩn và không hề dùng dữ
+liệu đó. Với các màn hình nặng như Trang chủ hay Thư viện, mỗi lần cập nhật dữ liệu là một lượt
+dựng lại toàn bộ cây giao diện.
+
+Bản này chuyển `CinemaStore`, `TvStore` và `ConnectivityMonitor` sang `@Observable` (Observation
+framework, iOS 17):
+
+- Bỏ toàn bộ `@Published` — `@Observable` tự theo dõi.
+- `@EnvironmentObject private var store` → `@Environment(CinemaStore.self) private var store`.
+- `.environmentObject(store)` → `.environment(store)`.
+
+Khác biệt cốt lõi: `@Observable` ghi nhận **chính xác thuộc tính nào được đọc trong `body`**. Một
+bản tin truyền hình, một cập nhật yêu thích hay một trang phim mới giờ chỉ dựng lại **đúng màn
+hình dùng dữ liệu đó**. Đây là lý do gốc khiến app "đẹp nhưng nặng".
+
+Lưu ý kỹ thuật: `@Environment(CinemaStore.self)` **crash nếu thiếu** thay vì trả về nil, nên mọi
+đường dẫn trình bày (root, từng tab, và mọi `sheet`/`fullScreenCover`) đều được kiểm tra là có
+`.environment(store)`. Các chỗ tái chèn trong sheet/cover vẫn giữ nguyên.
+
+### 14.2 Ngôn ngữ giao diện "Aurora Lite"
+
+`AuroraSurface` (nền của mọi card) trước đây xếp chồng **ba lớp**: gradient 3 điểm dừng, viền
+gradient, và một bóng đổ đen `radius 14`. Mỗi bóng đổ là một lượt vẽ ngoài màn hình, và khi có
+vài chục card cùng lúc, compositor phải làm việc đó **mỗi khung hình khi cuộn**.
+
+Aurora Lite giữ nguyên vẻ ngoài nhưng chỉ còn **một nền gradient + một viền mảnh 0.8pt**, không
+bóng đổ. Chỉ những bề mặt "hero" (thẻ đăng nhập, hero card) khai báo `glow` mới còn một bóng mờ
+nhẹ. `auroraHalo` cũng được thu bán kính xuống tối đa 10pt.
+
+Bỏ luôn `.blur(radius: 6)` trong trạng thái rỗng và animation "thở" chạy vô hạn của nó.
+
+### 14.3 Chính sách animation
+
+Nguyên tắc: **không có animation nào chạy vô hạn trong phần giao diện thường trực.** Một
+`repeatForever` duy nhất cũng đủ giữ vòng lặp vẽ ở tần số tối đa liên tục, khiến toàn bộ app —
+kể cả chuyển tab — luôn nặng.
+
+- Bỏ `repeatForever` ở banner mất kết nối và ở chấm trạng thái thiết bị.
+- `LivePulse` mặc định **không** chạy ripple; chỉ đúng một chỉ báo "đang phát" trên tab Truyền
+  hình còn ripple. Lưới kênh dùng chấm tĩnh.
+- `AuroraReveal` chỉ chạy hiệu ứng cho **7 thẻ đầu tiên**. Thẻ sinh ra sau đó — khi cuộn lưới
+  dài — hiện ra tức thì, nên cuộn không phải chạy animation cho cả hàng poster.
+- Animation còn lại đều là loại rẻ (transform/opacity) và nằm ở màn hình riêng: trình phát,
+  màn hình xem tiếp, QR, màn hình khởi động.
+
+### 14.4 Về tốc độ build
+
+Thời gian build thực tế trên Codemagic chỉ khoảng 1 phút — phần lớn thời gian trước đây bị mất
+vào những lần build **thất bại**. Ba lỗi biên dịch đã sửa ở mục 13 (một lỗi trong đó là compiler
+từ chối suy luận kiểu, kiểu lỗi này rất tốn thời gian biên dịch). Giao diện nhẹ hơn cũng giúp
+bớt các biểu thức modifier lồng nhau. Ngoài ra `project.yml` đã bật
+`COMPILER_INDEX_STORE_ENABLE=NO` sẵn.

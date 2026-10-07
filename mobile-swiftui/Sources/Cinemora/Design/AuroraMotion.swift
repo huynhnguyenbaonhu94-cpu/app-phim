@@ -86,9 +86,13 @@ struct AuroraReveal: ViewModifier {
             .onAppear {
                 guard !shown else { return }
                 guard !reduceMotion else { shown = true; return }
-                // Short, tightly capped stagger: a long cascade kept the whole
-                // screen animating while a tab was still settling in.
-                withAnimation(Motion.enter.delay(Double(min(index, 8)) * 0.028)) {
+                // Only the first screenful animates in. Cards that are built
+                // later — while scrolling a long grid — appear instantly, so
+                // scrolling never has to run an entrance animation on a whole row
+                // of posters at once. That alone removed most of the stutter on
+                // the long shelves.
+                guard index <= 6 else { shown = true; return }
+                withAnimation(Motion.enter.delay(Double(index) * 0.03)) {
                     shown = true
                 }
             }

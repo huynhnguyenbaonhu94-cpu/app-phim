@@ -1,9 +1,11 @@
 import Foundation
+import Observation
 import Network
 
 @MainActor
-final class ConnectivityMonitor: ObservableObject {
-    @Published private(set) var isConnected = true
+@Observable
+final class ConnectivityMonitor {
+    private(set) var isConnected = true
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.cinemora.connectivity")

@@ -37,15 +37,15 @@ enum OrientationSupport {
 @MainActor
 struct CinemoraApp: App {
     @UIApplicationDelegateAdaptor(CinemoraAppDelegate.self) private var appDelegate
-    @StateObject private var store = CinemaStore()
-    @StateObject private var connectivity = ConnectivityMonitor()
-    @StateObject private var tvStore = TvStore()
+    @State private var store = CinemaStore()
+    @State private var connectivity = ConnectivityMonitor()
+    @State private var tvStore = TvStore()
 
     var body: some Scene {
         WindowGroup {
             CinemoraTabShell(store: store, tvStore: tvStore)
-                .environmentObject(store)
-                .environmentObject(connectivity)
+                .environment(store)
+                .environment(connectivity)
                 .preferredColorScheme(.dark)
         }
     }
@@ -129,7 +129,7 @@ struct CinemoraTabShell: View {
     /// container — on every published change.
     let store: CinemaStore
     let tvStore: TvStore
-    @EnvironmentObject private var connectivity: ConnectivityMonitor
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
 
@@ -299,9 +299,9 @@ private struct AuroraTabScreen: View {
     var body: some View {
         NavigationStack(path: $path) {
             root
-                .environmentObject(store)
-                .environmentObject(tvStore)
-                .environmentObject(connectivity)
+                .environment(store)
+                .environment(tvStore)
+                .environment(connectivity)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
                 }
@@ -353,7 +353,7 @@ private struct AuroraTabScreen: View {
 /// the tab container — whenever the store changed. Here only this zero-sized
 /// view is invalidated, which keeps tab switching smooth.
 private struct AccountSessionWatcher: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
 
     var body: some View {
         Color.clear
@@ -377,7 +377,6 @@ private struct AccountSessionWatcher: View {
 }
 
 private struct OfflineBanner: View {
-    @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 11) {
@@ -385,7 +384,6 @@ private struct OfflineBanner: View {
                 Circle()
                     .fill(Color.auroraAmber.opacity(0.2))
                     .frame(width: 34, height: 34)
-                    .scaleEffect(pulse ? 1.12 : 0.94)
                 Image(systemName: "wifi.exclamationmark")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color.auroraAmber)
@@ -405,9 +403,5 @@ private struct OfflineBanner: View {
         .auroraCard(cornerRadius: 19, tint: .auroraAmber, glow: true)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
-        .onAppear {
-            guard !pulse else { return }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true }
-        }
     }
 }

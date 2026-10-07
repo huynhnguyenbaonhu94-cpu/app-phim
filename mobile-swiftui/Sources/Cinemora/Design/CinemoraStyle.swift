@@ -154,11 +154,15 @@ struct AuroraSurface<S: InsettableShape>: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        // The coloured bloom is a second shadow pass, so it is only rendered
-        // when a card actually asks for it. Lists and grids keep a single
-        // neutral shadow, which halves the offscreen rendering work.
+        // Aurora Lite: one flat background and a hairline edge.
+        //
+        // The old version stacked a three-stop gradient, a gradient border and a
+        // black drop shadow on every single card. Each shadow is an offscreen
+        // pass, and with a few dozen cards on screen the compositor was doing
+        // that work on every frame while scrolling. Only the handful of "hero"
+        // surfaces that ask for `glow` still get one soft shadow.
         if glow {
-            surface(content).shadow(color: tint.opacity(0.26), radius: 20, y: 6)
+            surface(content).shadow(color: tint.opacity(0.18), radius: 11, y: 4)
         } else {
             surface(content)
         }
@@ -170,19 +174,15 @@ struct AuroraSurface<S: InsettableShape>: ViewModifier {
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            tint.opacity(0.20 * fill),
-                            tint.opacity(0.07 * fill),
-                            Color.white.opacity(0.03 * fill)
+                            Color.auroraRaised.opacity(0.60),
+                            tint.opacity(0.15 * fill)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
             }
-            .overlay {
-                shape.strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
-            }
-            .shadow(color: Color.black.opacity(0.32), radius: 14, y: 9)
+            .overlay { shape.strokeBorder(Color.white.opacity(0.09), lineWidth: 0.8) }
     }
 }
 
@@ -206,7 +206,7 @@ struct AuroraSmoke<S: InsettableShape>: ViewModifier {
                 )
             }
             .background { shape.fill(Color.black.opacity(0.34 + 0.22 * strength)) }
-            .overlay { shape.strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8) }
+            .overlay { shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8) }
             .shadow(color: Color.black.opacity(0.38), radius: 14, y: 7)
     }
 }
@@ -238,7 +238,9 @@ extension View {
 
     /// Coloured bloom used behind hero artwork and primary actions.
     func auroraHalo(_ tint: Color = .auroraViolet, radius: CGFloat = 26, opacity: Double = 0.35) -> some View {
-        shadow(color: tint.opacity(opacity), radius: radius, y: radius * 0.35)
+        // Aurora Lite: a short bloom. Wide radii cost a large offscreen pass for
+        // a halo that is barely visible against a dark background.
+        shadow(color: tint.opacity(min(opacity, 0.26)), radius: min(radius, 10), y: 3)
     }
 }
 

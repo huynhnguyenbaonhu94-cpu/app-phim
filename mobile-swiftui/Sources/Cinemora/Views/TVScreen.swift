@@ -287,7 +287,7 @@ struct TVScreen: View {
     /// store publishes, so the store is passed in as a plain property and only
     /// forwarded to the detail screen inside the player cover.
     let store: CinemaStore
-    @EnvironmentObject private var tv: TvStore
+    @Environment(TvStore.self) private var tv
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = TVPlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
@@ -447,7 +447,7 @@ struct TVScreen: View {
                         autoPlayOnLoad: true,
                         onExitRelated: { isPlayerPresented = false }
                     )
-                        .environmentObject(store)
+                        .environment(store)
                         .preferredColorScheme(.dark)
                 } else if let selectedStream {
                     TVFullscreenPlayer(stream: selectedStream, playback: playback, pipCoordinator: pipCoordinator, isMuted: $isMuted, volume: $volume, isFullscreen: $isPlayerPresented)
@@ -576,7 +576,7 @@ private struct TVChannelCard: View {
                     }
                     .overlay(alignment: .topLeading) {
                         HStack(spacing: 6) {
-                            LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6, animated: true)
+                            LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6)
                             Text(stream.isOnline ? "LIVE" : "CHỜ NGUỒN")
                                 .font(.system(size: 8, weight: .black, design: .rounded))
                                 .tracking(0.8)
@@ -875,7 +875,7 @@ private struct TVPlayerView: View {
         VStack(spacing: 13) {
             HStack(spacing: 12) {
                 HStack(spacing: 6) {
-                    LivePulse(color: .auroraMint, size: 6, animated: true)
+                    LivePulse(color: .auroraMint, size: 6)
                     Text("LIVE")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                         .foregroundStyle(.white)

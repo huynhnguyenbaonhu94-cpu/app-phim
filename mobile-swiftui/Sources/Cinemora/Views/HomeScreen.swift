@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HomeScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var scrollToTopRequest = 0
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]

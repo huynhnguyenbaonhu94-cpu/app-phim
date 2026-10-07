@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Watch history
 
 struct WatchHistoryScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var showClearAlert = false
 
@@ -137,7 +137,7 @@ struct WatchHistoryScreen: View {
 // MARK: - Favorites
 
 struct FavoritesScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var showClearAlert = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
@@ -258,7 +258,7 @@ struct FavoritesScreen: View {
 // MARK: - Saved hub
 
 struct SavedHubScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @State private var pressedDestination: String?
 
     var body: some View {
@@ -383,7 +383,7 @@ private enum DefaultStopTimer: String, CaseIterable, Identifiable {
 }
 
 struct PlaybackDefaultsScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

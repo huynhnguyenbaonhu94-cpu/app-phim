@@ -430,7 +430,6 @@ struct StateMessage: View {
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
 
-    @State private var breathe = false
 
     var body: some View {
         VStack(spacing: 13) {
@@ -439,8 +438,7 @@ struct StateMessage: View {
                     .fill(LinearGradient.auroraPrimary)
                     .opacity(0.24)
                     .frame(width: 68, height: 68)
-                    .scaleEffect(breathe ? 1.08 : 0.94)
-                    .blur(radius: 6)
+                    .opacity(0.9)
                 Image(systemName: icon)
                     .font(.system(size: 24, weight: .light))
                     .foregroundStyle(Color.auroraViolet)
@@ -471,9 +469,6 @@ struct StateMessage: View {
         .padding(26)
         .frame(maxWidth: .infinity)
         .auroraCard(cornerRadius: 26, tint: .auroraViolet, fill: 0.6)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = true }
-        }
     }
 }
 

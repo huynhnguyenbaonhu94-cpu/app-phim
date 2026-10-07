@@ -4,7 +4,7 @@ struct MovieDetailScreen: View {
     let slug: String
     private let autoPlayOnLoad: Bool
     private let onExitRelated: (() -> Void)?
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
@@ -68,7 +68,7 @@ struct MovieDetailScreen: View {
         }
         .sheet(isPresented: $showLogin) {
             AccountSettingsScreen()
-                .environmentObject(store)
+                .environment(store)
                 .preferredColorScheme(.dark)
         }
         .task(id: slug) { store.loadDetail(slug: slug) }
@@ -102,7 +102,7 @@ struct MovieDetailScreen: View {
                         autoPlayOnLoad: true,
                         onExitRelated: { showPlayer = false }
                     )
-                        .environmentObject(store)
+                        .environment(store)
                         .preferredColorScheme(.dark)
                 } else if let movie, episode != nil {
                     CinemaPlayerScreen(

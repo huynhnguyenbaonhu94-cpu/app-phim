@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AccountSettingsScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var isRegistering = false
     @State private var name = ""
@@ -73,10 +73,10 @@ struct AccountSettingsScreen: View {
             Text("Tất cả phiên đăng nhập, kể cả thiết bị đang xem phim, sẽ bị thu hồi ngay lập tức.")
         }
         .sheet(isPresented: $showQrLogin) {
-            QRLoginSheet().environmentObject(store)
+            QRLoginSheet().environment(store)
         }
         .sheet(isPresented: $showChangePassword) {
-            ChangePasswordSheet().environmentObject(store)
+            ChangePasswordSheet().environment(store)
         }
         .sheet(isPresented: $showQrScanner) {
             NavigationStack {
@@ -396,7 +396,7 @@ struct AccountSettingsScreen: View {
 
     private func deviceRow(_ device: RemoteAccountDevice) -> some View {
         HStack(spacing: 11) {
-            LivePulse(color: device.isOnline ? .auroraMint : .white.opacity(0.35), size: 6, animated: true)
+            LivePulse(color: device.isOnline ? .auroraMint : .white.opacity(0.35), size: 6)
             VStack(alignment: .leading, spacing: 3) {
                 Text(device.deviceName)
                     .font(.auroraLabel(12, weight: .bold))
@@ -477,7 +477,7 @@ struct AccountSettingsScreen: View {
 // MARK: - Change password
 
 private struct ChangePasswordSheet: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var currentPassword = ""
     @State private var newPassword = ""

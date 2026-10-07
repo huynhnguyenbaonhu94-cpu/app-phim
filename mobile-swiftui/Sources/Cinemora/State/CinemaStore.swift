@@ -1,4 +1,5 @@
 import Combine
+import Observation
 import Foundation
 
 struct HomeSection: Identifiable {
@@ -8,33 +9,34 @@ struct HomeSection: Identifiable {
 }
 
 @MainActor
-final class CinemaStore: ObservableObject {
-    @Published private(set) var homeMovies: [Movie] = []
-    @Published private(set) var homeSections: [HomeSection] = []
-    @Published private(set) var homeLoading = false
-    @Published private(set) var homeLoadingMore = false
-    @Published private(set) var homeHasMore = false
-    @Published private(set) var homeError: String?
-    @Published private(set) var catalogMeta: CatalogMeta?
-    @Published private(set) var searchResults: [Movie] = []
-    @Published private(set) var searchLoading = false
-    @Published private(set) var searchError: String?
-    @Published private(set) var detailMovie: Movie?
-    @Published private(set) var detailLoading = false
-    @Published private(set) var detailError: String?
-    @Published private(set) var catalogMovies: [Movie] = []
-    @Published private(set) var catalogLoading = false
-    @Published private(set) var catalogError: String?
-    @Published private(set) var catalogHasMore = false
-    @Published private(set) var catalogPage = 1
-    @Published private(set) var localFavorites: [LocalMovieRecord] = []
-    @Published private(set) var localHistory: [LocalWatchRecord] = []
-    @Published private(set) var accountUser: RemoteAccountUser?
-    @Published private(set) var accountDevices: [RemoteAccountDevice] = []
-    @Published private(set) var accountLoading = false
-    @Published private(set) var accountError: String?
-    @Published var playbackDefaults = PlaybackDefaults()
-    @Published private(set) var hasNewHomeContent = false
+@Observable
+final class CinemaStore {
+    private(set) var homeMovies: [Movie] = []
+    private(set) var homeSections: [HomeSection] = []
+    private(set) var homeLoading = false
+    private(set) var homeLoadingMore = false
+    private(set) var homeHasMore = false
+    private(set) var homeError: String?
+    private(set) var catalogMeta: CatalogMeta?
+    private(set) var searchResults: [Movie] = []
+    private(set) var searchLoading = false
+    private(set) var searchError: String?
+    private(set) var detailMovie: Movie?
+    private(set) var detailLoading = false
+    private(set) var detailError: String?
+    private(set) var catalogMovies: [Movie] = []
+    private(set) var catalogLoading = false
+    private(set) var catalogError: String?
+    private(set) var catalogHasMore = false
+    private(set) var catalogPage = 1
+    private(set) var localFavorites: [LocalMovieRecord] = []
+    private(set) var localHistory: [LocalWatchRecord] = []
+    private(set) var accountUser: RemoteAccountUser?
+    private(set) var accountDevices: [RemoteAccountDevice] = []
+    private(set) var accountLoading = false
+    private(set) var accountError: String?
+    var playbackDefaults = PlaybackDefaults()
+    private(set) var hasNewHomeContent = false
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
@@ -549,11 +551,12 @@ final class CinemaStore: ObservableObject {
 /// somewhere else entirely. That is what made taps land late, back buttons
 /// occasionally need several presses, and tab switches stutter.
 @MainActor
-final class TvStore: ObservableObject {
-    @Published private(set) var streams: [TvStream] = []
-    @Published private(set) var videos: [TvVideo] = []
-    @Published private(set) var loading = false
-    @Published private(set) var error: String?
+@Observable
+final class TvStore {
+    private(set) var streams: [TvStream] = []
+    private(set) var videos: [TvVideo] = []
+    private(set) var loading = false
+    private(set) var error: String?
 
     private let api = CinemaAPI.shared
     private var eventsTask: Task<Void, Never>?

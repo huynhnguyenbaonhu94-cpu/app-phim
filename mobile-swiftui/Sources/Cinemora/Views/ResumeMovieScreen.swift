@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ResumeMovieScreen: View {
     let record: LocalWatchRecord
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var loadedMovie: Movie?
     @State private var showPlayer = false
@@ -39,7 +39,7 @@ struct ResumeMovieScreen: View {
             if let loadedMovie, !loadedMovie.availableServers.isEmpty {
                 let servers = loadedMovie.availableServers
                 CinemaPlayerScreen(movie: loadedMovie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode, resumeTime: record.watchedSeconds)
-                    .environmentObject(store)
+                    .environment(store)
                     .preferredColorScheme(.dark)
             }
         }

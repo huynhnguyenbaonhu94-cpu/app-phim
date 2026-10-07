@@ -10,7 +10,7 @@ private enum SearchSortField: String, CaseIterable, Identifiable {
 }
 
 struct SearchScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @State private var submitted = ""
     @State private var language = ""
     @State private var category = ""

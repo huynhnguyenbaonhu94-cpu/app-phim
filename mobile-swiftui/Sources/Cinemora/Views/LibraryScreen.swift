@@ -7,7 +7,7 @@ private struct LibraryFilterOption: Identifiable {
 }
 
 struct LibraryScreen: View {
-    @EnvironmentObject private var store: CinemaStore
+    @Environment(CinemaStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var kind = "latest"
     @State private var category = ""
