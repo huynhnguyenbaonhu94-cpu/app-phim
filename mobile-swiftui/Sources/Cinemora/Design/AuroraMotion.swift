@@ -8,10 +8,12 @@ import SwiftUI
 // changes such as the background drift.
 
 enum Motion {
-    static let tap = Animation.spring(response: 0.28, dampingFraction: 0.72)
-    static let enter = Animation.spring(response: 0.52, dampingFraction: 0.86)
-    static let sheet = Animation.spring(response: 0.42, dampingFraction: 0.82)
-    static let gentle = Animation.easeInOut(duration: 0.32)
+    // Tuned short: every animation here either accompanies a tap or an entrance,
+    // so long settle times read as input lag rather than polish.
+    static let tap = Animation.spring(response: 0.24, dampingFraction: 0.74)
+    static let enter = Animation.spring(response: 0.40, dampingFraction: 0.88)
+    static let sheet = Animation.spring(response: 0.34, dampingFraction: 0.86)
+    static let gentle = Animation.easeInOut(duration: 0.26)
 }
 
 // MARK: - Press feedback
@@ -169,24 +171,31 @@ struct SkeletonRow: View {
 struct LivePulse: View {
     var color: Color = .auroraMint
     var size: CGFloat = 7
+    /// The expanding ripple is opt-in. One animated indicator is a nice detail,
+    /// but a whole grid of them keeps the render loop running at full rate
+    /// forever, which makes the entire app — including tab switches — feel
+    /// heavy. Grid cells therefore use the static dot.
+    var animated: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(color.opacity(0.4))
-                .frame(width: size, height: size)
-                .scaleEffect(animate ? 2.3 : 1)
-                .opacity(animate ? 0 : 0.9)
+            if animated {
+                Circle()
+                    .fill(color.opacity(0.4))
+                    .frame(width: size, height: size)
+                    .scaleEffect(animate ? 2.3 : 1)
+                    .opacity(animate ? 0 : 0.9)
+            }
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
         }
         .frame(width: size * 2.4, height: size * 2.4)
         .onAppear {
-            guard !reduceMotion else { return }
+            guard animated, !reduceMotion else { return }
             withAnimation(.easeOut(duration: 1.5).repeatForever(autoreverses: false)) {
                 animate = true
             }
@@ -233,6 +242,22 @@ struct AuroraChip: View {
 
     var body: some View {
         Button(action: action) {
+            chipLabel
+        }
+        .buttonStyle(.auroraPress(scale: 0.94))
+        .animation(Motion.gentle, value: selected)
+    }
+
+    @ViewBuilder
+    private var chipLabel: some View {
+        if selected {
+            chipBody.shadow(color: Color.auroraViolet.opacity(0.32), radius: 12, y: 5)
+        } else {
+            chipBody
+        }
+    }
+
+    private var chipBody: some View {
             HStack(spacing: 5) {
                 if selected {
                     Image(systemName: "checkmark")
@@ -259,10 +284,6 @@ struct AuroraChip: View {
             .overlay {
                 Capsule().strokeBorder(Color.white.opacity(selected ? 0.32 : 0.09), lineWidth: 0.8)
             }
-            .shadow(color: selected ? Color.auroraViolet.opacity(0.32) : .clear, radius: 12, y: 5)
-        }
-        .buttonStyle(.auroraPress(scale: 0.94))
-        .animation(Motion.gentle, value: selected)
     }
 }
 
@@ -316,7 +337,13 @@ struct AuroraTabBar: View {
             ForEach(CinemoraTab.allCases) { tab in
                 Button {
                     guard selection != tab else { return }
-                    withAnimation(Motion.sheet) { selection = tab }
+                    // Plain assignment on purpose. Wrapping this in
+                    // `withAnimation` also animated the `TabView`'s content
+                    // swap, cross-fading two full screens for the length of the
+                    // spring — that is what made every switch feel laggy and
+                    // delayed. The pill still morphs, because the animation is
+                    // applied to this bar's own subtree at the bottom.
+                    selection = tab
                 } label: {
                     VStack(spacing: 5) {
                         Image(systemName: selection == tab ? tab.selectedIcon : tab.icon)
@@ -356,6 +383,7 @@ struct AuroraTabBar: View {
                 .shadow(color: Color.black.opacity(0.5), radius: 24, y: 14)
         }
         .padding(.horizontal, 16)
+        .animation(Motion.tap, value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
 }

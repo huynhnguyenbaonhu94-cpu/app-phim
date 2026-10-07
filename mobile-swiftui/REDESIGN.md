@@ -150,3 +150,27 @@ Thêm hai thay đổi về cấu trúc và chi phí vẽ:
 - **Hiệu ứng xuất hiện so le được rút ngắn**: delay tối đa từ `14 × 45ms = 630ms` xuống `8 × 28ms = 224ms`, nên nội dung "đứng yên" nhanh hơn nhiều sau khi chuyển tab.
 
 Kết quả: khi chuyển tab, không còn blur toàn màn hình phải vẽ lại, không còn fetch lại dữ liệu, không còn vòng publish định kỳ 5–12 giây, và không còn re-render cả cây `TabView` mỗi khi store thay đổi. Các hiệu ứng chuyển động vẫn giữ nguyên: chỉ báo tab trượt, icon bounce, press scale, reveal, shimmer, skeleton, pulse/equalizer ở tab Truyền hình.
+
+## 8. Vòng sửa thứ hai: chuyển tab vẫn còn lag
+
+Sau vòng 7, chuyển tab vẫn còn giật và có độ trễ. Nguyên nhân chính lần này nằm ở **cách chuyển tab** và **cách giải mã ảnh poster**.
+
+| # | Nguyên nhân | Vì sao gây lag | Cách sửa |
+| --- | --- | --- | --- |
+| 1 | `AuroraTabBar` đổi tab bằng `withAnimation(Motion.sheet) { selection = tab }` | Bọc animation quanh thay đổi `selection` cũng làm `TabView` **cross-fade toàn bộ nội dung** hai màn hình trong suốt thời gian của spring (~0,6s). Đây chính là cảm giác "lag và delay" khi bấm tab | Gán thẳng `selection = tab`; chuyển animation xuống chính thanh tab bằng `.animation(Motion.tap, value: selection)` nên viên chỉ báo vẫn trượt mượt mà nội dung đổi tức thì |
+| 2 | `PosterArt` giải mã ảnh bằng `UIImage(data:)` **trên main thread** | Ảnh poster giữ nguyên độ phân giải gốc (~13 MB mỗi ảnh khi giải mã ở 3x) và chỉ được giải nén khi vẽ lần đầu — tức là **trên main thread, đúng lúc lưới đang render**. Một lưới 16 poster vừa ngốn hàng trăm MB vừa chặn main thread | Chuyển sang `CGImageSourceCreateThumbnailAtIndex` trong `Task.detached`: giải mã + hạ mẫu ở luồng nền, đúng cỡ hiển thị (240–1400 px), kèm `kCGImageSourceShouldCacheImmediately`. Cache cũng kiểm tra ảnh đã đủ lớn chưa trước khi dùng lại |
+| 3 | Placeholder poster dùng `Circle().blur(radius: 34)` | Mỗi poster chưa tải xong là một lớp blur phải composite offscreen; một lưới đang tải là hàng chục lớp blur | Đổi sang `RadialGradient` |
+| 4 | Mỗi kênh trong lưới Truyền hình có một `LivePulse` chạy `repeatForever` | Một lưới 10–16 kênh giữ render loop chạy 60fps **mãi mãi**, làm cả app (kể cả lúc chuyển tab) nặng | Thêm cờ `animated` (mặc định `false`): lưới dùng chấm tĩnh, chỉ thẻ nổi bật và overlay trình phát còn nhịp lan toả |
+| 5 | `HeroParallax` đọc vị trí cuộn qua `GeometryReader` | Mỗi frame cuộn đều kéo theo một lượt layout lại toàn bộ thẻ hero | Chuyển sang `.visualEffect { content, proxy in … }` (iOS 17): đọc hình học trong render tree, không còn layout pass mỗi frame |
+| 6 | Bóng thứ hai luôn tồn tại với màu trong suốt (`AuroraChip`, thẻ kênh) | Vẫn tốn một lượt shadow pass dù không nhìn thấy | Chỉ thêm bóng khi thực sự cần (`AuroraChip`), và đặt `radius: 0` khi không chọn (thẻ kênh) |
+
+Ngoài ra toàn bộ spring đã được rút ngắn vì chúng đi kèm thao tác chạm hoặc lúc nội dung xuất hiện, nên thời gian ổn định dài bị cảm nhận là độ trễ:
+
+| Token | Trước | Sau |
+| --- | --- | --- |
+| `Motion.tap` | `response 0.28` | `response 0.24` |
+| `Motion.enter` | `response 0.52` | `response 0.40` |
+| `Motion.sheet` | `response 0.42` | `response 0.34` |
+| `Motion.gentle` | `0.32s` | `0.26s` |
+
+Kết quả: bấm tab là nội dung đổi ngay (không còn cross-fade toàn màn hình), ảnh poster được giải mã ở luồng nền với dung lượng nhỏ hơn khoảng 8–10 lần, không còn lớp blur nào trong lưới, không còn hàng chục animation chạy vô hạn, và việc cuộn ở tab Trang chủ không còn sinh layout pass mỗi frame.

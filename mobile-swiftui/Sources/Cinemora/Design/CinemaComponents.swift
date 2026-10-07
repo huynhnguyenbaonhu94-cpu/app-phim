@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -56,10 +57,32 @@ private final class PosterImageCache {
         configuration.timeoutIntervalForResource = 45
         return URLSession(configuration: configuration)
     }()
+
+    /// Decodes and downsamples an image off the main thread.
+    ///
+    /// `UIImage(data:)` keeps the full-resolution bitmap around and defers
+    /// decompression until the image is first drawn — that is, on the main
+    /// thread while a grid is being rendered. ImageIO does both jobs up front on
+    /// a background thread, and the resulting thumbnail is far smaller in memory.
+    static func downsample(_ data: Data, maxPixelSize: CGFloat) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+            guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions as CFDictionary) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail)
+        }.value
+    }
 }
 
 struct PosterArt: View {
     let url: URL?
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var isLoading = false
 
@@ -82,20 +105,27 @@ struct PosterArt: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
             .task(id: url) {
-                await loadImage()
+                await loadImage(targetWidth: proxy.size.width)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func loadImage() async {
+    private func loadImage(targetWidth: CGFloat) async {
         guard let url else {
             image = nil
             isLoading = false
             return
         }
 
-        if let cached = PosterImageCache.shared.object(forKey: url as NSURL) {
+        // Decode at roughly the size the poster is drawn at, never at full
+        // resolution: a 500x750 JPEG decoded at 3x costs ~13 MB per card and
+        // blocked the main thread for every card of a grid.
+        let width = targetWidth > 1 ? targetWidth : 300
+        let neededPixels = min(max(width * displayScale, 240), 1400)
+
+        if let cached = PosterImageCache.shared.object(forKey: url as NSURL),
+           cached.size.width * cached.scale >= neededPixels * 0.9 {
             image = cached
             isLoading = false
             return
@@ -113,10 +143,12 @@ struct PosterArt: View {
                 let (data, response) = try await PosterImageCache.session.data(for: request)
                 guard !Task.isCancelled,
                       let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode),
-                      let decoded = UIImage(data: data) else { continue }
-                PosterImageCache.shared.setObject(decoded, forKey: url as NSURL, cost: data.count)
-                withAnimation(.easeOut(duration: 0.35)) { image = decoded }
+                      (200..<300).contains(http.statusCode) else { continue }
+                guard let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { continue }
+                guard !Task.isCancelled else { return }
+                let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+                PosterImageCache.shared.setObject(decoded, forKey: url as NSURL, cost: cost)
+                withAnimation(.easeOut(duration: 0.3)) { image = decoded }
                 return
             } catch is CancellationError {
                 return
@@ -134,10 +166,13 @@ struct PosterArt: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            Circle()
-                .fill(Color.auroraViolet.opacity(0.22))
-                .frame(width: 120, height: 120)
-                .blur(radius: 34)
+            RadialGradient(
+                colors: [Color.auroraViolet.opacity(0.3), Color.auroraViolet.opacity(0)],
+                center: .center,
+                startRadius: 0,
+                endRadius: 90
+            )
+            .frame(width: 180, height: 180)
             Image(systemName: "film")
                 .font(.system(size: 24, weight: .light))
                 .foregroundStyle(Color.auroraViolet.opacity(0.8))
@@ -549,14 +584,17 @@ struct HeroParallax: View {
     var coordinateSpace: String
 
     var body: some View {
-        GeometryReader { proxy in
-            let minY = proxy.frame(in: .named(coordinateSpace)).minY
-            let pull = max(minY, 0)
-            FeaturedMovieCard(movie: movie)
-                .frame(width: proxy.size.width, height: height)
-                .offset(y: -pull * 0.30)
-                .scaleEffect(1 + pull / 2400)
-        }
-        .frame(height: height)
+        // `visualEffect` reads the scroll geometry in the render tree instead of
+        // through a `GeometryReader`, so scrolling no longer forces a SwiftUI
+        // layout pass of this card on every frame.
+        FeaturedMovieCard(movie: movie)
+            .frame(height: height)
+            .visualEffect { content, proxy in
+                let minY = proxy.frame(in: .named(coordinateSpace)).minY
+                let pull = max(minY, 0)
+                return content
+                    .offset(y: -pull * 0.30)
+                    .scaleEffect(1 + pull / 2400)
+            }
     }
 }

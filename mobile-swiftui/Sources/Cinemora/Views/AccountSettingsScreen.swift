@@ -396,7 +396,7 @@ struct AccountSettingsScreen: View {
 
     private func deviceRow(_ device: RemoteAccountDevice) -> some View {
         HStack(spacing: 11) {
-            LivePulse(color: device.isOnline ? .auroraMint : .white.opacity(0.35), size: 6)
+            LivePulse(color: device.isOnline ? .auroraMint : .white.opacity(0.35), size: 6, animated: true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(device.deviceName)
                     .font(.auroraLabel(12, weight: .bold))

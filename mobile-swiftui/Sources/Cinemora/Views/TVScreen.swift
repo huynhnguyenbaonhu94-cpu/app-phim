@@ -564,7 +564,7 @@ private struct TVChannelCard: View {
                     }
                     .overlay(alignment: .topLeading) {
                         HStack(spacing: 6) {
-                            LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6)
+                            LivePulse(color: stream.isOnline ? .auroraMint : .auroraAmber, size: 6, animated: true)
                             Text(stream.isOnline ? "LIVE" : "CHỜ NGUỒN")
                                 .font(.system(size: 8, weight: .black, design: .rounded))
                                 .tracking(0.8)
@@ -592,7 +592,9 @@ private struct TVChannelCard: View {
                             )
                     }
                     .shadow(color: Color.black.opacity(0.4), radius: 14, y: 9)
-                    .shadow(color: isSelected ? Color.auroraMint.opacity(0.3) : .clear, radius: 20, y: 8)
+                    // Zero radius while unselected: the grid should not pay for a
+                    // second, fully transparent shadow pass on every card.
+                    .shadow(color: isSelected ? Color.auroraMint.opacity(0.3) : .clear, radius: isSelected ? 20 : 0, y: isSelected ? 8 : 0)
 
                 Text(stream.name)
                     .font(.auroraLabel(12, weight: .bold))
@@ -676,7 +678,7 @@ private struct TVPlayerView: View {
         VStack(alignment: .trailing, spacing: 9) {
             HStack(spacing: 10) {
                 HStack(spacing: 9) {
-                    LivePulse(color: .auroraMint, size: 7)
+                    LivePulse(color: .auroraMint, size: 7, animated: true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(stream.name)
                             .font(.auroraLabel(12, weight: .bold))
@@ -861,7 +863,7 @@ private struct TVPlayerView: View {
         VStack(spacing: 13) {
             HStack(spacing: 12) {
                 HStack(spacing: 6) {
-                    LivePulse(color: .auroraMint, size: 6)
+                    LivePulse(color: .auroraMint, size: 6, animated: true)
                     Text("LIVE")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
