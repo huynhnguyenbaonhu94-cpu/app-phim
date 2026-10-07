@@ -41,14 +41,14 @@ final class CinemaStore {
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
     private let playbackDefaultsKey = "cinemora.playback.defaults.v1"
-    private var homePage = 1
-    private var detailTask: Task<Void, Never>?
-    private var catalogTask: Task<Void, Never>?
-    private var detailRequestID = 0
-    private var catalogRequestID = 0
-    private var searchRequestID = 0
-    private var nextAuthAttemptAt = Date.distantPast
-    private var lastHomeRefreshAt: Date?
+    @ObservationIgnored private var homePage = 1
+    @ObservationIgnored private var detailTask: Task<Void, Never>?
+    @ObservationIgnored private var catalogTask: Task<Void, Never>?
+    @ObservationIgnored private var detailRequestID = 0
+    @ObservationIgnored private var catalogRequestID = 0
+    @ObservationIgnored private var searchRequestID = 0
+    @ObservationIgnored private var nextAuthAttemptAt = Date.distantPast
+    @ObservationIgnored private var lastHomeRefreshAt: Date?
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -559,8 +559,8 @@ final class TvStore {
     private(set) var error: String?
 
     private let api = CinemaAPI.shared
-    private var eventsTask: Task<Void, Never>?
-    private var videoRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var eventsTask: Task<Void, Never>?
+    @ObservationIgnored private var videoRefreshTask: Task<Void, Never>?
 
     deinit {
         eventsTask?.cancel()

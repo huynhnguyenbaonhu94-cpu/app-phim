@@ -577,3 +577,35 @@ vào những lần build **thất bại**. Ba lỗi biên dịch đã sửa ở 
 từ chối suy luận kiểu, kiểu lỗi này rất tốn thời gian biên dịch). Giao diện nhẹ hơn cũng giúp
 bớt các biểu thức modifier lồng nhau. Ngoài ra `project.yml` đã bật
 `COMPILER_INDEX_STORE_ENABLE=NO` sẵn.
+
+## 15. Sửa lỗi build sau khi chuyển sang `@Observable`
+
+Hai lỗi duy nhất:
+
+```
+CinemaStore.swift:566:9: main actor-isolated property 'eventsTask' can not be referenced from a nonisolated context
+CinemaStore.swift:567:9: main actor-isolated property 'videoRefreshTask' can not be referenced from a nonisolated context
+```
+
+**Nguyên nhân.** Macro `@Observable` không giữ thuộc tính `var` ở dạng stored — nó sinh ra một cặp
+computed property (get/set) có theo dõi quan sát. Getter là một member thuộc actor, mà `deinit`
+lại là ngữ cảnh **nonisolated**, nên đọc thuộc tính từ `deinit` trở thành lỗi. Trước khi chuyển
+sang `@Observable`, hai thuộc tính này là stored nên `deinit` đọc được bình thường.
+
+Bằng chứng cho thấy đúng là như vậy: trong log chỉ có hai lỗi, và cả hai đều là `var`. Thuộc tính
+`let` (như `monitor` trong `ConnectivityMonitor`) không bị macro đụng tới, nên `deinit` của nó
+vẫn hợp lệ — compiler không báo gì.
+
+**Cách sửa.** Đánh dấu `@ObservationIgnored` cho toàn bộ thuộc tính sổ sách nội bộ:
+
+- `eventsTask`, `videoRefreshTask`, `detailTask`, `catalogTask`
+- `homePage`, `detailRequestID`, `catalogRequestID`, `searchRequestID`
+- `nextAuthAttemptAt`, `lastHomeRefreshAt`
+
+Tất cả đều là `private`, nên không view nào có thể quan sát chúng; đưa ra ngoài cơ chế quan sát
+vừa đúng về ngữ nghĩa, vừa tránh overhead theo dõi vô ích, vừa giữ chúng là stored property để
+`deinit` hợp lệ.
+
+**Ghi chú cho lần bảo trì sau:** trong một lớp `@Observable`, mọi `var` đều trở thành computed.
+Nếu cần đọc/ghi một thuộc tính từ `deinit` hay từ ngữ cảnh nonisolated, hãy đánh dấu nó
+`@ObservationIgnored`.
