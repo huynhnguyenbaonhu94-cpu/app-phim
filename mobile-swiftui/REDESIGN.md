@@ -790,3 +790,30 @@ phím — lỗi hay gặp khi gắn cử chỉ chạm lên toàn màn hình.
 
 Đã áp dụng cho 4 màn hình có ô nhập: Đăng nhập/Đăng ký, Đổi mật khẩu, Tìm kiếm, Yêu cầu phim.
 Muốn hiện lại bàn phím thì chỉ cần chạm vào ô nhập.
+
+## 21. Sửa lại cách ẩn bàn phím (bản 20.2 chưa chạy)
+
+**Triệu chứng:** chạm ra ngoài ô nhập nhưng bàn phím không đóng.
+
+**Vì sao bản trước thất bại.** Tôi đặt lớp cảm ứng **phía sau** nội dung. Cách đó không thể chạy
+với `ScrollView`: scroll view chiếm trọn khung của nó khi kiểm tra điểm chạm, nên cú chạm vào khoảng
+trống **không bao giờ** rơi xuống lớp nằm sau nó. Lớp đó tồn tại nhưng vô hình với mọi cú chạm.
+
+**Cách làm mới — bộ nhận diện chạm ở tầng cửa sổ.** `AuroraKeyboardDismissLayer` gắn một
+`UITapGestureRecognizer` lên window, nên nó thấy **mọi** cú chạm trong app:
+
+- Chạm vào ô nhập → bỏ qua, bàn phím giữ nguyên (đúng yêu cầu: chạm vào ô nhập để hiện lại bàn phím).
+- Chạm vào bất kì chỗ nào khác — khoảng trống, chữ tiêu đề, thẻ phim, thanh menu, nút trở lại, nền
+  sheet — → đóng bàn phím.
+- **Lướt lên xuống không đóng bàn phím**, vì đây là bộ nhận diện *chạm*, không phải *kéo*. Đúng
+  yêu cầu.
+
+Hai thiết lập giữ cho phần còn lại của app không bị ảnh hưởng: `cancelsTouchesInView = false` để
+nút bấm vẫn nhận được cú chạm, và cho phép nhận diện đồng thời để thao tác cuộn, chuyển tab, các
+cử chỉ riêng của trình phát vẫn chạy như cũ.
+
+Việc gắn vào window do `didMoveToWindow` đảm nhiệm: `updateUIView` có thể chạy trước khi view nằm
+trong window, nên nếu chỉ dựa vào nó thì có lúc bộ nhận diện không bao giờ được gắn.
+
+**Sửa kèm:** ba màn hình đang bật `.scrollDismissesKeyboard(.interactively)` — tức kéo là đóng bàn
+phím, trái với yêu cầu mới. Đã đổi thành `.never`: chỉ chạm ra ngoài mới đóng.

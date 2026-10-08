@@ -111,8 +111,7 @@ struct SearchScreen: View {
                 .padding(.bottom, 120)
             }
             .scrollIndicators(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .auroraDismissKeyboardOnTap()
+            .scrollDismissesKeyboard(.never)
         }
         .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)

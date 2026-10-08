@@ -639,19 +639,79 @@ extension UIApplication {
     }
 }
 
-extension View {
-    /// Closes the keyboard when the user taps anywhere that is not a text field
-    /// or a button.
-    ///
-    /// The gesture is installed *behind* the content, so a tap on a field still
-    /// focuses it and a tap on a button still presses it — only taps that land
-    /// on empty space or on plain text reach this layer. Tapping a field again
-    /// brings the keyboard straight back.
-    func auroraDismissKeyboardOnTap() -> some View {
-        background {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { UIApplication.shared.auroraEndEditing() }
+/// Installs a tap recogniser on the window that closes the keyboard when a tap
+/// lands outside any text field.
+///
+/// A tap recogniser is used on purpose, not a pan: dragging must never close the
+/// keyboard, only a deliberate tap somewhere else should. The first attempt hung
+/// the gesture off the scroll view's background, which cannot work — a scroll
+/// view covers its whole frame for hit testing, so taps on empty space never
+/// reach a layer behind it. Watching the window sees every tap instead.
+///
+/// `cancelsTouchesInView` stays false and simultaneous recognition is allowed, so
+/// buttons, the tab bar and scrolling keep behaving exactly as before.
+struct AuroraKeyboardDismissLayer: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = WindowWatcherView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        let coordinator = context.coordinator
+        // `updateUIView` can run before this view is in a window, so the attach is
+        // driven by the view actually arriving in one.
+        view.onWindow = { [weak coordinator] window in coordinator?.attach(to: window) }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if let window = uiView.window { context.coordinator.attach(to: window) }
+    }
+
+    /// Reports the window as soon as it is known, and again if it ever changes.
+    final class WindowWatcherView: UIView {
+        var onWindow: ((UIWindow) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let window { onWindow?(window) }
         }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private weak var installed: UIView?
+
+        /// Attaches once per window; re-attaching would stack duplicates.
+        func attach(to window: UIView) {
+            guard installed !== window else { return }
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+            tap.cancelsTouchesInView = false
+            tap.delegate = self
+            window.addGestureRecognizer(tap)
+            installed = window
+        }
+
+        @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard let host = gesture.view else { return }
+            var node: UIView? = host.hitTest(gesture.location(in: host), with: nil)
+            while let view = node {
+                if Self.isTextInput(view) { return }   // the tap was on a field
+                node = view.superview
+            }
+            UIApplication.shared.auroraEndEditing()
+        }
+
+        /// SwiftUI's fields are backed by UIKit text views, but the backing class
+        /// has changed name across releases, so the class name is checked as a
+        /// fallback. A false positive only means one tap is ignored.
+        private static func isTextInput(_ view: UIView) -> Bool {
+            if view is UITextInput { return true }
+            let name = String(describing: type(of: view))
+            return name.contains("TextField") || name.contains("TextView")
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
     }
 }

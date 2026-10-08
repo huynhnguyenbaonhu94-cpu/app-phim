@@ -166,8 +166,7 @@ struct MovieRequestScreen: View {
                 .padding(.bottom, 120)
             }
             .scrollIndicators(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .auroraDismissKeyboardOnTap()
+            .scrollDismissesKeyboard(.never)
         }
         .animation(Motion.enter, value: message)
         .animation(Motion.enter, value: imagePreview == nil)

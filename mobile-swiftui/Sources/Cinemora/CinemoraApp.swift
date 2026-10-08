@@ -185,7 +185,13 @@ struct CinemoraTabShell: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardVisible = false
         }
-        .background { AccountSessionWatcher() }
+        .background {
+            ZStack {
+                AccountSessionWatcher()
+                // Closes the keyboard on a tap anywhere outside a text field.
+                AuroraKeyboardDismissLayer()
+            }
+        }
     }
 }
 
