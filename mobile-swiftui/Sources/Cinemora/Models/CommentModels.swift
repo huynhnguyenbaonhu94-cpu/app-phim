@@ -1,5 +1,25 @@
 import Foundation
 
+// MARK: - Trợ giúp giải mã
+
+/// Thử lần lượt nhiều tên trường rồi lấy giá trị đầu tiên đọc được.
+///
+/// Viết thành vòng lặp thay vì chuỗi `??` nối tiếp: chuỗi `??` gồm nhiều lần
+/// `decodeIfPresent` từng làm trình biên dịch mất quá nhiều thời gian suy luận và
+/// báo lỗi "unable to type-check this expression in reasonable time".
+private func firstValue<T: Decodable, K: CodingKey>(
+    _ type: T.Type,
+    in container: KeyedDecodingContainer<K>,
+    keys: [K]
+) throws -> T? {
+    for key in keys {
+        if let value = try container.decodeIfPresent(T.self, forKey: key) {
+            return value
+        }
+    }
+    return nil
+}
+
 // MARK: - Flexible primitives
 
 /// Giải mã một giá trị có thể đến dưới dạng chuỗi hoặc số (id bình luận, id người dùng).
@@ -90,18 +110,10 @@ private struct NestedCommentAuthor: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(FlexibleID.self, forKey: .id)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .userId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .user_id)
-        name = try container.decodeIfPresent(String.self, forKey: .name)
-            ?? container.decodeIfPresent(String.self, forKey: .userName)
-            ?? container.decodeIfPresent(String.self, forKey: .user_name)
-            ?? container.decodeIfPresent(String.self, forKey: .displayName)
-            ?? container.decodeIfPresent(String.self, forKey: .display_name)
-        role = try container.decodeIfPresent(String.self, forKey: .role)
-            ?? container.decodeIfPresent(String.self, forKey: .userRole)
-            ?? container.decodeIfPresent(String.self, forKey: .user_role)
-        email = try container.decodeIfPresent(String.self, forKey: .email)
+        id = try firstValue(FlexibleID.self, in: container, keys: [.id, .userId, .user_id])
+        name = try firstValue(String.self, in: container, keys: [.name, .userName, .user_name, .displayName, .display_name])
+        role = try firstValue(String.self, in: container, keys: [.role, .userRole, .user_role])
+        email = try firstValue(String.self, in: container, keys: [.email])
     }
 }
 
@@ -134,10 +146,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
     var isMine = false
 
     var isAdmin: Bool {
-        let role = (authorRole ?? "")
-            .folding(options: .diacriticInsensitive, locale: .current)
-            .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let role = CommentAuthor.normalize(authorRole)
         if role.contains("admin") || role.contains("quantri") || role.contains("moderator") { return true }
         // Đường dự phòng cho tới khi máy chủ trả `role`: chủ app thêm email của
         // mình vào `CommentAuthor.fallbackAdminEmails` là huy hiệu hiện ngay.
@@ -226,70 +235,46 @@ struct MovieComment: Identifiable, Hashable, Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let nested = try container.decodeIfPresent(NestedCommentAuthor.self, forKey: .user)
-            ?? container.decodeIfPresent(NestedCommentAuthor.self, forKey: .authorUser)
-            ?? container.decodeIfPresent(NestedCommentAuthor.self, forKey: .author_user)
 
-        let rawID = try container.decodeIfPresent(FlexibleID.self, forKey: .id)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .commentId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .comment_id)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: ._id)
+        let nested = try firstValue(NestedCommentAuthor.self, in: container, keys: [.user, .authorUser, .author_user])
+
+        let rawID = try firstValue(FlexibleID.self, in: container, keys: [.id, .commentId, .comment_id, ._id])
         id = rawID?.value ?? UUID().uuidString
 
-        let rawParent = try container.decodeIfPresent(FlexibleID.self, forKey: .parentId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .parentID)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .parent_id)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .replyTo)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .reply_to)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .parentCommentId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .parent_comment_id)
+        let rawParent = try firstValue(
+            FlexibleID.self,
+            in: container,
+            keys: [.parentId, .parentID, .parent_id, .replyTo, .reply_to, .parentCommentId, .parent_comment_id]
+        )
         parentID = rawParent?.value
 
-        content = try container.decodeIfPresent(String.self, forKey: .content)
-            ?? container.decodeIfPresent(String.self, forKey: .text)
-            ?? container.decodeIfPresent(String.self, forKey: .body)
-            ?? container.decodeIfPresent(String.self, forKey: .message)
-            ?? ""
+        let rawContent = try firstValue(String.self, in: container, keys: [.content, .text, .body, .message])
+        content = rawContent ?? ""
 
-        authorName = try container.decodeIfPresent(String.self, forKey: .authorName)
-            ?? container.decodeIfPresent(String.self, forKey: .userName)
-            ?? container.decodeIfPresent(String.self, forKey: .user_name)
-            ?? container.decodeIfPresent(String.self, forKey: .author)
-            ?? container.decodeIfPresent(String.self, forKey: .fullName)
-            ?? container.decodeIfPresent(String.self, forKey: .full_name)
-            ?? container.decodeIfPresent(String.self, forKey: .name)
-            ?? nested?.name
-            ?? "Người xem"
+        let rawName = try firstValue(
+            String.self,
+            in: container,
+            keys: [.authorName, .userName, .user_name, .author, .fullName, .full_name, .name]
+        )
+        authorName = rawName ?? nested?.name ?? "Người xem"
 
-        authorRole = try container.decodeIfPresent(String.self, forKey: .authorRole)
-            ?? container.decodeIfPresent(String.self, forKey: .role)
-            ?? container.decodeIfPresent(String.self, forKey: .userRole)
-            ?? container.decodeIfPresent(String.self, forKey: .user_role)
-            ?? nested?.role
+        let rawRole = try firstValue(String.self, in: container, keys: [.authorRole, .role, .userRole, .user_role])
+        authorRole = rawRole ?? nested?.role
 
-        authorID = (try container.decodeIfPresent(FlexibleID.self, forKey: .authorId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .userId)
-            ?? container.decodeIfPresent(FlexibleID.self, forKey: .user_id))?.value
-            ?? nested?.id?.value
+        let rawAuthorID = try firstValue(FlexibleID.self, in: container, keys: [.authorId, .userId, .user_id])
+        authorID = rawAuthorID?.value ?? nested?.id?.value
 
-        authorEmail = try container.decodeIfPresent(String.self, forKey: .authorEmail)
-            ?? container.decodeIfPresent(String.self, forKey: .userEmail)
-            ?? container.decodeIfPresent(String.self, forKey: .user_email)
-            ?? container.decodeIfPresent(String.self, forKey: .email)
-            ?? nested?.email
+        let rawEmail = try firstValue(String.self, in: container, keys: [.authorEmail, .userEmail, .user_email, .email])
+        authorEmail = rawEmail ?? nested?.email
 
-        let flexible = try container.decodeIfPresent(FlexibleDate.self, forKey: .createdAt)
-            ?? container.decodeIfPresent(FlexibleDate.self, forKey: .created_at)
-            ?? container.decodeIfPresent(FlexibleDate.self, forKey: .time)
-            ?? container.decodeIfPresent(FlexibleDate.self, forKey: .date)
-            ?? container.decodeIfPresent(FlexibleDate.self, forKey: .timestamp)
+        let flexible = try firstValue(
+            FlexibleDate.self,
+            in: container,
+            keys: [.createdAt, .created_at, .time, .date, .timestamp]
+        )
         createdAt = flexible?.date
 
-        isMine = (try container.decodeIfPresent(Bool.self, forKey: .isMine))
-            ?? (try container.decodeIfPresent(Bool.self, forKey: .mine))
-            ?? (try container.decodeIfPresent(Bool.self, forKey: .isOwner))
-            ?? (try container.decodeIfPresent(Bool.self, forKey: .is_owner))
-            ?? false
+        isMine = try firstValue(Bool.self, in: container, keys: [.isMine, .mine, .isOwner, .is_owner]) ?? false
     }
 }
 
@@ -358,10 +343,7 @@ struct MovieCommentEnvelope: Decodable {
             return
         }
         let container = try decoder.container(keyedBy: Keys.self)
-        comment = try container.decodeIfPresent(MovieComment.self, forKey: .comment)
-            ?? container.decodeIfPresent(MovieComment.self, forKey: .item)
-            ?? container.decodeIfPresent(MovieComment.self, forKey: .data)
-            ?? container.decodeIfPresent(MovieComment.self, forKey: .result)
+        comment = try firstValue(MovieComment.self, in: container, keys: [.comment, .item, .data, .result])
     }
 }
 
@@ -395,10 +377,17 @@ struct CommentAuthor: Equatable {
         self.email = account.email
     }
 
-    var isAdmin: Bool {
-        let value = (role ?? "")
-            .folding(options: .diacriticInsensitive, locale: .current)
+    /// Bỏ dấu và viết thường để "Quản trị", "quan tri", "ADMIN" đều nhận ra nhau.
+    static func normalize(_ value: String?) -> String {
+        guard let value else { return "" }
+        return value
+            .folding(options: .diacriticInsensitive, locale: Locale(identifier: "en_US_POSIX"))
             .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isAdmin: Bool {
+        let value = Self.normalize(role)
         return value.contains("admin") || value.contains("quantri")
     }
 

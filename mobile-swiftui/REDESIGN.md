@@ -1129,3 +1129,76 @@ Chi tiết đáng chú ý:
 - `npx tsc --noEmit` (strict, `include` gồm `server/**`): **0 lỗi**.
 - `npx vitest run`: **14/14 test cũ vẫn pass**.
 - Gói PHP độc lập: 19 bài kiểm thử đầu-cuối qua chính `.htaccess` mô phỏng (xem mục 29).
+
+## 31. Sửa lỗi build: trình biên dịch không suy luận kịp trong CommentModels.swift
+
+Codemagic báo ba lỗi cùng một dạng:
+
+```
+CommentModels.swift:96:9:  the compiler is unable to type-check this expression in reasonable time
+CommentModels.swift:239:25: the compiler is unable to type-check this expression in reasonable time
+CommentModels.swift:254:9:  the compiler is unable to type-check this expression in reasonable time
+```
+
+### Nguyên nhân
+
+Ba chỗ đó là các chuỗi `??` nối tiếp để thử nhiều tên trường, mỗi mắt là một lần
+`try container.decodeIfPresent(...)`:
+
+```swift
+name = try container.decodeIfPresent(String.self, forKey: .name)
+    ?? container.decodeIfPresent(String.self, forKey: .userName)
+    ?? container.decodeIfPresent(String.self, forKey: .user_name)
+    ?? container.decodeIfPresent(String.self, forKey: .displayName)
+    ?? container.decodeIfPresent(String.self, forKey: .display_name)
+```
+
+Mỗi `decodeIfPresent` vừa là hàm `throws` vừa trả về optional, nên khi nối 5–8 mắt lại,
+bộ suy luận kiểu của Swift phải xét số tổ hợp tăng theo cấp số nhân. Đây là lỗi nổi
+tiếng của Swift, không phải lỗi cú pháp — bản thân đoạn code vẫn đúng.
+
+### Cách sửa
+
+Thay mọi chuỗi `??` bằng một hàm vòng lặp nhỏ, dùng chung cho cả tệp:
+
+```swift
+private func firstValue<T: Decodable, K: CodingKey>(
+    _ type: T.Type,
+    in container: KeyedDecodingContainer<K>,
+    keys: [K]
+) throws -> T? {
+    for key in keys {
+        if let value = try container.decodeIfPresent(T.self, forKey: key) {
+            return value
+        }
+    }
+    return nil
+}
+```
+
+Nhờ vậy mỗi lần đọc chỉ còn một lời gọi phẳng, ví dụ:
+
+```swift
+let rawName = try firstValue(
+    String.self,
+    in: container,
+    keys: [.authorName, .userName, .user_name, .author, .fullName, .full_name, .name]
+)
+authorName = rawName ?? nested?.name ?? "Người xem"
+```
+
+Đã áp dụng cho toàn bộ `CommentModels.swift`: `NestedCommentAuthor`, `MovieComment`
+(id, parentId, nội dung, tên, vai trò, id người gửi, email, thời gian, `isMine`) và
+`MovieCommentEnvelope`. Hành vi giải mã không đổi — vẫn nhận đủ mọi cách đặt tên trường,
+thời gian ISO/epoch, id dạng chuỗi hoặc số.
+
+Thêm một thay đổi nhỏ: phần bỏ dấu để nhận diện tên quản trị được gom vào
+`CommentAuthor.normalize(_:)` và dùng chung, thay vì lặp lại chuỗi xử lý ở hai nơi.
+
+### Đã kiểm
+
+- Quét toàn bộ mã nguồn: không còn chỗ nào có từ ba dấu `??` trở lên, không có dòng nào
+  dài quá 320 ký tự trong các tệp mới.
+- Kiểm tra cú pháp toàn bộ 26 tệp: 0 lỗi.
+- Ba tệp còn lại của tính năng bình luận (`CommentsStore.swift`, `CommentsSection.swift`,
+  `CinemaAPI.swift`) đã rà lại theo cùng tiêu chí, không có biểu thức nào thuộc dạng này.
