@@ -695,3 +695,70 @@ nổ khi màn hình đang bị đóng. Nay `deinit` của trình phát gỡ nố
 Điểm chưa chạm, chỉ nên xử lý nếu build này vẫn văng: `canStartPictureInPictureAutomaticallyFromInline = true`
 trong `PictureInPictureCoordinator` — tự động vào PiP khi video đang chiếu inline, có thể va chạm
 với lúc `AVPlayerLayer` bị tháo.
+
+## 18. Đăng xuất tất cả thiết bị và độ mượt khi thoát trình phát
+
+### 18.1 Thiết bị khác nhận lệnh đăng xuất quá chậm
+
+**Triệu chứng:** thiết bị bấm "Đăng xuất tất cả thiết bị" thì thoát ngay, còn các thiết bị khác
+phải khá lâu mới bị đăng xuất.
+
+**Nguyên nhân.** Thiết bị bấm nút thoát ngay vì `logoutAllDevices()` xoá phiên **cục bộ trước**, rồi
+mới gọi API. Các thiết bị khác không ai báo cho chúng — chúng chỉ biết khi tự hỏi máy chủ, mà vòng
+hỏi đó chạy **mỗi 20 giây** (`AccountSessionWatcher`). Vì vậy thời gian chờ tệ nhất là 20 giây.
+
+Con số 20 giây đó là do tôi đặt dè dặt ở vòng trước: hồi đó mỗi lần store đổi trạng thái là mọi tab
+vẽ lại, nên hỏi dày sẽ tốn. Nay store đã chuyển sang `@Observable` và `checkAccountSession()` chỉ
+phát tín hiệu khi người dùng **thật sự** thay đổi, nên hỏi dày gần như không tốn gì trên màn hình.
+
+**Cách sửa.**
+
+1. Giảm chu kỳ hỏi từ **20 giây xuống 5 giây** — một request nhỏ, và các lần hỏi không có gì mới
+   thì không gây vẽ lại.
+2. Thêm kiểm tra **ngay khi app trở lại tiền cảnh**: đây chính là lúc người dùng cầm thiết bị kia
+   lên và nhận ra mình đã bị đăng xuất, nên không cần chờ đến nhịp tiếp theo.
+
+### 18.2 Thoát trình phát bị khựng
+
+**Triệu chứng:** đang trong trình phát, bấm trở ra thấy hơi lag.
+
+**Nguyên nhân.** `onDisappear` chạy `playback.shutdown()` ngay **trong lúc animation đóng màn hình
+đang chạy**. Hàm này làm những việc nặng và đồng bộ trên main thread: nhả `AVPlayerItem`, gỡ
+observer, tắt audio session, ghi lại vị trí xem dở. Chừng đó đủ để chặn main thread vài chục
+mili-giây — đúng khoảng thời gian animation cần để mượt, nên mắt thấy khựng.
+
+**Cách sửa.** Tách làm hai nhịp:
+
+- **Ngay lập tức** (rẻ, cần phản hồi tức thì): `pauseForDismissal()` chỉ tạm dừng hình/tiếng, cùng
+  `forcePortrait()` để bắt đầu xoay về dọc.
+- **Sau khi animation đóng xong (350ms)**: ghi vị trí xem dở rồi mới `shutdown()`.
+
+Đã áp dụng cho cả 4 chỗ: trình phát phim, trình phát toàn màn hình của tab Truyền hình, trình phát
+video toàn màn hình, và lúc rời tab Truyền hình. Riêng `openRelatedMovie` vẫn dừng ngay vì ở đó
+cần tắt tiếng trước khi mở trình phát mới.
+
+## 19. Thanh menu che mất form khi bàn phím hiện lên
+
+**Triệu chứng:** vào màn hình cần điền (đăng nhập, tìm kiếm, yêu cầu phim…), bàn phím hiện lên và
+thanh menu dưới cùng bị đẩy lên nằm chồng lên form — hàng cuối của form như nút "Đăng nhập" hay
+liên kết "Quên mật khẩu" bị che, nhìn rất chật.
+
+**Nguyên nhân.** Thanh menu được gắn bằng `.overlay(alignment: .bottom)`, tức nó **nổi trên** nội
+dung chứ không tham gia vào vùng an toàn. Khi bàn phím mở, iOS đẩy thanh này lên ngang tầm bàn
+phím, và vì nó là lớp phủ nên nội dung form ở dưới bị nó che mất, không cách nào cuộn qua được.
+
+**Cách sửa.** Cho thanh menu **tự né khi đang gõ**:
+
+- Có bàn phím: thanh trượt xuống 140pt, mờ dần và ngừng nhận chạm — dùng đúng lò xo `Motion.sheet`
+  như phần còn lại của app.
+- Bàn phím tắt: thanh trượt về chỗ cũ ngay lập tức.
+
+Điểm quan trọng: **thanh menu không bị loại bỏ**, nó chỉ tạm lùi ra trong lúc gõ. Vì nó là lớp phủ
+nên khi lùi đi, bố cục phía dưới **không xê dịch** — không có giật, không có nhảy layout, form
+được trả lại trọn vẹn chiều cao.
+
+Kết hợp sẵn có: ba màn hình đã dùng `.scrollDismissesKeyboard(.interactively)`, nên chỉ cần kéo
+nhẹ form xuống là bàn phím đóng và thanh menu trượt trở lại — thao tác rất tự nhiên.
+
+Nếu muốn thanh menu **vẫn hiện** trong lúc gõ, chỉ cần đổi phương án: thay vì trượt đi, cho nó thu
+gọn lại thành dạng chỉ có icon (bỏ nhãn chữ, thấp hơn khoảng 20pt). Nói một câu là tôi đổi.

@@ -47,6 +47,15 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    /// Cheap stop for the moment the cover starts animating away. `shutdown()`
+    /// tears the player item down and can block the main thread long enough to
+    /// make the dismissal look sticky, so it is deferred until the animation is
+    /// over.
+    func pauseForDismissal() {
+        player.pause()
+        isPlaying = false
+        isLoading = false
+    }
     func shutdown() {
         loadTask?.cancel()
         loadTask = nil
@@ -654,8 +663,20 @@ struct CinemaPlayerScreen: View {
                 forceLandscape()
             }
             .onDisappear {
-                saveLocalWatchProgress(); hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
-                if scenePhase == .active { playback.shutdown() }
+                hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
+                if scenePhase == .active {
+                    // Stop the picture at once, then let the dismissal animation
+                    // finish before the expensive part: releasing the item,
+                    // deactivating the audio session, writing the resume point.
+                    // Doing all of that during the animation is what made leaving
+                    // the player feel sticky.
+                    playback.pauseForDismissal()
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        saveLocalWatchProgress()
+                        playback.shutdown()
+                    }
+                }
                 forcePortrait()
             }
             .statusBarHidden(true)

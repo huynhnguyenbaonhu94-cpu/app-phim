@@ -265,6 +265,13 @@ private final class TVPlaybackController: ObservableObject {
         syncToLiveEdge()
     }
 
+    /// Cheap stop for the dismissal animation; the heavy teardown is deferred.
+    func pauseForDismissal() {
+        player.pause()
+        separateAudioPlayer.pause()
+        isPlaying = false
+        isLoading = false
+    }
     func shutdown() {
         syncTask?.cancel()
         itemObservation = nil
@@ -425,10 +432,20 @@ struct TVScreen: View {
         .onChange(of: isPlayerPresented) { _, presented in
             if !presented {
                 if pipCoordinator.isActive { pipCoordinator.stop() }
+                playback.pauseForDismissal()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    playback.shutdown()
+                }
+            }
+        }
+        .onDisappear {
+            playback.pauseForDismissal()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
                 playback.shutdown()
             }
         }
-        .onDisappear { playback.shutdown() }
         .fullScreenCover(isPresented: $isPlayerPresented, onDismiss: {
             if relatedMovieRoute != nil {
                 relatedMovieRoute = nil
@@ -992,8 +1009,12 @@ private struct TVFullscreenPlayer: View {
         }
         .onDisappear {
             if pipCoordinator.isActive { pipCoordinator.stop() }
-            playback.shutdown()
+            playback.pauseForDismissal()
             forcePortrait()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                playback.shutdown()
+            }
         }
     }
 
@@ -1183,7 +1204,14 @@ private struct TVVideoFullscreenPlayer: View {
         .onAppear { loadCurrent(); scheduleHide() }
         .animation(Motion.sheet, value: settingsOpen)
         .animation(.easeOut(duration: 0.26), value: advancedSettings)
-        .onDisappear { hideTask?.cancel(); stopTask?.cancel(); playback.shutdown() }
+        .onDisappear {
+            hideTask?.cancel(); stopTask?.cancel()
+            playback.pauseForDismissal()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                playback.shutdown()
+            }
+        }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
         .onChange(of: stopTimer) { _, _ in scheduleStop() }

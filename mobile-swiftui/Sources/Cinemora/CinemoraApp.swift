@@ -137,6 +137,7 @@ struct CinemoraTabShell: View {
     @Environment(ConnectivityMonitor.self) private var connectivity
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
+    @State private var keyboardVisible = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -157,6 +158,16 @@ struct CinemoraTabShell: View {
         .overlay(alignment: .bottom) {
             AuroraTabBar(selection: $selection)
                 .padding(.bottom, 2)
+                // The bar rides above the software keyboard, which puts it right
+                // on top of whatever form the user is filling in — the last rows
+                // of the form end up hidden behind it. So while the keyboard is
+                // up the bar parks itself just below the screen and comes back the
+                // moment the keyboard leaves. It is never removed, only moved
+                // aside, and the slide is the same spring as the rest of the app.
+                .offset(y: keyboardVisible ? 140 : 0)
+                .opacity(keyboardVisible ? 0 : 1)
+                .allowsHitTesting(!keyboardVisible)
+                .animation(Motion.sheet, value: keyboardVisible)
                 .opacity(showLaunchLoader ? 0 : 1)
                 .animation(Motion.enter, value: showLaunchLoader)
         }
@@ -164,6 +175,15 @@ struct CinemoraTabShell: View {
         .task {
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.45)) { showLaunchLoader = false }
+        }
+        // Combine's publisher is used rather than the async sequence: keyboard
+        // notifications are posted on the main thread, and this form keeps the
+        // handler free of any sendability question.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardVisible = false
         }
         .background { AccountSessionWatcher() }
     }
@@ -359,6 +379,7 @@ private struct AuroraTabScreen: View {
 /// view is invalidated, which keeps tab switching smooth.
 private struct AccountSessionWatcher: View {
     @Environment(CinemaStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Color.clear
@@ -370,13 +391,19 @@ private struct AccountSessionWatcher: View {
                 await store.restoreAccount()
             }
             .task {
-                // Session checks only need to catch revoked sessions, so a slow
-                // timer is enough. Every poll that changes state makes each tab
-                // re-render, so keep the interval generous.
+                // "Log out all devices" has to reach the other devices quickly,
+                // so this polls often. It is cheap: one small request, and
+                // `checkAccountSession()` only publishes when the user actually
+                // changed, so idle polls cost nothing on screen.
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(20))
+                    try? await Task.sleep(for: .seconds(5))
                     if !Task.isCancelled { await store.checkAccountSession() }
                 }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Picking the device back up is the moment the user notices a
+                // remote logout, so check immediately instead of waiting a tick.
+                if phase == .active { Task { await store.checkAccountSession() } }
             }
     }
 }
