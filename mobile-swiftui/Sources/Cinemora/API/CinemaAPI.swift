@@ -9,9 +9,36 @@ import Security
 struct CinemaAPI {
     static let shared = CinemaAPI()
     static let baseURL = URL(string: (Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String) ?? "https://cungcapicloud.id.vn")!
+
+    /// Máy chủ bình luận. Bỏ trống trong Info.plist thì dùng luôn máy chủ chính —
+    /// như vậy app hoạt động đúng cả khi backend chính tự thêm procedure bình luận,
+    /// lẫn khi bình luận được chạy như một dịch vụ riêng trên hosting.
+    static let commentsBaseURL: URL = {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "COMMENTS_API_BASE_URL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty, let url = URL(string: raw), url.host != nil else { return baseURL }
+        return url
+    }()
+
     private let session: URLSession
 
     init(session: URLSession = .shared) { self.session = session }
+
+    /// Cookie phiên của máy chủ chính, gửi kèm khi gọi máy chủ bình luận ở tên miền
+    /// khác. Máy chủ bình luận dùng chính cookie này để biết ai đang gửi.
+    private static func forwardedSessionCookie(for host: URL) -> String? {
+        guard let domain = host.host?.lowercased() else { return nil }
+        let cookies = HTTPCookieStorage.shared.cookies ?? []
+        let matched = cookies.filter { cookie in
+            let cookieDomain = cookie.domain.lowercased().hasPrefix(".")
+                ? String(cookie.domain.lowercased().dropFirst())
+                : cookie.domain.lowercased()
+            guard !cookieDomain.isEmpty else { return false }
+            return domain == cookieDomain || domain.hasSuffix("." + cookieDomain)
+        }
+        guard !matched.isEmpty else { return nil }
+        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
 
     private var deviceId: String {
         let key = "app.serval4238.cinemora.account.device.id.v2"
@@ -136,6 +163,24 @@ struct CinemaAPI {
         let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
+    // MARK: - Bình luận
+
+    func comments(slug: String) async throws -> [MovieComment] {
+        let page: MovieCommentPage = try await query("cinema.comments", input: ["slug": slug], base: Self.commentsBaseURL)
+        return page.items
+    }
+
+    func addComment(slug: String, content: String, parentID: String?) async throws -> MovieComment? {
+        var input: [String: Any] = ["slug": slug, "content": content]
+        if let parentID, !parentID.isEmpty { input["parentId"] = parentID }
+        let response: MovieCommentEnvelope = try await mutate("cinema.addComment", input: input, base: Self.commentsBaseURL)
+        return response.comment
+    }
+
+    func deleteComment(slug: String, id: String) async throws {
+        let _: SuccessResponse = try await mutate("cinema.deleteComment", input: ["slug": slug, "id": id], base: Self.commentsBaseURL)
+    }
+
     func me() async throws -> RemoteOptionalUser { try await query("auth.me", input: nil) }
 
     func register(name: String, email: String, password: String) async throws -> RemoteAccountUser {
@@ -211,8 +256,8 @@ struct CinemaAPI {
         return input
     }
 
-    private func query<T: Decodable>(_ procedure: String, input: [String: Any]?) async throws -> T {
-        var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
+    private func query<T: Decodable>(_ procedure: String, input: [String: Any]?, base: URL = CinemaAPI.baseURL) async throws -> T {
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
         if let input {
             let inputData = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
@@ -225,6 +270,12 @@ struct CinemaAPI {
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
+        // Máy chủ bình luận ở tên miền khác vẫn cần cookie phiên của máy chủ chính
+        // để biết ai đang xem và ai đang gửi.
+        if base != CinemaAPI.baseURL,
+           let cookie = Self.forwardedSessionCookie(for: CinemaAPI.baseURL) {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -248,8 +299,8 @@ struct CinemaAPI {
         catch { throw APIError.decoding(error.localizedDescription) }
     }
 
-    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any]) async throws -> T {
-        var components = URLComponents(url: Self.baseURL, resolvingAgainstBaseURL: false)!
+    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any], base: URL = CinemaAPI.baseURL) async throws -> T {
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
         guard let url = components.url else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
@@ -260,6 +311,10 @@ struct CinemaAPI {
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
         request.timeoutInterval = 12
+        if base != CinemaAPI.baseURL,
+           let cookie = Self.forwardedSessionCookie(for: CinemaAPI.baseURL) {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

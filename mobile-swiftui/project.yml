@@ -12,6 +12,9 @@ settings:
     GENERATE_INFOPLIST_FILE: NO
     INFOPLIST_FILE: Info.plist
     API_BASE_URL: https://cungcapicloud.id.vn
+    # May chu binh luan. De trong = dung chung may chu chinh. Khi chay dich vu
+    # binh luan rieng tren cPanel, dien ten mien phu vao day roi build lai.
+    COMMENTS_API_BASE_URL: ""
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     CODE_SIGN_STYLE: Automatic
     PRODUCT_BUNDLE_IDENTIFIER: app.serval4238.taurus3258

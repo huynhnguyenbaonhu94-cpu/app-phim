@@ -1013,3 +1013,119 @@ Các vị trí: màn hình chi tiết (2), trình phát phim (3), trình phát t
 
 Xem mục 26. `AuroraKeyboardDismissLayer` gắn `UITapGestureRecognizer` lên window, mà
 `UIGestureRecognizer` **không giữ target**. Nay target là singleton sống suốt vòng đời app.
+## 28. Tính năng bình luận cho từng phim
+
+Thêm khối bình luận vào trang chi tiết phim, dành cho thành viên đã đăng nhập.
+
+### Thành phần mới
+
+| Tệp | Vai trò |
+| --- | --- |
+| `Models/CommentModels.swift` | `MovieComment`, `MovieCommentThread`, `CommentAuthor` + giải mã dễ tính (`FlexibleID`, `FlexibleDate`) |
+| `State/CommentsStore.swift` | Tải, gửi lạc quan, làm mới định kỳ, trả lời, xoá, kho lưu tạm trên thiết bị |
+| `Views/CommentsSection.swift` | Ô soạn + danh sách bình luận + huy hiệu quản trị |
+| `API/CinemaAPI.swift` | `cinema.comments`, `cinema.addComment`, `cinema.deleteComment` |
+| `COMMENTS-BACKEND.md` | Hợp đồng API để backend bổ sung ba procedure |
+
+### Hành vi
+
+- **Chỉ thành viên đã đăng nhập** mới thấy ô soạn; khách thấy lời mời đăng nhập và dùng
+  lại đúng luồng đăng nhập sẵn có trong app.
+- **Gửi tức thì**: bình luận hiện ngay ở đầu danh sách với trạng thái "Đang gửi…", rồi
+  được thay bằng bản của máy chủ khi trả về. Không có màn hình chờ.
+- **Gửi lỗi thì không mất chữ**: bình luận được đánh dấu và có nút "Gửi lỗi — thử lại".
+- **Trả lời**: hỗ trợ lồng một cấp; trả lời của trả lời được gắn về bình luận gốc nên cây
+  không sâu vô hạn. Ô soạn hiện "Đang trả lời …" kèm nút huỷ.
+- **Bình luận của người khác** tự xuất hiện nhờ nhịp làm mới mỗi 7 giây trong lúc trang
+  còn mở, và làm mới ngay khi app quay lại tiền cảnh.
+- **Xoá** chỉ hiện với bình luận của chính mình, có hộp xác nhận, và khôi phục lại nếu
+  máy chủ từ chối.
+
+### Tài khoản quản trị
+
+Tên quản trị viên in đậm bằng gradient xanh, kèm huy hiệu **tích xanh động**: vòng tròn
+xanh có quầng sáng nhấp nhẹ và dấu tick. Chuyển động chỉ dùng `scaleEffect` và một quầng
+sáng nhỏ trên hình 16pt, tự tắt khi bật *Reduce Motion* — bài học từ vòng 24: quầng sáng
+lặp vô hạn trên cả danh sách là thứ từng làm app giật.
+
+Huy hiệu hiện khi `userRole` của bình luận chứa `admin`/`quantri`/`moderator`, hoặc khi
+email người gửi nằm trong `CommentAuthor.fallbackAdminEmails` (dự phòng cho tới khi
+backend trả `role`).
+
+### Khi backend chưa có endpoint
+
+Ba procedure bình luận hiện **chưa tồn tại** trên máy chủ (đã kiểm tra trực tiếp: tRPC
+trả 404 cho mọi tên thử). Vì vậy app:
+
+1. Thử gọi máy chủ trước.
+2. Gặp 404 → tự chuyển sang lưu bình luận trong Application Support của thiết bị, hiện
+   một dòng nhỏ "Máy chủ chưa bật bình luận, nội dung đang được lưu trên thiết bị này".
+3. Ngay khi backend bổ sung ba procedure theo `COMMENTS-BACKEND.md`, app tự quay về chế
+   độ máy chủ — không cần sửa client.
+
+## 29. Dịch vụ bình luận PHP chạy trên cPanel
+
+Vì backend chính chưa có procedure bình luận, kèm thêm một gói PHP độc lập để chạy
+tính năng này trên hosting cPanel mà không cần đụng vào backend hiện tại.
+
+### Nội dung gói `cpanel-comments/`
+
+| Tệp | Vai trò |
+| --- | --- |
+| `index.php` | Định tuyến `cinema.comments`, `cinema.addComment`, `cinema.deleteComment`, `health` |
+| `lib/Auth.php` | Xác thực bằng cách gọi `auth.me` của máy chủ chính với cookie phiên được chuyển tiếp |
+| `lib/Store.php` | Lưu trữ SQLite/MySQL, kiểm tra dữ liệu, chống spam, luật xoá |
+| `lib/Respond.php` | Trả về đúng envelope tRPC mà app đang đọc |
+| `.htaccess` | Đưa `/api/trpc/...` về `index.php`, chặn truy cập `data/`, `lib/`, `config.php` |
+| `README.md` | Hướng dẫn upload và xử lý sự cố |
+
+### Phía app
+
+- `COMMENTS_API_BASE_URL` trong `project.yml` / `Info.plist`: để trống thì dùng máy chủ
+  chính, điền tên miền phụ thì gọi dịch vụ riêng. Cùng một đường dẫn `/api/trpc/…` nên
+  không phải sửa gì khác.
+- Khi máy chủ bình luận ở tên miền khác, app gửi kèm cookie phiên của máy chủ chính
+  trong header `Cookie`, nhờ đó dịch vụ biết ai đang đọc và ai đang gửi.
+
+### Kiểm thử đã chạy
+
+Dựng máy chủ chính giả để trả `auth.me` theo cookie, rồi chạy 19 bài kiểm thử đầu-cuối
+qua chính `.htaccess` mô phỏng: health, danh sách rỗng, slug sai, procedure lạ (404),
+gửi khi chưa đăng nhập (401), người dùng thường gửi, admin trả lời, `isMine` nhìn từ
+hai tài khoản, chống spam, trả lời vào bình luận không tồn tại, trả lời sai phim, người
+dùng thường xoá bình luận của admin (bị từ chối), admin xoá (được, xoá cả trả lời),
+email dự phòng trong `admin_emails` thành admin, nội dung quá dài, nội dung rỗng.
+Tất cả trả về đúng như mong đợi.
+
+## 30. Ba procedure bình luận thêm thẳng vào backend tRPC sẵn có
+
+Trong zip có cả backend (`server/`, `drizzle/`), nên tính năng bình luận được nối vào
+đúng chỗ thay vì bắt bạn dựng thêm dịch vụ. Bốn tệp được sửa, theo đúng quy ước đang
+dùng trong dự án:
+
+| Tệp | Thay đổi |
+| --- | --- |
+| `drizzle/schema.ts` | Bảng `movie_comments` + hai chỉ mục, cùng kiểu khai báo với `movie_favorites` |
+| `server/db.ts` | `ensureMovieCommentsCompatibility` (tạo bảng lúc khởi động), `listMovieComments`, `findMovieComment`, `addMovieComment`, `deleteMovieComment` |
+| `server/routers.ts` | `cinema.comments` (công khai), `cinema.addComment`, `cinema.deleteComment` (yêu cầu đăng nhập) |
+| `server/securityRateLimit.ts` | `commentPerUser`: 20 bình luận mỗi phút cho mỗi tài khoản |
+
+Chi tiết đáng chú ý:
+
+- **Bảng tự tạo khi khởi động** qua `initializeDatabase`, đúng cách các bảng mới khác
+  (`qr_login_challenges`, `account_sessions`) đang làm — không cần chạy migration tay.
+- **Vai trò quản trị lấy từ chính bảng `users`**: `users.role` đã là enum `user | admin`,
+  nên bình luận do tài khoản admin gửi sẽ mang `userRole = "admin"` và app gắn huy hiệu
+  tích xanh mà không cần cấu hình thêm.
+- **Luật xoá**: chủ bình luận hoặc quản trị viên. Xoá bình luận gốc xoá luôn các trả lời
+  trực thuộc nên không còn trả lời mồ côi.
+- **Trả lời**: kiểm tra bình luận gốc có thật và thuộc đúng phim trước khi ghi.
+- **Định dạng trả về** trùng với bản PHP (`id`, `parentId`, `content`, `createdAt`,
+  `userName`, `userRole`, `userId`, `isMine`), nên hai backend thay thế được cho nhau mà
+  app không phải sửa gì.
+
+### Kiểm tra đã chạy
+
+- `npx tsc --noEmit` (strict, `include` gồm `server/**`): **0 lỗi**.
+- `npx vitest run`: **14/14 test cũ vẫn pass**.
+- Gói PHP độc lập: 19 bài kiểm thử đầu-cuối qua chính `.htaccess` mô phỏng (xem mục 29).

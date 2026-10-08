@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, clearWatchHistory, createLocalUser, getUserByEmail, getUserById, isFavorite, listFavorites, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
+import { addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -16,6 +16,13 @@ import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
+// Id bình luận đến từ app dưới dạng chuỗi, nhưng vẫn nhận cả số cho tiện thử nghiệm.
+const commentIdInput = z.union([z.string(), z.number()]);
+function toCommentId(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 const movieSnapshot = z.object({
   movieSlug: slugInput,
   movieName: z.string().trim().min(1).max(255),
@@ -97,6 +104,54 @@ export const appRouter = router({
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),
     dailyUpdates: publicProcedure.input(z.object({ page: pageInput }).optional()).query(({ input }) => getDailyUpdates(input?.page)),
     meta: publicProcedure.query(() => getCatalogMeta()),
+
+    // Bình luận của phim: khách đọc được, chỉ thành viên đã đăng nhập mới gửi được.
+    comments: publicProcedure
+      .input(z.object({ slug: slugInput }))
+      .query(async ({ ctx, input }) => ({ items: await listMovieComments(input.slug, ctx.user?.id ?? null) })),
+
+    addComment: protectedProcedure
+      .input(z.object({
+        slug: slugInput,
+        content: z.string().trim().min(1, "Nội dung bình luận không được để trống.").max(2000, "Bình luận quá dài, tối đa 2000 ký tự."),
+        parentId: commentIdInput.nullish(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        enforceRateLimit(ctx.req, "cinema.comment", SECURITY_LIMITS.commentPerUser.limit, SECURITY_LIMITS.commentPerUser.windowMs, String(ctx.user.id));
+        const parentId = toCommentId(input.parentId);
+        if (parentId) {
+          const parent = await findMovieComment(parentId);
+          if (!parent || parent.movieSlug !== input.slug) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Bình luận gốc không còn tồn tại." });
+          }
+        }
+        const comment = await addMovieComment({
+          movieSlug: input.slug,
+          parentId,
+          userId: ctx.user.id,
+          userName: ctx.user.name?.trim() || ctx.user.email?.split("@")[0] || "Người xem",
+          userRole: ctx.user.role,
+          content: input.content,
+        }, ctx.user.id);
+        return { comment };
+      }),
+
+    deleteComment: protectedProcedure
+      .input(z.object({ slug: slugInput, id: commentIdInput }))
+      .mutation(async ({ ctx, input }) => {
+        const id = toCommentId(input.id);
+        if (!id) throw new TRPCError({ code: "BAD_REQUEST", message: "Bình luận không hợp lệ." });
+        const existing = await findMovieComment(id);
+        if (!existing || existing.movieSlug !== input.slug) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Bình luận không còn tồn tại." });
+        }
+        // Chủ bình luận, hoặc quản trị viên.
+        if (existing.userId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Bạn chỉ xoá được bình luận của mình." });
+        }
+        await deleteMovieComment(id);
+        return { success: true };
+      }),
     submitRequest: publicProcedure.input(z.object({
       title: z.string().trim().min(2, "Vui lòng nhập tên phim.").max(255),
       // Keep this optional field permissive: users may paste an IMDb/TMDB URL,

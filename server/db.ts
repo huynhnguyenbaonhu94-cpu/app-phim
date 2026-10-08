@@ -1,7 +1,8 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { InsertUser, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
+import { InsertUser, movieComments, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
+import type { MovieComment as MovieCommentRow } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -109,6 +110,7 @@ export async function initializeDatabase() {
     await ensureTvVideosCompatibility(db);
     await ensureAccountSessionsCompatibility();
     await ensureQrLoginCompatibility(db);
+    await ensureMovieCommentsCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -284,4 +286,106 @@ export async function updateLocalAccountByAdmin(input: { id: number; name?: stri
   if (Object.keys(updates).length === 0) return getUserById(input.id);
   await db.update(users).set(updates).where(eq(users.id, input.id));
   return getUserById(input.id);
+}
+
+// ---------------------------------------------------------------------------
+// Bình luận phim
+// ---------------------------------------------------------------------------
+
+const COMMENT_LIMIT = 300;
+
+export type MovieCommentView = {
+  id: string;
+  parentId: string | null;
+  content: string;
+  createdAt: string;
+  userName: string;
+  userRole: string | null;
+  userId: string;
+  isMine: boolean;
+};
+
+/** Tạo bảng nếu database chưa có, theo cùng cách các bảng mới khác đang dùng. */
+export async function ensureMovieCommentsCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS movie_comments (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    movieSlug varchar(140) NOT NULL,
+    parentId int NULL,
+    userId int NOT NULL,
+    userName varchar(160) NOT NULL,
+    userRole varchar(20) NULL,
+    content text NOT NULL,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX movie_comments_slug_created_idx (movieSlug, createdAt),
+    INDEX movie_comments_user_created_idx (userId, createdAt)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
+function toCommentView(row: MovieCommentRow, viewerId: number | null): MovieCommentView {
+  const createdAt = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+  return {
+    id: String(row.id),
+    parentId: row.parentId === null || row.parentId === undefined ? null : String(row.parentId),
+    content: row.content,
+    createdAt: createdAt.toISOString(),
+    userName: row.userName,
+    userRole: row.userRole ?? null,
+    userId: String(row.userId),
+    isMine: viewerId !== null && row.userId === viewerId,
+  };
+}
+
+export async function listMovieComments(movieSlug: string, viewerId: number | null): Promise<MovieCommentView[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  // Lấy mới nhất trước để phim quá đông vẫn giữ được bình luận gần đây, rồi đảo lại
+  // cho app hiển thị theo thứ tự thời gian.
+  const rows = await db
+    .select()
+    .from(movieComments)
+    .where(eq(movieComments.movieSlug, movieSlug))
+    .orderBy(desc(movieComments.id))
+    .limit(COMMENT_LIMIT);
+  return rows.reverse().map((row) => toCommentView(row, viewerId));
+}
+
+export async function findMovieComment(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.select().from(movieComments).where(eq(movieComments.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function addMovieComment(
+  input: {
+    movieSlug: string;
+    parentId: number | null;
+    userId: number;
+    userName: string;
+    userRole: string | null;
+    content: string;
+  },
+  viewerId: number | null,
+): Promise<MovieCommentView> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const inserted = await db.insert(movieComments).values({
+    movieSlug: input.movieSlug,
+    parentId: input.parentId,
+    userId: input.userId,
+    userName: input.userName,
+    userRole: input.userRole,
+    content: input.content,
+  }).$returningId();
+  const id = inserted[0]?.id;
+  const row = id ? await findMovieComment(id) : null;
+  if (!row) throw new Error("Không lưu được bình luận.");
+  return toCommentView(row, viewerId);
+}
+
+/** Xoá bình luận và các trả lời trực thuộc để không còn trả lời mồ côi. */
+export async function deleteMovieComment(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(movieComments).where(or(eq(movieComments.id, id), eq(movieComments.parentId, id)));
 }

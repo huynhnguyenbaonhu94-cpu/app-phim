@@ -60,4 +60,5 @@ export const SECURITY_LIMITS = {
   qrCreatePerIp: { limit: 6, windowMs: 10 * 60_000 },
   qrCompletePerIp: { limit: 6, windowMs: 10 * 60_000 },
   accountWritePerUser: { limit: 60, windowMs: 60_000 },
+  commentPerUser: { limit: 20, windowMs: 60_000 },
 } as const;

@@ -35,6 +35,9 @@ struct MovieDetailScreen: View {
                     VStack(alignment: .leading, spacing: 24) {
                         if let movie {
                             detailContent(movie, width: contentWidth)
+                            // Bình luận của phim này, ngay dưới phần nội dung.
+                            CommentsSection(movie: movie)
+                                .padding(.top, 4)
                         } else if store.detailLoading {
                             loadingState
                                 .frame(width: contentWidth)

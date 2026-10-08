@@ -4,6 +4,8 @@
 <dict>
     <key>API_BASE_URL</key>
     <string>$(API_BASE_URL)</string>
+    <key>COMMENTS_API_BASE_URL</key>
+    <string>$(COMMENTS_API_BASE_URL)</string>
     <key>CFBundleDisplayName</key>
     <string>Cinemora</string>
     <key>CFBundleDevelopmentRegion</key>

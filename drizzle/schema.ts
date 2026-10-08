@@ -160,3 +160,21 @@ export type TvVideo = typeof tvVideos.$inferSelect;
 export type TvVideoEpisode = typeof tvVideoEpisodes.$inferSelect;
 export type TvVideoQuality = typeof tvVideoQualities.$inferSelect;
 export type TvVideoSubtitle = typeof tvVideoSubtitles.$inferSelect;
+
+// Bình luận của người dùng cho từng phim. Trả lời được lồng một cấp: bản ghi có
+// parentId trỏ về bình luận gốc.
+export const movieComments = mysqlTable("movie_comments", {
+  id: int("id").autoincrement().primaryKey(),
+  movieSlug: varchar("movieSlug", { length: 140 }).notNull(),
+  parentId: int("parentId"),
+  userId: int("userId").notNull(),
+  userName: varchar("userName", { length: 160 }).notNull(),
+  userRole: varchar("userRole", { length: 20 }),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  slugCreatedIndex: index("movie_comments_slug_created_idx").on(table.movieSlug, table.createdAt),
+  userCreatedIndex: index("movie_comments_user_created_idx").on(table.userId, table.createdAt),
+}));
+export type MovieComment = typeof movieComments.$inferSelect;
+export type InsertMovieComment = typeof movieComments.$inferInsert;
