@@ -2,218 +2,191 @@ import SwiftUI
 
 // MARK: - Palette
 //
-// "Aurora" replaces the previous ice-blue Liquid Glass palette with a softer,
-// warmer cinematic gradient family. Legacy names (cinemaInk / cinemaAccent /
-// cinemaLavender) are kept as aliases so the whole app shares one source of
-// truth instead of drifting into per-screen colours.
+// "Studio" theme — the flat, editorial direction that replaced the Aurora
+// gradient look.
+//
+// Three rules drive everything here:
+//
+//   1. Neutral near-black surfaces, so poster artwork is the only real colour on
+//      screen. Colourful chrome competes with the artwork and makes a film
+//      library look noisy.
+//   2. Exactly one accent — warm gold — used for the primary action, the
+//      selected tab and section markers. Nothing else is allowed to be coloured.
+//   3. Flat fills with a hairline edge instead of gradients, glows and blurred
+//      materials. Each gradient or shadow is an offscreen pass the compositor
+//      repeats for every card, so removing them is both a visual and a
+//      performance decision.
+//
+// The property names are kept (`auroraViolet` and friends) because every screen
+// already references them; the values are what changed. The canonical names are
+// added alongside so new code reads correctly.
 
 extension Color {
-    static let auroraVoid = Color(red: 6 / 255, green: 5 / 255, blue: 17 / 255)
-    static let auroraInk = Color(red: 12 / 255, green: 10 / 255, blue: 28 / 255)
-    static let auroraRaised = Color(red: 25 / 255, green: 22 / 255, blue: 50 / 255)
-    static let auroraViolet = Color(red: 163 / 255, green: 143 / 255, blue: 255 / 255)
-    static let auroraPink = Color(red: 255 / 255, green: 158 / 255, blue: 196 / 255)
-    static let auroraMint = Color(red: 124 / 255, green: 227 / 255, blue: 195 / 255)
-    static let auroraSky = Color(red: 132 / 255, green: 202 / 255, blue: 255 / 255)
-    static let auroraAmber = Color(red: 255 / 255, green: 205 / 255, blue: 140 / 255)
+    // Surfaces, darkest to lightest.
+    static let auroraVoid = Color(red: 8 / 255, green: 8 / 255, blue: 10 / 255)
+    static let auroraInk = Color(red: 14 / 255, green: 14 / 255, blue: 17 / 255)
+    static let auroraRaised = Color(red: 23 / 255, green: 23 / 255, blue: 27 / 255)
 
+    // The single accent, plus the semantic tones that are allowed to differ.
+    static let auroraViolet = Color(red: 239 / 255, green: 183 / 255, blue: 90 / 255)   // gold
+    static let auroraPink = Color(red: 201 / 255, green: 138 / 255, blue: 46 / 255)     // deep gold
+    static let auroraMint = Color(red: 111 / 255, green: 211 / 255, blue: 168 / 255)    // live
+    static let auroraSky = Color(red: 152 / 255, green: 162 / 255, blue: 179 / 255)     // slate
+    static let auroraAmber = Color(red: 232 / 255, green: 132 / 255, blue: 60 / 255)    // warning
+
+    /// Canonical aliases for new code.
+    static let auroraAccent = Color.auroraViolet
+    static let auroraAccentDeep = Color.auroraPink
+    static let auroraSurface = Color.auroraRaised
+
+    // Legacy names kept so older screens keep compiling.
     static let cinemaInk = Color.auroraInk
     static let cinemaAccent = Color.auroraViolet
     static let cinemaLavender = Color.auroraPink
 
-    /// Soft, readable secondary text tone used across the app.
-    static let auroraTextSecondary = Color.white.opacity(0.62)
-    static let auroraTextTertiary = Color.white.opacity(0.42)
+    /// Text ramp. Three steps only: reading text, supporting text, hints.
+    static let auroraTextPrimary = Color.white.opacity(0.95)
+    static let auroraTextSecondary = Color.white.opacity(0.60)
+    static let auroraTextTertiary = Color.white.opacity(0.38)
+
+    /// Hairline used on every card edge.
+    static let auroraHairline = Color.white.opacity(0.07)
 }
 
 extension LinearGradient {
+    /// The accent ramp. Kept as a gradient because it is the single coloured
+    /// surface in the app (primary buttons, the selected tab), but the two stops
+    /// now sit close together so it reads as one warm tone rather than a
+    /// two-colour effect.
     static let auroraPrimary = LinearGradient(
-        colors: [Color.auroraViolet, Color.auroraPink],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [Color.auroraViolet, Color.auroraAccentDeep],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static let auroraCool = LinearGradient(
         colors: [Color.auroraSky, Color.auroraMint],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static let auroraWarm = LinearGradient(
-        colors: [Color.auroraPink, Color.auroraAmber],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [Color.auroraViolet, Color.auroraAmber],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
-    /// Hairline highlight used on card borders.
+    /// Hairline highlight. Flatter than before: a 1pt edge should not look like
+    /// a lighting effect.
     static let auroraVeil = LinearGradient(
-        colors: [Color.white.opacity(0.26), Color.white.opacity(0.05)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [Color.white.opacity(0.12), Color.white.opacity(0.04)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
-    /// Bottom scrim that keeps poster artwork readable.
+    /// Bottom scrim that keeps poster titles readable.
     static let auroraScrim = LinearGradient(
-        colors: [Color.clear, Color.black.opacity(0.35), Color.black.opacity(0.86)],
+        colors: [Color.clear, Color.black.opacity(0.30), Color.black.opacity(0.82)],
         startPoint: .top,
         endPoint: .bottom
     )
 }
 
 // MARK: - Typography
+//
+// Plain SF rather than the rounded face. Headings lean on weight and tight
+// tracking instead of shape, which reads calmer next to poster artwork and
+// gives the app an editorial feel instead of a playful one.
 
 extension Font {
     static func auroraDisplay(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .black, design: .rounded)
+        .system(size: size, weight: .bold)
     }
 
     static func auroraTitle(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .bold, design: .rounded)
+        .system(size: size, weight: .semibold)
     }
 
-    static func auroraLabel(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+    static func auroraLabel(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight)
     }
 
-    static func auroraBody(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
+    static func auroraBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
     }
 }
 
 // MARK: - Ambient background
 
-/// Animated aurora field. Three soft light blooms drift slowly behind the
-/// content, layered over a deep indigo base and finished with a vignette.
-/// The blobs are soft `RadialGradient`s rather than blurred circles, and the
-/// whole stack is completely static: no `blur`, no repeating animation. That
-/// matters because every tab keeps its own background alive once visited, so a
-/// blurred or continuously animating background would be re-composited for
-/// every frame of every tab and make switching tabs feel laggy.
+/// Flat backdrop: a near-black base with a single soft accent wash at the top.
+///
+/// The previous version stacked three 800pt radial blooms and a full-screen
+/// vignette. Those are large offscreen fills that every tab re-composites, and
+/// against a dark UI they mostly read as noise. One wash keeps the depth cue and
+/// costs a fraction of the work.
 struct CinemaBackground: View {
     var body: some View {
         LinearGradient(
-            colors: [Color.auroraVoid, Color.auroraInk, Color.auroraVoid],
+            colors: [Color.auroraVoid, Color.auroraInk],
             startPoint: .top,
             endPoint: .bottom
         )
-        // The glow blobs live in an `overlay`, which is sized by the view it
-        // decorates and never feeds its own size back into the layout. That
-        // matters because each blob is roughly 800pt across: as direct children
-        // of a `ZStack` their frames widened the whole screen, which pushed the
-        // header off-centre and stretched the hero card to full bleed.
-        .overlay {
-            ZStack {
-                blob(Color.auroraViolet.opacity(0.34), size: 380)
-                    .offset(x: -110, y: -300)
-                blob(Color.auroraPink.opacity(0.24), size: 320)
-                    .offset(x: 130, y: -40)
-                blob(Color.auroraSky.opacity(0.18), size: 340)
-                    .offset(x: 60, y: 340)
-                RadialGradient(
-                    colors: [Color.clear, Color.auroraVoid.opacity(0.62)],
-                    center: .center,
-                    startRadius: 90,
-                    endRadius: 520
-                )
-            }
+        // The wash lives in an `overlay` so it never feeds its size back into the
+        // layout: as a direct child of a `ZStack` a large radial gradient widens
+        // the whole screen and pushes content off-centre.
+        .overlay(alignment: .top) {
+            RadialGradient(
+                colors: [Color.auroraAccent.opacity(0.10), Color.clear],
+                center: .top,
+                startRadius: 0,
+                endRadius: 460
+            )
+            .frame(height: 560)
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
-        // No `drawingGroup()` here on purpose: the stack is static, so Core
-        // Animation already caches the layers, while an offscreen group would
-        // have to be re-rasterised every time the store publishes a change.
-    }
-
-    private func blob(_ color: Color, size: CGFloat) -> some View {
-        let diameter = size * 2.2
-        return RadialGradient(
-            stops: [
-                .init(color: color, location: 0),
-                .init(color: color.opacity(0.5), location: 0.38),
-                .init(color: color.opacity(0), location: 1)
-            ],
-            center: .center,
-            startRadius: 0,
-            endRadius: diameter * 0.5
-        )
-        .frame(width: diameter, height: diameter)
     }
 }
 
 // MARK: - Surfaces
 
-/// Soft translucent card used instead of the previous Liquid Glass material.
-/// A tinted gradient fill, a hairline top-left highlight and a two-layer shadow
-/// (neutral + coloured bloom) give depth without any backdrop blur, which keeps
-/// scrolling smooth and scrolling-heavy screens cheap to render.
+/// Flat card: one neutral fill, a whisper of the caller's tint and a 1pt edge.
+///
+/// No gradient fill, no drop shadow, no material. Cards appear by the dozen on
+/// library and search screens, and each shadow was an offscreen pass per card
+/// per frame. Depth now comes from the fill being lighter than the background,
+/// which is how dark-mode elevation is meant to work anyway.
 struct AuroraSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     let tint: Color
     let glow: Bool
     let fill: Double
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        // Aurora Lite: one flat background and a hairline edge.
-        //
-        // The old version stacked a three-stop gradient, a gradient border and a
-        // black drop shadow on every single card. Each shadow is an offscreen
-        // pass, and with a few dozen cards on screen the compositor was doing
-        // that work on every frame while scrolling. Only the handful of "hero"
-        // surfaces that ask for `glow` still get one soft shadow.
-        if glow {
-            surface(content).shadow(color: tint.opacity(0.18), radius: 11, y: 4)
-        } else {
-            surface(content)
-        }
-    }
-
-    private func surface(_ content: Content) -> some View {
         content
-            .background {
-                shape.fill(
-                    LinearGradient(
-                        colors: [
-                            Color.auroraRaised.opacity(0.60),
-                            tint.opacity(0.15 * fill)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            }
-            .overlay { shape.strokeBorder(Color.white.opacity(0.09), lineWidth: 0.8) }
+            .background { shape.fill(Color.auroraRaised) }
+            .background { shape.fill(tint.opacity(0.07 * fill)) }
+            .overlay { shape.strokeBorder(tint.opacity(0.16), lineWidth: 1) }
+            // Only hero surfaces ask for `glow`, and even then it stays short.
+            .shadow(color: glow ? Color.black.opacity(0.34) : Color.clear, radius: glow ? 12 : 0, y: glow ? 6 : 0)
     }
 }
 
-/// Dark "smoke" chrome used over video, where a light surface would wash out.
+/// Chrome used over video, where a light surface would wash out.
 struct AuroraSmoke<S: InsettableShape>: ViewModifier {
     let shape: S
     let strength: Double
 
     func body(content: Content) -> some View {
         content
-            .background {
-                shape.fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.16 * strength),
-                            Color.white.opacity(0.05 * strength)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            }
-            .background { shape.fill(Color.black.opacity(0.34 + 0.22 * strength)) }
-            .overlay { shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8) }
-            .shadow(color: Color.black.opacity(0.38), radius: 14, y: 7)
+            .background { shape.fill(Color.black.opacity(0.42 + 0.20 * strength)) }
+            .overlay { shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
     }
 }
 
 extension View {
-    /// Rounded translucent card (app surfaces).
-    func auroraCard(cornerRadius: CGFloat = 24, tint: Color = .auroraViolet, glow: Bool = false, fill: Double = 1) -> some View {
+    /// Flat card (app surfaces).
+    func auroraCard(cornerRadius: CGFloat = 20, tint: Color = .auroraAccent, glow: Bool = false, fill: Double = 1) -> some View {
         modifier(AuroraSurface(
             shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous),
             tint: tint,
@@ -223,7 +196,7 @@ extension View {
     }
 
     /// Same card, arbitrary shape.
-    func auroraCard<S: InsettableShape>(in shape: S, tint: Color = .auroraViolet, glow: Bool = false, fill: Double = 1) -> some View {
+    func auroraCard<S: InsettableShape>(in shape: S, tint: Color = .auroraAccent, glow: Bool = false, fill: Double = 1) -> some View {
         modifier(AuroraSurface(shape: shape, tint: tint, glow: glow, fill: fill))
     }
 
@@ -236,34 +209,43 @@ extension View {
         modifier(AuroraSmoke(shape: shape, strength: strength))
     }
 
-    /// Coloured bloom used behind hero artwork and primary actions.
-    func auroraHalo(_ tint: Color = .auroraViolet, radius: CGFloat = 26, opacity: Double = 0.35) -> some View {
-        // Aurora Lite: a short bloom. Wide radii cost a large offscreen pass for
-        // a halo that is barely visible against a dark background.
-        shadow(color: tint.opacity(min(opacity, 0.26)), radius: min(radius, 10), y: 3)
+    /// Kept so existing screens compile. The coloured bloom is gone on purpose:
+    /// a wide glow behind every hero and every primary button was one of the
+    /// heaviest effects in the app for very little visual return. Accent fills
+    /// carry the emphasis now.
+    func auroraHalo(_ tint: Color = .auroraAccent, radius: CGFloat = 26, opacity: Double = 0.35) -> some View {
+        self
     }
 }
 
 // MARK: - Eyebrow / section label
 
+/// Small uppercase marker above a section title: one accent dash and a tracked
+/// label. The gradient capsule and coloured glow are gone.
 struct SectionEyebrow: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Capsule()
-                .fill(LinearGradient.auroraPrimary)
-                .frame(width: 15, height: 3)
+                .fill(Color.auroraAccent)
+                .frame(width: 14, height: 2.5)
             Text(text.uppercased())
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.7)
-                .foregroundStyle(Color.auroraViolet.opacity(0.92))
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.6)
+                .foregroundStyle(Color.auroraTextSecondary)
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Big gradient headline used for hero and launch typography.
+/// Headline used for hero and launch typography.
+///
+/// This used to paint a violet-to-pink gradient through the letterforms. The
+/// text is now solid: on a neutral background the white headline is the
+/// strongest element on the screen, and gradient type fights the poster artwork
+/// sitting right next to it. The `gradient` parameter is kept so call sites do
+/// not break, and is deliberately ignored.
 struct AuroraGradientText: View {
     let text: String
     var font: Font = .auroraDisplay(30)
@@ -272,6 +254,7 @@ struct AuroraGradientText: View {
     var body: some View {
         Text(text)
             .font(font)
-            .foregroundStyle(gradient)
+            .foregroundStyle(Color.auroraTextPrimary)
+            .tracking(-0.4)
     }
 }

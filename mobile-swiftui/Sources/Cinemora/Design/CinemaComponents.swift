@@ -17,7 +17,6 @@ struct CinemaHeader: View {
                     .font(.auroraDisplay(30))
                     .tracking(-0.8)
                     .foregroundStyle(.white)
-                    .shadow(color: Color.auroraViolet.opacity(0.35), radius: 18, y: 6)
             }
             Spacer(minLength: 8)
             if let action {
@@ -253,7 +252,6 @@ struct MoviePosterCard: View {
                 }
                 // A single shadow per grid cell: a second, coloured shadow
                 // doubled the offscreen blur work for every poster on screen.
-                .shadow(color: Color.black.opacity(0.38), radius: 12, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(movie.name)
@@ -318,7 +316,6 @@ struct MovieShelfCard: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                 }
-                .shadow(color: Color.black.opacity(0.38), radius: 12, y: 8)
             }
             .frame(width: width)
             .contentShape(Rectangle())
@@ -362,7 +359,6 @@ struct FeaturedMovieCard: View {
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
 
                     Text(movie.originName ?? "Một lựa chọn dành riêng cho bạn")
                         .font(.auroraBody(12))
@@ -411,8 +407,6 @@ struct FeaturedMovieCard: View {
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                     .strokeBorder(LinearGradient.auroraVeil, lineWidth: 1)
             }
-            .shadow(color: Color.black.opacity(0.5), radius: 26, y: 14)
-            .shadow(color: Color.auroraViolet.opacity(0.28), radius: 30, y: 12)
         }
         .buttonStyle(.auroraPress(scale: 0.985))
     }
@@ -570,7 +564,10 @@ struct AuroraBackButton: View {
                 .padding(.vertical, 11)
         }
         .buttonStyle(.auroraPress(scale: 0.94))
-        .auroraSmoke(in: Capsule(), strength: 0.3)
+        // App surface, not the video chrome: on the near-black app background a
+        // translucent black pill is invisible, while the raised surface plus a
+        // hairline reads as a real control.
+        .auroraCard(in: Capsule(), fill: 0.9)
         .accessibilityLabel(title)
     }
 }

@@ -13,8 +13,6 @@ struct QRCodeImage: View {
             .scaledToFit()
             .padding(16)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: Color.black.opacity(0.4), radius: 20, y: 12)
-            .shadow(color: Color.auroraViolet.opacity(0.3), radius: 26, y: 8)
     }
 
     private static func makeImage(payload: String) -> UIImage {
@@ -170,7 +168,7 @@ struct QRLoginSheet: View {
 
                         if isSuccess {
                             ZStack {
-                                Circle().fill(Color.auroraMint.opacity(0.22)).frame(width: 110, height: 110).blur(radius: 18)
+                                Circle().fill(Color.auroraMint.opacity(0.12)).frame(width: 96, height: 96)
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 44, weight: .black))
                                     .foregroundStyle(Color.auroraMint)

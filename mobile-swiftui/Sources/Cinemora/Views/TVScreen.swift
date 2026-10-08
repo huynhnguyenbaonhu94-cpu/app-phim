@@ -621,10 +621,9 @@ private struct TVChannelCard: View {
                                 lineWidth: isSelected ? 1.4 : 0.8
                             )
                     }
-                    .shadow(color: Color.black.opacity(0.4), radius: 14, y: 9)
-                    // Zero radius while unselected: the grid should not pay for a
-                    // second, fully transparent shadow pass on every card.
-                    .shadow(color: isSelected ? Color.auroraMint.opacity(0.3) : .clear, radius: isSelected ? 20 : 0, y: isSelected ? 8 : 0)
+                    // The selection is carried by the mint edge and the label,
+                    // not by a coloured glow: one shadow per card in a grid is an
+                    // offscreen pass the compositor repeats every frame.
 
                 Text(stream.name)
                     .font(.auroraLabel(12, weight: .bold))
@@ -843,7 +842,6 @@ private struct TVPlayerView: View {
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                 }
-                .shadow(color: .black.opacity(0.5), radius: 22, y: 12)
         }
         .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topTrailing)))
     }
@@ -943,7 +941,6 @@ private struct TVPlayerView: View {
                         Capsule()
                             .fill(Color.auroraRaised.opacity(0.96))
                             .overlay(Capsule().strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9))
-                            .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
                     }
                     .offset(y: -52)
                     .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottomTrailing)))
@@ -1079,7 +1076,6 @@ private struct TVVideoRow: View {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 26))
                     .foregroundStyle(LinearGradient.auroraPrimary)
-                    .symbolEffect(.pulse, options: .repeating.speed(0.4), isActive: isFeatured)
             }
             .padding(13)
             .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))

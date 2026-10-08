@@ -192,6 +192,9 @@ struct SubtitlePreferencesScreen: View {
         .onChange(of: preferences) { _, value in
             // Đợi SwiftUI hoàn tất transaction của Toggle/Slider rồi mới
             // cập nhật EnvironmentObject, tránh lỗi văng khi bật nền.
+            // Keep a local reference: reading the environment inside the hop
+            // traps if the screen has already been dismissed.
+            let store = self.store
             DispatchQueue.main.async {
                 store.playbackDefaults.subtitlePreferences = value
                 store.savePlaybackDefaults()

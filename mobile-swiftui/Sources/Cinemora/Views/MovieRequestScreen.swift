@@ -111,7 +111,6 @@ struct MovieRequestScreen: View {
                                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                                             .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                                     }
-                                    .shadow(color: Color.black.opacity(0.4), radius: 16, y: 10)
                                 Button {
                                     withAnimation(Motion.enter) {
                                         selectedPhoto = nil

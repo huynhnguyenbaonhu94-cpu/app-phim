@@ -845,3 +845,63 @@ view nữa. Cùng lỗi này cũng có ở chỗ lưu tùy chọn phụ đề tr
 
 Đã rà thêm: mọi `deinit`, mọi `onDisappear`, mọi chỉ số mảng theo biến, và mọi closure chạy trễ
 trong app. Chỉ còn lại đúng mẫu đã sửa ở trên.
+
+## 23. Màn hình đen khi bấm video liên quan, và siết lại đường thoát trình phát
+
+### 23.1 Nguyên nhân màn hình đen
+
+`openRelatedMovie()` gọi `playback.shutdown()` — hàm này gỡ luôn item khỏi player — **trước khi**
+phim liên quan kịp hiện ra. Nhưng player không hề bị đóng ở bước đó: `MovieDetailScreen` **đổi nội
+dung của chính cover đang mở** sang phim B (xem nhánh `if let relatedMovieRoute`), nên bề mặt
+player A vẫn nằm trên màn hình, chỉ là đã bị gỡ item → đen.
+
+Hai lỗi phụ cùng nằm trên đường này:
+
+- `forcePortrait()` trong `onDisappear` chạy ngay lúc bàn giao, ép app về dọc trong khi player B
+  sắp mở ở ngang, gây xoay hai lần và thêm một nhịp đen.
+- `onDisappear` có thể được gọi hơn một lần cho một cover, khiến phần dọn dẹp chạy hai lần.
+
+**Cách sửa:** chỉ `pauseForDismissal()` (giữ nguyên khung hình cuối) rồi bàn giao; việc gỡ item để
+cho `onDisappear` làm sau. Thêm cờ `handingOffToRelated` để **giữ nguyên hướng ngang** qua lúc bàn
+giao, và cờ `didScheduleTeardown` để phần dọn dẹp chỉ chạy đúng một lần.
+
+### 23.2 Vá thêm một chỗ cùng loại lỗi văng
+
+`Views/SubtitlePreferencesScreen.swift` cũng đọc `store` bên trong `DispatchQueue.main.async` mà
+không giữ bản sao cục bộ — đúng mẫu đã làm văng app ở mục 22. Đã sửa.
+
+## 24. Giao diện mới: "Studio" — phẳng, một màu nhấn, bớt hiệu ứng
+
+Yêu cầu: bớt hiệu ứng nhưng vẫn phải đẹp. Tôi tra cứu lại hướng thiết kế dark mode hiện hành
+(nguyên tắc chung: **dùng độ cao của bề mặt để tạo chiều sâu, không dùng đổ bóng; dùng màu nhấn
+thật tiết chế**) rồi thay hệ thống thiết kế, chứ không sửa từng màn hình — mọi màn hình đều lấy
+màu, chữ, thẻ từ `CinemoraStyle.swift`, nên đổi ở đó là đổi toàn app.
+
+**Bảng màu.** Nền gần đen và **trung tính** (#08080A → #0E0E11) để poster phim là thứ duy nhất có
+màu trên màn hình — trang trí nhiều màu sẽ tranh chấp với ảnh phim và làm thư viện trông ồn. Chỉ
+còn **một màu nhấn: vàng ấm (#EFB75A)**, dùng cho hành động chính, tab đang chọn và gạch đầu mục.
+Các tông còn lại chỉ mang nghĩa: mint = đang phát, cam = cảnh báo, xám = phụ.
+
+**Chữ.** Bỏ font rounded, chuyển sang SF với độ đậm và tracking chặt hơn. Tiêu đề dựa vào trọng
+lượng chứ không vào hình dáng chữ, nên đọc ra chất biên tập thay vì "đồ chơi".
+
+**Bề mặt.** Thẻ giờ là **một nền phẳng + viền 1pt** thay vì gradient ba lớp + viền gradient + đổ
+bóng. Chiều sâu đến từ việc nền thẻ sáng hơn nền app — đúng cách làm elevation của dark mode.
+
+**Nền app.** Bỏ ba khối sáng 800pt và lớp vignette, thay bằng một dải sáng nhạt duy nhất ở đỉnh.
+
+**Những gì đã gỡ:**
+
+| Hiệu ứng | Trước | Sau |
+| --- | --- | --- |
+| `blur()` | 2 | 0 |
+| Material / kính mờ | nhiều | 0 |
+| Đổ bóng trang trí trong màn hình app | 18 | 0 |
+| Hiệu ứng cuộn theo vị trí (`scrollTransition`) | có | 0 |
+| Icon nhún / nhấp nháy (`symbolEffect` trang trí) | 3 | 0 |
+| Quầng sáng (`auroraHalo`) | mọi hero + nút chính | không vẽ gì |
+| Chữ gradient | tiêu đề | chữ trắng đặc |
+| Tab bar | viên gradient + quầng | viên phẳng màu nhấn |
+
+Giữ lại có chủ đích: các vòng xoay chờ (tải dữ liệu, quét QR) và đổ bóng trên chrome trình phát —
+đó là thông tin chức năng trên nền video, không phải trang trí.

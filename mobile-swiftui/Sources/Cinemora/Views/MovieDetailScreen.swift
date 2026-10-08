@@ -315,7 +315,6 @@ struct MovieDetailScreen: View {
                     .foregroundStyle(.white)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                    .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
                 if let origin = movie.originName, !origin.isEmpty {
                     Text(origin)
                         .font(.auroraBody(13))
@@ -356,8 +355,6 @@ struct MovieDetailScreen: View {
             RoundedRectangle(cornerRadius: 32, style: .continuous)
                 .strokeBorder(LinearGradient.auroraVeil, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.5), radius: 24, y: 14)
-        .shadow(color: Color.auroraViolet.opacity(0.22), radius: 28, y: 12)
         .overlay(alignment: .topTrailing) {
             Button {
                 // Favourites live on the account, so ask for a sign-in instead
@@ -467,7 +464,6 @@ struct MovieDetailScreen: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
             }
-            .shadow(color: Color.black.opacity(0.35), radius: 12, y: 7)
 
             Text(profile.name)
                 .font(.auroraLabel(10, weight: .bold))

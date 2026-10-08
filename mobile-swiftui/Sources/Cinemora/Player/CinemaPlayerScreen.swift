@@ -427,6 +427,14 @@ struct CinemaPlayerScreen: View {
     @State private var pictureInPictureEnabled = true
     @State private var relatedRecommendationsVisible = false
     @State private var selectedRelatedMovie: Movie?
+    /// True while this player is being swapped for a related film. The cover
+    /// stays presented in that case, so the landscape orientation must survive
+    /// the swap — restoring portrait here made the next player rotate twice and
+    /// show a black surface in between.
+    @State private var handingOffToRelated = false
+    /// Guards the deferred teardown: SwiftUI can call `onDisappear` more than
+    /// once for a cover, and the teardown must only ever run once.
+    @State private var didScheduleTeardown = false
     @State private var hasAppliedPlaybackDefaults = false
     @State private var didHandleEpisodeEnd = false
     @State private var videoFit: VideoFit = .fit
@@ -685,21 +693,28 @@ struct CinemaPlayerScreen: View {
                     let episode = self.episode
                     let serverName = self.server?.name
                     let playback = self.playback
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(350))
-                        if let episode {
-                            store.recordLocalHistory(
-                                movie: movie,
-                                episode: episode,
-                                serverName: serverName,
-                                watchedSeconds: playback.currentTime,
-                                durationSeconds: playback.duration
-                            )
+                    if !didScheduleTeardown {
+                        didScheduleTeardown = true
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(350))
+                            if let episode {
+                                store.recordLocalHistory(
+                                    movie: movie,
+                                    episode: episode,
+                                    serverName: serverName,
+                                    watchedSeconds: playback.currentTime,
+                                    durationSeconds: playback.duration
+                                )
+                            }
+                            playback.shutdown()
                         }
-                        playback.shutdown()
                     }
                 }
-                forcePortrait()
+                // A handoff keeps the landscape orientation for the incoming
+                // player; a normal exit goes back to portrait.
+                if !handingOffToRelated {
+                    forcePortrait()
+                }
             }
             .statusBarHidden(true)
         }
@@ -1576,10 +1591,13 @@ struct CinemaPlayerScreen: View {
     }
 
     private func openRelatedMovie(_ related: Movie) {
-        // Stop the current item before presenting another player so its audio
-        // cannot continue underneath the related movie.
+        // Pause, do not release the item. This view stays on screen while the
+        // related film loads — the cover swaps its content instead of closing —
+        // and releasing the item here left a black surface covering the app
+        // until the new playback appeared. `onDisappear` does the real teardown
+        // once this player is actually gone.
         saveLocalWatchProgress()
-        playback.shutdown()
+        playback.pauseForDismissal()
         subtitles.load(url: nil)
         hideTask?.cancel()
         withAnimation(Motion.sheet) {
@@ -1588,6 +1606,7 @@ struct CinemaPlayerScreen: View {
         if let onOpenRelated {
             // MovieDetailScreen thay player A bằng trang phim B. B tự mở
             // player, nên khi đóng có thể trở về đúng trang chi tiết B.
+            handingOffToRelated = true
             onOpenRelated(related)
             return
         }

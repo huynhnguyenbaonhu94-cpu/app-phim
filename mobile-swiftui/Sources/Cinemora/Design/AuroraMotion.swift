@@ -82,7 +82,7 @@ struct AuroraReveal: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 16)
+            .offset(y: shown ? 0 : 12)
             .onAppear {
                 guard !shown else { return }
                 guard !reduceMotion else { shown = true; return }
@@ -92,7 +92,7 @@ struct AuroraReveal: ViewModifier {
                 // of posters at once. That alone removed most of the stutter on
                 // the long shelves.
                 guard index <= 6 else { shown = true; return }
-                withAnimation(Motion.enter.delay(Double(index) * 0.03)) {
+                withAnimation(Motion.enter.delay(Double(index) * 0.02)) {
                     shown = true
                 }
             }
@@ -104,14 +104,12 @@ extension View {
         modifier(AuroraReveal(index: index))
     }
 
-    /// Scroll-linked depth: cards settle into place as they enter the viewport.
+    /// Kept so existing screens compile. The scroll-linked scale/fade is gone on
+    /// purpose: it ran a transform on every card for every frame of a scroll, and
+    /// on a long shelf that is the most expensive thing the app can do while the
+    /// user is simply browsing.
     func auroraScrollDepth() -> some View {
-        scrollTransition(.interactive, axis: .vertical) { content, phase in
-            content
-                .scaleEffect(phase.isIdentity ? 1 : 0.95)
-                .opacity(phase.isIdentity ? 1 : 0.55)
-                .offset(y: phase.value * 14)
-        }
+        self
     }
 }
 
@@ -289,42 +287,25 @@ struct AuroraChip: View {
         .animation(Motion.gentle, value: selected)
     }
 
-    @ViewBuilder
-    private var chipLabel: some View {
-        if selected {
-            chipBody.shadow(color: Color.auroraViolet.opacity(0.32), radius: 12, y: 5)
-        } else {
-            chipBody
-        }
-    }
-
     private var chipBody: some View {
-            HStack(spacing: 5) {
-                if selected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .black))
-                        .transition(.scale.combined(with: .opacity))
-                } else if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 9, weight: .bold))
-                }
-                Text(title)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .lineLimit(1)
+        HStack(spacing: 5) {
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .transition(.opacity)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
             }
-            .foregroundStyle(selected ? Color.auroraVoid : Color.white.opacity(0.76))
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
-            .background {
-                if selected {
-                    Capsule().fill(LinearGradient.auroraPrimary)
-                } else {
-                    Capsule().fill(Color.white.opacity(0.07))
-                }
-            }
-            .overlay {
-                Capsule().strokeBorder(Color.white.opacity(selected ? 0.32 : 0.09), lineWidth: 0.8)
-            }
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(selected ? Color.auroraVoid : Color.auroraTextSecondary)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
+        .background { Capsule().fill(selected ? Color.auroraAccent : Color.white.opacity(0.06)) }
+        .overlay { Capsule().strokeBorder(Color.white.opacity(selected ? 0 : 0.07), lineWidth: 1) }
     }
 }
 
@@ -387,22 +368,20 @@ struct AuroraTabBar: View {
                 } label: {
                     VStack(spacing: 5) {
                         Image(systemName: selection == tab ? tab.selectedIcon : tab.icon)
-                            .font(.system(size: 17, weight: .semibold))
-                            .symbolEffect(.bounce, value: selection == tab)
+                            .font(.system(size: 17, weight: .medium))
                         Text(tab.title)
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .font(.system(size: 10, weight: .semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
-                    .foregroundStyle(selection == tab ? Color.auroraVoid : Color.white.opacity(0.55))
+                    .foregroundStyle(selection == tab ? Color.auroraVoid : Color.auroraTextTertiary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 54)
                     .background {
                         if selection == tab {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(LinearGradient.auroraPrimary)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.auroraAccent)
                                 .matchedGeometryEffect(id: "auroraTabIndicator", in: indicator)
-                                .shadow(color: Color.auroraViolet.opacity(0.45), radius: 14, y: 6)
                         }
                     }
                     .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -414,13 +393,13 @@ struct AuroraTabBar: View {
         }
         .padding(6)
         .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.auroraRaised.opacity(0.94))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.auroraRaised.opacity(0.97))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.auroraHairline, lineWidth: 1)
                 }
-                .shadow(color: Color.black.opacity(0.5), radius: 24, y: 14)
+                .shadow(color: Color.black.opacity(0.35), radius: 14, y: 8)
         }
         .padding(.horizontal, 16)
         .animation(Motion.tap, value: selection)

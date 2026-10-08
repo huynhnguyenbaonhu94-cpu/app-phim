@@ -74,7 +74,6 @@ struct WatchHistoryScreen: View {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.8)
                         }
-                        .shadow(color: Color.black.opacity(0.35), radius: 12, y: 7)
 
                     VStack(alignment: .leading, spacing: 7) {
                         Text(record.movie.name)
@@ -222,7 +221,6 @@ struct FavoritesScreen: View {
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
                                 .strokeBorder(LinearGradient.auroraVeil, lineWidth: 0.9)
                         }
-                        .shadow(color: Color.black.opacity(0.38), radius: 12, y: 8)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(record.name)

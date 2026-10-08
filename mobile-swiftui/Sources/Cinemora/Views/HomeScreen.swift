@@ -65,7 +65,6 @@ struct HomeScreen: View {
             HStack(spacing: 9) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .black))
-                    .symbolEffect(.pulse)
                 Text("Có phim mới — chạm để xem")
                     .font(.auroraLabel(12, weight: .bold))
                 Spacer(minLength: 0)
