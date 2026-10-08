@@ -1190,7 +1190,7 @@ struct CinemaPlayerScreen: View {
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 5) {
                         ForEach(selectableStopEpisodes.indices, id: \.self) { index in
                             let item = selectableStopEpisodes[index]
@@ -1215,6 +1215,7 @@ struct CinemaPlayerScreen: View {
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
                 // `maxHeight` alone lets SwiftUI collapse this ScrollView to zero
                 // height inside the settings VStack. Keep one row visible and
                 // cap long episode lists so they remain scrollable.
@@ -1543,6 +1544,7 @@ struct CinemaPlayerScreen: View {
                         }
                         .padding(.bottom, 24)
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
             .padding(.horizontal, 30)
@@ -1622,6 +1624,7 @@ struct CinemaPlayerScreen: View {
                         }
                     }
                 }
+                .scrollIndicators(.hidden)
                 .frame(maxHeight: 340)
             }
             .padding(.horizontal, 22)

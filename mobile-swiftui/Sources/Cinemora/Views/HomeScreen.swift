@@ -37,6 +37,7 @@ struct HomeScreen: View {
                     .padding(.top, 6)
                     .padding(.bottom, 120)
                 }
+                .scrollIndicators(.hidden)
                 .coordinateSpace(.named("homeScroll"))
                 .refreshable { await store.refreshHome() }
                 .onChange(of: scrollToTopRequest) { _, _ in

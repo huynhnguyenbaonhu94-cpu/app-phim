@@ -47,6 +47,7 @@ struct WatchHistoryScreen: View {
                 .padding(.top, 58)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
         }
         .overlay(alignment: .topLeading) {
             AuroraBackButton(title: "Trở lại") { dismiss() }
@@ -183,6 +184,7 @@ struct FavoritesScreen: View {
                 .padding(.top, 58)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
         }
         .overlay(alignment: .topLeading) {
             AuroraBackButton(title: "Trở lại") { dismiss() }
@@ -290,6 +292,7 @@ struct SavedHubScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
         }
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -407,6 +410,7 @@ struct PlaybackDefaultsScreen: View {
                 .padding(.top, 58)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
         }
         .overlay(alignment: .topLeading) {
             AuroraBackButton(title: "Trở lại") { dismiss() }

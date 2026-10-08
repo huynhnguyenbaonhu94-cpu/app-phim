@@ -36,7 +36,9 @@ struct AccountSettingsScreen: View {
                 .padding(.top, 58)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
+            .auroraDismissKeyboardOnTap()
         }
         .overlay(alignment: .topLeading) {
             AuroraBackButton(title: "Trở lại") { dismiss() }
@@ -529,6 +531,8 @@ private struct ChangePasswordSheet: View {
                     }
                     .padding(22)
                 }
+                .scrollIndicators(.hidden)
+                .auroraDismissKeyboardOnTap()
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Đóng") { dismiss() } }

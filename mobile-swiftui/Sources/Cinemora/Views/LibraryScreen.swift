@@ -76,6 +76,7 @@ struct LibraryScreen: View {
                 .padding(.top, 6)
                 .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
             .refreshable { load() }
         }
         .animation(Motion.sheet, value: filtersExpanded)

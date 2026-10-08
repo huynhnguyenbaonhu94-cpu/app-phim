@@ -626,3 +626,32 @@ struct HeroParallax: View {
             }
     }
 }
+
+
+// MARK: - Keyboard dismissal
+
+extension UIApplication {
+    /// Resigns whatever is currently first responder, which closes the keyboard.
+    /// `sendAction` with a nil target walks the responder chain, so it works no
+    /// matter which field is focused.
+    func auroraEndEditing() {
+        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+extension View {
+    /// Closes the keyboard when the user taps anywhere that is not a text field
+    /// or a button.
+    ///
+    /// The gesture is installed *behind* the content, so a tap on a field still
+    /// focuses it and a tap on a button still presses it — only taps that land
+    /// on empty space or on plain text reach this layer. Tapping a field again
+    /// brings the keyboard straight back.
+    func auroraDismissKeyboardOnTap() -> some View {
+        background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { UIApplication.shared.auroraEndEditing() }
+        }
+    }
+}

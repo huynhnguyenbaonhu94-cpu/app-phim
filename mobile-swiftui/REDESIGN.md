@@ -762,3 +762,31 @@ nhẹ form xuống là bàn phím đóng và thanh menu trượt trở lại —
 
 Nếu muốn thanh menu **vẫn hiện** trong lúc gõ, chỉ cần đổi phương án: thay vì trượt đi, cho nó thu
 gọn lại thành dạng chỉ có icon (bỏ nhãn chữ, thấp hơn khoảng 20pt). Nói một câu là tôi đổi.
+
+## 20. Thanh cuộn và cách ẩn bàn phím
+
+### 20.1 Bỏ thanh cuộn
+
+Thanh cuộn dọc bên phải xuất hiện mỗi lần lướt, trông không hợp với giao diện. Đã thêm
+`.scrollIndicators(.hidden)` cho **tất cả** vùng cuộn dọc: Trang chủ (kể cả danh sách "xem thêm"),
+Thư viện, Lưu (4 màn hình), Tìm kiếm, Yêu cầu phim, Tài khoản, Đổi mật khẩu, Tùy chỉnh phụ đề,
+Truyền hình, và 3 vùng cuộn trong trình phát. Danh sách tập phim trong trình phát đổi từ
+`showsIndicators: true` sang `false`.
+
+Các dải cuộn ngang (shelf poster) vốn đã tắt sẵn. Việc ẩn thanh cuộn **không ảnh hưởng** thao tác
+lướt — vẫn kéo lên xuống bình thường, chỉ là không còn thanh chỉ báo.
+
+### 20.2 Chạm ra ngoài để ẩn bàn phím, chạm vào ô nhập để hiện lại
+
+Thêm hai tiện ích dùng chung trong `Design/CinemaComponents.swift`:
+
+- `UIApplication.auroraEndEditing()` — thu hồi first responder, tức đóng bàn phím.
+- `View.auroraDismissKeyboardOnTap()` — đặt một lớp cảm ứng **phía sau** nội dung.
+
+Điểm mấu chốt là lớp cảm ứng nằm sau: chạm vào ô nhập thì ô nhập vẫn nhận được và bàn phím hiện
+lên; chạm vào nút thì nút vẫn hoạt động; chỉ những cú chạm vào khoảng trống hoặc chữ thường mới
+rơi xuống lớp này và đóng bàn phím. Nhờ vậy không có chuyện vừa chạm vào ô nhập đã bị đóng bàn
+phím — lỗi hay gặp khi gắn cử chỉ chạm lên toàn màn hình.
+
+Đã áp dụng cho 4 màn hình có ô nhập: Đăng nhập/Đăng ký, Đổi mật khẩu, Tìm kiếm, Yêu cầu phim.
+Muốn hiện lại bàn phím thì chỉ cần chạm vào ô nhập.

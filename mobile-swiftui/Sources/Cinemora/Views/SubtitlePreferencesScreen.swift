@@ -180,6 +180,7 @@ struct SubtitlePreferencesScreen: View {
                     .padding(.top, 58)
                     .padding(.bottom, 120)
             }
+            .scrollIndicators(.hidden)
         }
         .overlay(alignment: .topLeading) {
             AuroraBackButton(title: "Trở lại") { dismiss() }
