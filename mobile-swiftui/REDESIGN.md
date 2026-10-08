@@ -953,3 +953,63 @@ trạng thái cuối cùng đọng lại là "đang phát" và icon pause không
 
 **Sửa:** lắng nghe thông báo kết thúc → dừng phát, đặt `didReachEnd`, đưa icon về nút phát lại
 (`arrow.counterclockwise`); bấm nút đó sẽ phát lại từ đầu. Chuyển tập hoặc tua lại thì cờ được xoá.
+
+## 26. Văng app khi mở phim rồi trở ra (nguyên nhân gốc)
+
+Đây là lỗi nghiêm trọng nhất trong loạt lỗi "lâu lâu ấn không ăn" và "văng khi trở ra".
+
+`AuroraKeyboardDismissLayer` gắn một `UITapGestureRecognizer` lên **window** để ấn ra ngoài ô nhập
+thì đóng bàn phím. Nhưng **`UIGestureRecognizer` không giữ target của nó** — target là tham chiếu
+không sở hữu. Coordinator của lớp này do `makeCoordinator()` tạo ra, tức là **chỉ sống theo màn hình
+đã tạo nó**. Khi màn hình đó bị tháo (đẩy màn hình phim lên, rồi trở ra), coordinator bị giải phóng,
+**nhưng recognizer vẫn nằm trên window**. Cú chạm tiếp theo gửi `handleTap(_:)` tới một đối tượng đã
+bị huỷ → `EXC_BAD_ACCESS` → văng app.
+
+Vì sao đúng kịch bản bạn gặp: lần chạm đầu tiên còn an toàn vì coordinator còn sống; sau khi vào
+phim rồi trở ra, nó đã chết; chạm vào phim tiếp theo là cú chạm giết app.
+
+Điều này cũng giải thích các triệu chứng trước đây: nút "Trở lại" có lúc phải ấn nhiều lần mới ăn —
+một số cú chạm rơi vào đối tượng đã huỷ nên bị nuốt mất, chỉ khác nhau ở việc lần này có nổ hay không.
+
+**Sửa:** target của recognizer nay là **một singleton sống suốt vòng đời app**
+(`@MainActor static let shared`), nên không còn khả năng gửi thông điệp tới đối tượng đã huỷ. Kèm
+theo, khi window đổi thì recognizer cũ được gỡ trước khi gắn cái mới, tránh chồng nhiều recognizer.
+
+## 27. Văng khi trở ra từ chi tiết phim rồi lướt tiếp
+
+### Nguyên nhân 1 — chỉ số vượt mảng (đúng kịch bản bạn gặp)
+
+Sáu vòng lặp trong app dùng **chỉ số làm danh tính** cho `ForEach`:
+
+```swift
+ForEach(servers.indices, id: \.self) { index in
+    let server = servers[index]      // ← có thể vượt mảng
+```
+
+`servers` và `episodes` ở màn hình chi tiết không phải mảng cố định — chúng suy ra từ `movie`:
+
+```swift
+private var servers: [MovieServer] { movie?.availableServers ?? [] }
+private var episodes: [MovieEpisode] { servers.indices.contains(selectedServer) ? servers[selectedServer].episodes : [] }
+```
+
+Mỗi lần màn hình chi tiết tải lại dữ liệu, `movie` bị thay bằng bản mới (hoặc về `nil` khi màn hình
+bị tháo trong lúc trở ra). Số nguồn/số tập có thể **giảm**, nhưng `ForEach` theo chỉ số vẫn còn hàng
+ở vị trí cũ và SwiftUI vẫn hỏi lại hàng đó một lần nữa trong lúc cập nhật. Lúc đó `servers[index]`
+truy cập ngoài mảng → **trap "Index out of range" → văng app**. Lần vào đầu thường an toàn vì dữ
+liệu vừa tải và chưa bị thay; các lần sau mới nổ — đúng như bạn mô tả.
+
+**Sửa:** cả sáu chỗ chuyển sang ảnh chụp liệt kê kèm danh tính theo phần tử, và **không truy cập
+bằng chỉ số nữa**:
+
+```swift
+ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
+    serverChip(server, selected: selectedServer == index) { … }
+```
+
+Các vị trí: màn hình chi tiết (2), trình phát phim (3), trình phát truyền hình (1).
+
+### Nguyên nhân 2 — recognizer bàn phím nhắm vào đối tượng đã huỷ
+
+Xem mục 26. `AuroraKeyboardDismissLayer` gắn `UITapGestureRecognizer` lên window, mà
+`UIGestureRecognizer` **không giữ target**. Nay target là singleton sống suốt vòng đời app.

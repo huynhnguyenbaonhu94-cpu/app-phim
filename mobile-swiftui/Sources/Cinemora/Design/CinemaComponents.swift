@@ -672,18 +672,31 @@ struct AuroraKeyboardDismissLayer: UIViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { .shared }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// A gesture recogniser does **not** retain its target. When the
+        /// coordinator was owned by a single screen, it was deallocated as soon
+        /// as that screen went away — but its recogniser stayed installed on the
+        /// window, so the next tap messaged a freed object and crashed the app.
+        /// That is exactly what happened after opening a film and coming back.
+        /// One shared target, alive for the whole process, removes the crash.
+        @MainActor static let shared = Coordinator()
+
         private weak var installed: UIView?
+        private var recognizer: UITapGestureRecognizer?
 
         /// Attaches once per window; re-attaching would stack duplicates.
         func attach(to window: UIView) {
             guard installed !== window else { return }
+            if let recognizer, let installed {
+                installed.removeGestureRecognizer(recognizer)
+            }
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             tap.cancelsTouchesInView = false
             tap.delegate = self
             window.addGestureRecognizer(tap)
+            recognizer = tap
             installed = window
         }
 

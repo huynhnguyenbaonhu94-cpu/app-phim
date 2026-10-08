@@ -200,8 +200,12 @@ struct MovieDetailScreen: View {
                 SectionHeading(eyebrow: "SẴN SÀNG PHÁT", title: "Tập & nguồn")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(servers.indices, id: \.self) { index in
-                            let server = servers[index]
+                        // Enumerated snapshot with element identity, never
+                        // `servers[index]`. A reload replaces `movie`, so the
+                        // server list can shrink while this row is still on
+                        // screen — indexing it then traps "Index out of range"
+                        // and takes the app down.
+                        ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
                             serverChip(server, selected: selectedServer == index) {
                                 withAnimation(Motion.gentle) { selectedServer = index }
                             }
@@ -211,8 +215,7 @@ struct MovieDetailScreen: View {
                 }
                 .scrollClipDisabled()
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 9) {
-                    ForEach(episodes.indices, id: \.self) { index in
-                        let item = episodes[index]
+                    ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
                         Button {
                             selectedEpisode = index
                             store.recordLocalHistory(movie: movie, episode: item, serverName: servers.indices.contains(selectedServer) ? servers[selectedServer].name : nil)

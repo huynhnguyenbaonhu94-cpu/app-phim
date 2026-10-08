@@ -1310,8 +1310,7 @@ struct CinemaPlayerScreen: View {
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 5) {
-                        ForEach(selectableStopEpisodes.indices, id: \.self) { index in
-                            let item = selectableStopEpisodes[index]
+                        ForEach(Array(selectableStopEpisodes.enumerated()), id: \.element.id) { index, item in
                             Button {
                                 stopAtEpisodeID = stopEpisodeKey(item)
                             } label: {
@@ -1732,15 +1731,15 @@ struct CinemaPlayerScreen: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 9)], spacing: 9) {
                         if kind == .episodes {
-                            ForEach(episodes.indices, id: \.self) { index in
-                                pickerRow(number: index + 1, title: episodes[index].name, selected: index == episodeIndex) {
+                            ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
+                                pickerRow(number: index + 1, title: item.name, selected: index == episodeIndex) {
                                     episodeIndex = index
                                     controlsVisible = true
                                 }
                             }
                         } else {
-                            ForEach(servers.indices, id: \.self) { index in
-                                pickerRow(number: index + 1, title: servers[index].name, selected: index == serverIndex) {
+                            ForEach(Array(servers.enumerated()), id: \.element.id) { index, item in
+                                pickerRow(number: index + 1, title: item.name, selected: index == serverIndex) {
                                     serverIndex = index
                                     controlsVisible = true
                                 }

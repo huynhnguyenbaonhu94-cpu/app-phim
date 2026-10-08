@@ -1362,8 +1362,8 @@ private struct TVVideoFullscreenPlayer: View {
                         .tint(Color.auroraViolet)
                     if stopAtEpisode {
                         Picker("Tập dừng", selection: $stopAtEpisodeIndex) {
-                            ForEach(video.episodes.indices, id: \.self) { index in
-                                Text(video.episodes[index].name).tag(index)
+                            ForEach(Array(video.episodes.enumerated()), id: \.element.id) { index, episode in
+                                Text(episode.name).tag(index)
                             }
                         }
                         .pickerStyle(.menu)
