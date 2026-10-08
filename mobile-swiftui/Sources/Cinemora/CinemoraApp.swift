@@ -13,8 +13,13 @@ final class CinemoraAppDelegate: NSObject, UIApplicationDelegate {
 enum OrientationSupport {
     static func rotate(to orientation: UIInterfaceOrientation) {
         let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        // The app delegate's orientation lock plus the scene geometry request
+        // below are the supported way to force a rotation. There used to be a
+        // third line here — `UIDevice.current.setValue(_:forKey:"orientation")` —
+        // which is the old KVC hack. Apple moved `orientation` off `UIDevice`, so
+        // on iOS 16+ that call is undefined behaviour and could raise at any time;
+        // it ran on every player open/close, so the app crashed after a few uses.
         CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
         guard let scene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive }) else { return }

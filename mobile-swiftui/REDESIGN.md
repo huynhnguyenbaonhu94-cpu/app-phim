@@ -609,3 +609,41 @@ vừa đúng về ngữ nghĩa, vừa tránh overhead theo dõi vô ích, vừa 
 **Ghi chú cho lần bảo trì sau:** trong một lớp `@Observable`, mọi `var` đều trở thành computed.
 Nếu cần đọc/ghi một thuộc tính từ `deinit` hay từ ngữ cảnh nonisolated, hãy đánh dấu nó
 `@ObservationIgnored`.
+
+## 16. Sửa lỗi crash khi đang dùng app
+
+**Triệu chứng:** dùng app một lúc thì bị văng ra ngoài, không có quy luật rõ ràng.
+
+**Thủ phạm:** dòng hack KVC để ép xoay màn hình, xuất hiện ở **3 chỗ**:
+
+```swift
+UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+```
+
+- `CinemoraApp.swift` trong `OrientationSupport.rotate`
+- `CinemaPlayerScreen.swift` khi bật/tắt toàn màn hình
+- `Views/TVScreen.swift` khi bật/tắt toàn màn hình
+
+Đây là cách ép xoay "truyền miệng" từ nhiều năm trước. Apple đã chuyển thuộc tính
+`orientation` ra khỏi `UIDevice`, nên từ iOS 16 trở đi lệnh này là **hành vi không xác định**: nó
+có thể chạy êm nhiều lần rồi bất ngờ ném ngoại lệ. Vì nó nằm trên đường mở/đóng trình phát — tức
+mỗi lần bạn bấm xem phim hoặc thoát toàn màn hình — app sẽ "sống một lúc rồi chết", đúng như mô
+tả. Đây cũng là kiểu lỗi rất khó tái hiện vì phụ thuộc thời điểm.
+
+**Cách sửa:** bỏ cả ba dòng. Việc ép xoay vẫn hoạt động đầy đủ nhờ hai API chính thức đã có sẵn
+trong code:
+
+1. `CinemoraAppDelegate.orientationLock` trả về từ
+   `application(_:supportedInterfaceOrientationsFor:)` — quy định tập hướng được phép.
+2. `windowScene.requestGeometryUpdate(.iOS(interfaceOrientations:))` kèm
+   `setNeedsUpdateOfSupportedInterfaceOrientations()` — yêu cầu hệ thống xoay ngay.
+
+Trên iOS 16+, hack KVC vốn đã không còn tác dụng, nên bỏ nó không mất gì.
+
+### 16.1 Thêm phòng ngừa áp lực bộ nhớ
+
+`PosterMemoryGuard` lắng nghe `UIApplication.didReceiveMemoryWarningNotification` và xoá cache
+ảnh đã giải mã. Trước đây không có gì tự giải phóng ảnh: một phiên duyệt phim dài chạm tới hàng
+trăm poster, bộ nhớ chỉ tăng chứ không giảm. Đồng thời hạ `totalCostLimit` của cache từ 48MB
+xuống 32MB. Đây là biện pháp phòng ngừa cho kiểu văng app do hệ thống thu hồi bộ nhớ — khác với
+nguyên nhân chính ở trên.

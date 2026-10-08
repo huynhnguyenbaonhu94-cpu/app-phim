@@ -1782,8 +1782,10 @@ struct CinemaPlayerScreen: View {
 
     private func forceOrientation(_ orientation: UIInterfaceOrientation) {
         let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        // No `UIDevice.setValue(_:forKey:"orientation")` here: that KVC hack is
+        // undefined behaviour on iOS 16+ and crashed the app intermittently. The
+        // delegate lock plus the geometry request are enough.
         CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
         if let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive }),

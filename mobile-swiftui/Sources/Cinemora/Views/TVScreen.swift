@@ -1002,8 +1002,8 @@ private struct TVFullscreenPlayer: View {
 
     private func forceOrientation(_ orientation: UIInterfaceOrientation) {
         let isLandscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        // See the player: the KVC orientation hack is gone.
         CinemoraAppDelegate.orientationLock = isLandscape ? .landscape : .portrait
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
         if let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive }),

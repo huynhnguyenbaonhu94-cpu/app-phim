@@ -40,11 +40,36 @@ struct CinemaHeader: View {
 
 // MARK: - Remote artwork
 
+/// Drops the decoded-poster cache when iOS reports memory pressure.
+///
+/// Nothing in the app frees images by itself: a long browsing session touches
+/// hundreds of posters, and the footprint only ever creeps up. Reacting to the
+/// system's warning keeps it flat instead of letting the app grow until the
+/// system kills it.
+private final class PosterMemoryGuard: NSObject {
+    static let shared = PosterMemoryGuard()
+
+    private override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(purge),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+    }
+
+    @objc private func purge() {
+        PosterImageCache.shared.removeAllObjects()
+    }
+}
+
 private final class PosterImageCache {
     static let shared: NSCache<NSURL, UIImage> = {
         let cache = NSCache<NSURL, UIImage>()
         cache.countLimit = 160
-        cache.totalCostLimit = 48 * 1024 * 1024
+        cache.totalCostLimit = 32 * 1024 * 1024
+        _ = PosterMemoryGuard.shared
         return cache
     }()
 
