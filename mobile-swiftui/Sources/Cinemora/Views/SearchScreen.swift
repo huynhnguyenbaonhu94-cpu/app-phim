@@ -146,13 +146,17 @@ struct SearchScreen: View {
             if filteredResults.isEmpty {
                 StateMessage(icon: "line.3.horizontal.decrease.circle", title: "Không có phim phù hợp", detail: "Hãy nới lỏng một hoặc nhiều bộ lọc.")
             } else {
+                // No `.id(...)` on the grid. It used to be keyed to the query,
+                // which made SwiftUI tear down and rebuild the whole grid every
+                // time a new result set arrived. If that happened while a card's
+                // navigation push was in flight, the view owning the push was
+                // destroyed underneath it and the app crashed. Card identity is
+                // already stable through `ForEach(id: \.element.id)`.
                 LazyVGrid(columns: columns, spacing: 20) {
                     ForEach(Array(filteredResults.enumerated()), id: \.element.id) { index, movie in
                         MoviePosterCard(movie: movie, revealIndex: index % 12)
-                            .id("search-movie-\(movie.id)")
                     }
                 }
-                .id("search-results-\(submitted)")
             }
         } else {
             StateMessage(icon: "sparkles.tv", title: "Khám phá thế giới phim", detail: "Nhập ít nhất 2 ký tự, kết quả sẽ hiện ngay khi bạn gõ.")
@@ -259,11 +263,25 @@ struct SearchScreen: View {
         }
     }
 
-    private func dateValue(_ value: String?) -> Date {
-        guard let value else { return .distantPast }
+    /// Parsers are built once. `filteredResults` is re-evaluated on every store
+    /// publish — and while the user types, one arrives every debounce tick — so
+    /// allocating two `ISO8601DateFormatter`s per comparison (hundreds per sort)
+    /// was the reason the keyboard lagged behind the fingers.
+    private static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value) ?? .distantPast
+        return formatter
+    }()
+
+    private static let isoPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private func dateValue(_ value: String?) -> Date {
+        guard let value else { return .distantPast }
+        return Self.isoFractional.date(from: value) ?? Self.isoPlain.date(from: value) ?? .distantPast
     }
 }
 

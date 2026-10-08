@@ -16,6 +16,11 @@ final class PlaybackController: ObservableObject {
     @Published var playbackRate: Float = 1
     @Published var errorMessage: String?
     @Published var activeURL: URL?
+    /// True once the current item has played to its end. The periodic time
+    /// observer stops firing the moment playback ends, so without this flag the
+    /// last published state stayed "playing" and the pause icon never went back
+    /// to the play state.
+    @Published var didReachEnd = false
     private var timeObserver: Any?
     private var itemObservation: NSKeyValueObservation?
     private var loadTask: Task<Void, Never>?
@@ -31,6 +36,16 @@ final class PlaybackController: ObservableObject {
         notificationTokens = [
             NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.recoverAfterAudioRouteChange() }
+            },
+            // Reach the end of the film or of the last episode: stop and hand
+            // control back to the play/replay button.
+            NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
+                Task { @MainActor in
+                    guard let self,
+                          let item = self.player.currentItem,
+                          (note.object as? AVPlayerItem) === item else { return }
+                    self.handleReachedEnd()
+                }
             }
         ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
@@ -106,6 +121,7 @@ final class PlaybackController: ObservableObject {
         suppressLoadingUntil = .distantPast
         player.pause()
         errorMessage = nil; currentTime = 0; duration = 0
+        didReachEnd = false
         itemObservation = nil
         guard let url = episode.streamURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
@@ -205,9 +221,27 @@ final class PlaybackController: ObservableObject {
         isPlaying = true
         resumeAfterOverlay = false
     }
+    private func handleReachedEnd() {
+        player.pause()
+        isPlaying = false
+        isLoading = false
+        isSeeking = false
+        if duration.isFinite, duration > 0 { currentTime = duration }
+        didReachEnd = true
+    }
+
     func togglePlayback() {
-        if player.timeControlStatus == .playing { player.pause(); isPlaying = false }
-        else { player.play(); isPlaying = true }
+        if player.timeControlStatus == .playing { player.pause(); isPlaying = false; return }
+        // Pressing play on a finished item starts it over instead of doing nothing.
+        if didReachEnd {
+            didReachEnd = false
+            seek(to: 0)
+            player.play()
+            isPlaying = true
+            return
+        }
+        player.play()
+        isPlaying = true
     }
 
     func pause() {
@@ -235,6 +269,7 @@ final class PlaybackController: ObservableObject {
         let target = max(0, seconds)
         seekRequestID = UUID()
         let requestID = seekRequestID
+        didReachEnd = false
         isSeeking = true
         isLoading = false
         suppressLoadingUntil = Date().addingTimeInterval(1.2)
@@ -343,6 +378,23 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
     @Published private(set) var isSupported = false
     @Published private(set) var isActive = false
     private var controller: AVPictureInPictureController?
+    /// Watches `isPictureInPicturePossible`. Pressing the PiP button almost
+    /// always happens before the layer has rendered a frame, and the flag stays
+    /// false until it has — the old code retried once after 280ms and then gave
+    /// up silently, which is why the button often did nothing at all.
+    private var possibleObservation: NSKeyValueObservation?
+    private var pendingStart = false
+    /// Whether iOS may move playback into Picture in Picture by itself when the
+    /// app leaves the foreground. Comes from the playback setting, so the
+    /// setting now actually controls the behaviour instead of only hiding the
+    /// button.
+    private var autoStart = true
+
+    @MainActor
+    func setAutoStart(_ value: Bool) {
+        autoStart = value
+        controller?.canStartPictureInPictureAutomaticallyFromInline = value
+    }
 
     @MainActor
     func attach(to layer: AVPlayerLayer) {
@@ -350,7 +402,14 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
         if controller?.playerLayer !== layer {
             guard let next = AVPictureInPictureController(playerLayer: layer) else { return }
             next.delegate = self
-            next.canStartPictureInPictureAutomaticallyFromInline = true
+            next.canStartPictureInPictureAutomaticallyFromInline = autoStart
+            possibleObservation = next.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
+                Task { @MainActor in
+                    guard let self, self.pendingStart, controller.isPictureInPicturePossible else { return }
+                    self.pendingStart = false
+                    controller.startPictureInPicture()
+                }
+            }
             controller = next
         }
         isSupported = controller != nil
@@ -364,26 +423,42 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
         if controller.isPictureInPicturePossible {
             controller.startPictureInPicture()
         } else {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(280))
-                guard !Task.isCancelled, let self, let controller = self.controller, controller.isPictureInPicturePossible else { return }
-                controller.startPictureInPicture()
-            }
+            // Started as soon as the layer reports that the hand-off is allowed.
+            pendingStart = true
         }
     }
 
     @MainActor
     func stop() {
+        pendingStart = false
         guard let controller, controller.isPictureInPictureActive else { return }
         controller.stopPictureInPicture()
     }
 
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor [weak self] in self?.isActive = true }
     }
 
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        Task { @MainActor [weak self] in self?.isActive = false }
+    nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.pendingStart = false; self?.isActive = true }
+    }
+
+    nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in self?.pendingStart = false; self?.isActive = false }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        Task { @MainActor [weak self] in self?.pendingStart = false; self?.isActive = false }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        completionHandler(true)
     }
 }
 
@@ -1119,6 +1194,12 @@ struct CinemaPlayerScreen: View {
                     settingsLabel(icon: "pip.enter", title: "Picture-in-Picture", detail: "Cho phép phát nổi khi rời trình phát")
                 }
                 .tint(Color.auroraViolet)
+                // The setting used to only hide the button. It now also decides
+                // whether iOS may move playback into PiP by itself when the app
+                // leaves the foreground.
+                .onChange(of: pictureInPictureEnabled) { _, value in
+                    pipCoordinator.setAutoStart(value && movie.allowPip != false)
+                }
             }
         case .speed:
             VStack(alignment: .leading, spacing: 8) {
@@ -1296,7 +1377,9 @@ struct CinemaPlayerScreen: View {
                 playback.togglePlayback()
                 scheduleHide()
             } label: {
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                // At the end of the film the button becomes "replay" instead of
+                // staying on the pause glyph.
+                Image(systemName: playback.isPlaying ? "pause.fill" : (playback.didReachEnd ? "arrow.counterclockwise" : "play.fill"))
                     .font(.system(size: 26, weight: .black))
                     .foregroundStyle(Color.auroraVoid)
                     .frame(width: 74, height: 74)
@@ -1737,6 +1820,7 @@ struct CinemaPlayerScreen: View {
         hasAppliedPlaybackDefaults = true
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
+        pipCoordinator.setAutoStart(pictureInPictureEnabled && movie.allowPip != false)
         if subtitleCustomizationEnabled {
             let defaults = store.playbackDefaults.subtitlePreferences
             subtitlePreferences = defaults
@@ -1878,6 +1962,10 @@ private struct EmbedWebPlayer: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
+        // Without this the inline web player can never hand off to Picture in
+        // Picture, which is why PiP did nothing for streams that play in the
+        // web view.
+        configuration.allowsPictureInPictureMediaPlayback = true
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false; view.backgroundColor = .black; view.scrollView.isScrollEnabled = false
         view.load(URLRequest(url: url))

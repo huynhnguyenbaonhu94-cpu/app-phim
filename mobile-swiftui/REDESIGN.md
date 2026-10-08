@@ -905,3 +905,51 @@ bóng. Chiều sâu đến từ việc nền thẻ sáng hơn nền app — đú
 
 Giữ lại có chủ đích: các vòng xoay chờ (tải dữ liệu, quét QR) và đổ bóng trên chrome trình phát —
 đó là thông tin chức năng trên nền video, không phải trang trí.
+
+## 25. Tìm kiếm, Picture-in-Picture và trạng thái cuối phim
+
+### 25.1 Vì sao bàn phím gõ bị lag
+
+`filteredResults` được tính lại **mỗi lần store phát thông báo** — mà khi đang gõ, mỗi nhịp
+debounce lại có một kết quả mới về. Trong hàm sắp xếp, `dateValue()` **tạo mới hai
+`ISO8601DateFormatter` cho mỗi lần so sánh**, nên một lần sắp xếp vài trăm phim sinh ra hàng trăm
+đối tượng formatter. Toàn bộ việc đó chạy trên main thread, đúng lúc bàn phím đang cần nó.
+
+**Sửa:** hai formatter nay là `static let` (tạo một lần cho cả vòng đời app), không còn cấp phát
+trong vòng lặp so sánh.
+
+### 25.2 Vì sao ấn vào phim trong kết quả tìm kiếm bị văng
+
+Lưới kết quả có `.id("search-results-\(submitted)")` — mỗi lần có kết quả của truy vấn mới là
+SwiftUI **tháo và dựng lại toàn bộ lưới**. Nếu lúc đó người dùng vừa ấn vào một phim và màn hình
+chi tiết đang được đẩy lên, view đang giữ việc điều hướng bị huỷ ngay dưới chân nó → văng app.
+Vào lại thì bình thường vì lúc đó không còn kết quả nào đang bay về nữa.
+
+**Sửa:** bỏ `.id(...)` trên lưới — danh tính từng thẻ vốn đã ổn định qua `ForEach(id: \.element.id)`.
+
+### 25.3 Picture-in-Picture
+
+Ba lỗi riêng biệt:
+
+1. **Trình phát web chưa bao giờ bật `allowsPictureInPictureMediaPlayback`.** Với các nguồn phát
+   trong `WKWebView`, cờ này là điều kiện bắt buộc — thiếu nó thì PiP không thể xảy ra, dù nút có
+   hiện. Đã bật.
+2. **Nút PiP thường không làm gì.** `isPictureInPicturePossible` chỉ chuyển sang `true` sau khi
+   player layer đã vẽ khung hình đầu tiên, thường là sau khi người dùng đã bấm nút. Bản cũ thử lại
+   đúng một lần sau 280ms rồi im lặng bỏ cuộc. Nay theo dõi thuộc tính này bằng KVO và khởi động
+   PiP ngay khi được phép.
+3. **Cài đặt PiP chỉ để ẩn/hiện nút, không điều khiển hành vi.** `canStartPictureInPictureAutomaticallyFromInline`
+   bị đặt cứng là `true`. Nay nó lấy từ chính cài đặt `playbackDefaults.pictureInPicture`, nên khi
+   bật, iOS được phép tự đưa hình sang PiP lúc app rời tiền cảnh.
+
+Kèm theo: `stop()` huỷ luôn yêu cầu đang chờ, và các callback `didStart` / `failedToStart` nay cập
+nhật `isActive` để nút không kẹt trạng thái.
+
+### 25.4 Hết phim / hết tập cuối
+
+Trình phát phim **không hề lắng nghe `AVPlayerItemDidPlayToEndTime`**. Trạng thái `isPlaying` chỉ
+được cập nhật bởi periodic time observer, mà observer này ngừng bắn ngay khi phim kết thúc — nên
+trạng thái cuối cùng đọng lại là "đang phát" và icon pause không bao giờ trở về.
+
+**Sửa:** lắng nghe thông báo kết thúc → dừng phát, đặt `didReachEnd`, đưa icon về nút phát lại
+(`arrow.counterclockwise`); bấm nút đó sẽ phát lại từ đầu. Chuyển tập hoặc tua lại thì cờ được xoá.
