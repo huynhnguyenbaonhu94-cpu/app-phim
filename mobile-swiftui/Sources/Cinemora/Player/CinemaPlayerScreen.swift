@@ -67,6 +67,11 @@ final class PlaybackController: ObservableObject {
 
     deinit {
         notificationTokens.forEach(NotificationCenter.default.removeObserver)
+        // `shutdown()` normally removes this, but the cover can be torn down
+        // without it running. Leaving a periodic observer registered on a player
+        // that outlives this controller is exactly the kind of thing that
+        // eventually blows up while a screen is being dismissed.
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
     }
 
     private func configureAudioSession() {

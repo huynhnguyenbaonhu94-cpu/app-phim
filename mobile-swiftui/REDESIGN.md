@@ -647,3 +647,51 @@ Trên iOS 16+, hack KVC vốn đã không còn tác dụng, nên bỏ nó không
 trăm poster, bộ nhớ chỉ tăng chứ không giảm. Đồng thời hạ `totalCostLimit` của cache từ 48MB
 xuống 32MB. Đây là biện pháp phòng ngừa cho kiểu văng app do hệ thống thu hồi bộ nhớ — khác với
 nguyên nhân chính ở trên.
+
+## 17. Crash khi thoát khỏi trình phát
+
+**Triệu chứng:** bấm vào một phim để xem, vào trình phát bình thường, nhưng bấm "Trở lại" để về
+màn hình app thì app văng.
+
+**Đường đi của lỗi.** Trình phát đóng lại thì `onDisappear` chạy hai việc:
+
+```swift
+.onDisappear {
+    if scenePhase == .active { playback.shutdown() }
+    forcePortrait()          // <-- chỗ này
+}
+```
+
+`forcePortrait()` gọi `forceOrientation(.portrait)`, mà hàm đó trước đây có dòng hack KVC
+`UIDevice.current.setValue(_:forKey:"orientation")`. Vậy đây **cùng một nguyên nhân với mục 16**,
+chỉ khác là điểm rơi: không phải "sau vài lần dùng" mà là ngay lần bấm trở lại đầu tiên, vì đường
+thoát luôn chạy qua đây. Bỏ dòng hack là hết.
+
+### 17.1 Vá thêm một điểm dọn dẹp của trình phát
+
+Hai lớp điều khiển trình phát lệch nhau ở `deinit`:
+
+- `TVPlaybackController` (tab Truyền hình) — dọn cả notification **và** time observer.
+- `PlaybackController` (trình phát phim) — chỉ dọn notification, **quên time observer**.
+
+`shutdown()` có gỡ time observer, nhưng cover có thể bị tháo mà `shutdown()` không chạy. Để lại
+một periodic observer đã đăng ký trên một `AVPlayer` sống lâu hơn bộ điều khiển là dạng lỗi chỉ
+nổ khi màn hình đang bị đóng. Nay `deinit` của trình phát gỡ nốt, giống hệt bản TV.
+
+### 17.2 Kết quả rà soát các điểm crash còn lại
+
+| Điểm | Trạng thái |
+| --- | --- |
+| Hack KVC xoay màn hình (3 chỗ) | đã bỏ |
+| Time observer của trình phát | đã gỡ trong `deinit` |
+| PiP: `stopPictureInPicture` | đã có guard `isPictureInPictureActive` |
+| Audio session | mọi lệnh đều `try?`, không deactivate sai chỗ |
+| Camera (simulator / máy không camera) | có guard, báo lỗi thay vì văng |
+| `force unwrap` còn lại | 3 × `URLComponents(url: baseURL)!` (baseURL hợp lệ), 2 × `layer as! AVPlayerLayer` (layer do chính lớp đó khai báo) |
+| Ghi store trong `body` | không có (không tạo vòng lặp cập nhật) |
+| Chèn store cho `@Observable` | đã phủ hết root, 5 tab, mọi sheet/cover |
+| Cache ảnh | có trần, có xử lý cảnh báo bộ nhớ |
+
+Điểm chưa chạm, chỉ nên xử lý nếu build này vẫn văng: `canStartPictureInPictureAutomaticallyFromInline = true`
+trong `PictureInPictureCoordinator` — tự động vào PiP khi video đang chiếu inline, có thể va chạm
+với lúc `AVPlayerLayer` bị tháo.
