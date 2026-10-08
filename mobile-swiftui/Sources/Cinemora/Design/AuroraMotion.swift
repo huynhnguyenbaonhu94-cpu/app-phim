@@ -281,7 +281,7 @@ struct AuroraChip: View {
 
     var body: some View {
         Button(action: action) {
-            chipLabel
+            chipBody
         }
         .buttonStyle(.auroraPress(scale: 0.94))
         .animation(Motion.gentle, value: selected)
