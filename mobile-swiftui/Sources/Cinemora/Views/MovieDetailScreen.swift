@@ -82,7 +82,11 @@ struct MovieDetailScreen: View {
             guard let playableServerIndex = loadedMovie.availableServers.firstIndex(where: { !$0.episodes.isEmpty }) else { return }
             selectedServer = playableServerIndex
             selectedEpisode = 0
-            let playableEpisode = loadedMovie.availableServers[playableServerIndex].episodes[0]
+            // Both lookups were unchecked: a stale server index, or a server
+            // whose episode list is empty, crashed right here.
+            guard loadedMovie.availableServers.indices.contains(playableServerIndex),
+                  let playableEpisode = loadedMovie.availableServers[playableServerIndex].episodes.first
+            else { return }
             store.recordLocalHistory(movie: loadedMovie, episode: playableEpisode, serverName: loadedMovie.availableServers[playableServerIndex].name)
             startPlayback()
         }

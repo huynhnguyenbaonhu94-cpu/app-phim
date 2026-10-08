@@ -817,3 +817,31 @@ trong window, nên nếu chỉ dựa vào nó thì có lúc bộ nhận diện k
 
 **Sửa kèm:** ba màn hình đang bật `.scrollDismissesKeyboard(.interactively)` — tức kéo là đóng bàn
 phím, trái với yêu cầu mới. Đã đổi thành `.never`: chỉ chạm ra ngoài mới đóng.
+
+## 22. Văng app khi trở ra từ trình phát (truy đúng nguyên nhân)
+
+**Triệu chứng:** xem phim → trở ra trang chi tiết phim → trở ra màn hình app thì bị văng.
+
+**Nguyên nhân chính xác — do bản vá ở mục 18.2 của tôi.** Để thoát trình phát mượt, tôi dời phần
+dọn dẹp nặng vào một `Task` chạy sau 350ms. Nhưng trong đó tôi gọi `saveLocalWatchProgress()`, mà
+hàm này đọc `@Environment(CinemaStore.self) private var store`. Sau khi view trình phát đã bị tháo
+khỏi cây giao diện, **environment không còn được cài đặt nữa** — đọc nó lúc đó làm SwiftUI trap và
+app biến mất ngay lập tức. Vì độ trễ đúng 350ms nên hiện tượng trông như do cú bấm trở ra ở trang
+chi tiết gây ra, trong khi thủ phạm là bước dọn dẹp của trình phát.
+
+**Cách sửa:** đọc và giữ lại mọi thứ cần dùng **trước khi** hoãn — `store`, `movie`, `episode`,
+tên server, `playback` — rồi phần chạy sau chỉ làm việc trên các tham chiếu đã giữ, không chạm vào
+view nữa. Cùng lỗi này cũng có ở chỗ lưu tùy chọn phụ đề trong trình phát (`DispatchQueue.main.async`
+đọc `store`); đã sửa tương tự.
+
+**Ba chỗ văng khác tìm được khi rà toàn app:**
+
+1. `Views/MovieDetailScreen.swift` — `availableServers[playableServerIndex].episodes[0]` không kiểm
+   tra: chỉ số server cũ, hoặc server không có tập nào, là văng. Đã thêm `guard` + dùng `.first`.
+2. `Player/CinemaPlayerScreen.swift` — `visibleSettingsTabs[0]` không kiểm tra: nếu danh sách rỗng
+   là văng. Đã đổi sang `.first`.
+3. Không còn `try!`, `as!`, `fatalError` nào trong toàn bộ mã. Hai chỗ `as! AVPlayerLayer` là an
+   toàn theo thiết kế vì lớp `UIView` đó đã khai báo `layerClass` là `AVPlayerLayer`.
+
+Đã rà thêm: mọi `deinit`, mọi `onDisappear`, mọi chỉ số mảng theo biến, và mọi closure chạy trễ
+trong app. Chỉ còn lại đúng mẫu đã sửa ở trên.

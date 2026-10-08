@@ -637,6 +637,9 @@ struct CinemaPlayerScreen: View {
             }
             .onChange(of: subtitlePreferences) { _, value in
                 guard subtitleCustomizationEnabled else { return }
+                // Read the environment while the view is still installed; inside
+                // the hop it may already be gone.
+                let store = self.store
                 DispatchQueue.main.async {
                     store.playbackDefaults.subtitlePreferences = value
                     store.savePlaybackDefaults()
@@ -671,9 +674,28 @@ struct CinemaPlayerScreen: View {
                     // Doing all of that during the animation is what made leaving
                     // the player feel sticky.
                     playback.pauseForDismissal()
+                    // Everything the deferred work needs is read *now*. Touching
+                    // the view's environment after the view has been dismantled
+                    // traps ("No Observable object of type CinemaStore found"),
+                    // and that trap is what made the app vanish on the way back
+                    // from the player. Capturing the store and the values first
+                    // keeps the deferred work independent of the view's lifetime.
+                    let store = self.store
+                    let movie = self.movie
+                    let episode = self.episode
+                    let serverName = self.server?.name
+                    let playback = self.playback
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(350))
-                        saveLocalWatchProgress()
+                        if let episode {
+                            store.recordLocalHistory(
+                                movie: movie,
+                                episode: episode,
+                                serverName: serverName,
+                                watchedSeconds: playback.currentTime,
+                                durationSeconds: playback.duration
+                            )
+                        }
                         playback.shutdown()
                     }
                 }
@@ -772,8 +794,8 @@ struct CinemaPlayerScreen: View {
 
                 Button {
                     withAnimation(Motion.sheet) {
-                        if !visibleSettingsTabs.contains(settingsTab) {
-                            settingsTab = visibleSettingsTabs[0]
+                        if !visibleSettingsTabs.contains(settingsTab), let firstTab = visibleSettingsTabs.first {
+                            settingsTab = firstTab
                         }
                         settingsOpen.toggle()
                         quickMenu = nil
