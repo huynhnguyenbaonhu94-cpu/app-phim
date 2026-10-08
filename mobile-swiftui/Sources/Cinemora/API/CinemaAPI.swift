@@ -165,9 +165,22 @@ struct CinemaAPI {
 
     // MARK: - Bình luận
 
-    func comments(slug: String) async throws -> [MovieComment] {
-        let page: MovieCommentPage = try await query("cinema.comments", input: ["slug": slug], base: Self.commentsBaseURL)
-        return page.items
+    func comments(slug: String) async throws -> MovieCommentFeed {
+        try await query("cinema.comments", input: ["slug": slug], base: Self.commentsBaseURL)
+    }
+
+    /// Chờ bình luận mới. Máy chủ giữ kết nối tối đa 25 giây và trả về ngay khi có
+    /// thay đổi, nên bình luận của người khác hiện lên gần như tức thì.
+    func watchComments(slug: String, since: Int) async throws -> MovieCommentFeed {
+        try await query("cinema.watchComments", input: ["slug": slug, "since": since], base: Self.commentsBaseURL)
+    }
+
+    func setAvatar(dataUrl: String) async throws {
+        let _: SuccessResponse = try await mutate("account.setAvatar", input: ["dataUrl": dataUrl])
+    }
+
+    func clearAvatar() async throws {
+        let _: SuccessResponse = try await mutate("account.clearAvatar", input: nil)
     }
 
     func addComment(slug: String, content: String, parentID: String?) async throws -> MovieComment? {

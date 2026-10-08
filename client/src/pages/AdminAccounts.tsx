@@ -17,11 +17,13 @@ export default function AdminAccounts() {
   const [authOpen, setAuthOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [badgeDraft, setBadgeDraft] = useState("");
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "user" as "user" | "admin" });
   const accounts = trpc.adminAccounts.list.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: 10_000, retry: false });
   const devices = trpc.adminAccounts.devices.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: 10_000, retry: false });
   const logoutAll = trpc.adminAccounts.logoutAll.useMutation({ onSuccess: () => { accounts.refetch(); if (selectedUserId) devices.refetch(); } });
   const updateAccount = trpc.adminAccounts.update.useMutation({ onSuccess: async () => { setEditingUserId(null); setForm({ name: "", email: "", password: "", role: "user" }); await accounts.refetch(); } });
+  const setBadge = trpc.adminAccounts.setBadge.useMutation({ onSuccess: async () => { await accounts.refetch(); } });
 
   if (loading) return <PageShell><main className="content-wrap inner-page"><p>Đang kiểm tra quyền truy cập…</p></main></PageShell>;
   if (!user) return <PageShell><main className="content-wrap inner-page"><div className="empty-state"><ShieldCheck size={30} /><h3>Cần đăng nhập admin</h3><p>Đăng nhập tài khoản quản trị viên để quản lý tài khoản app.</p><button className="button button-primary" onClick={() => setAuthOpen(true)}>Đăng nhập</button></div><AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /></main></PageShell>;
@@ -30,17 +32,21 @@ export default function AdminAccounts() {
   function beginEdit(account: NonNullable<typeof accounts.data>[number]) {
     setEditingUserId(account.id);
     setForm({ name: account.name || "", email: account.email || "", password: "", role: account.role === "admin" ? "admin" : "user" });
+    const profile = account as typeof account & { badge?: string | null };
+    setBadgeDraft(profile.badge || "");
   }
 
   return <PageShell><main className="content-wrap inner-page admin-accounts-page">
-    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note">Admin · cập nhật mỗi 10 giây</span></div>
+    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/movies" className="text-link">Quản lý phim</Link> · Admin · cập nhật mỗi 10 giây</span></div>
     <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý tất cả tài khoản app" action={<button className="admin-tv-refresh" onClick={() => accounts.refetch()} disabled={accounts.isFetching}><RefreshCw size={15} /></button>} />
     <p className="admin-accounts-note">Dữ liệu tài khoản, số thiết bị, yêu thích và lịch sử được lấy trực tiếp từ database. Website vẫn giữ thư viện local riêng.</p>
     <section className="admin-account-list">
-      {accounts.isLoading ? <p>Đang tải danh sách tài khoản…</p> : (accounts.data ?? []).map((account) => <article className={`admin-account-card${selectedUserId === account.id ? " is-selected" : ""}`} key={account.id}>
+      {accounts.isLoading ? <p>Đang tải danh sách tài khoản…</p> : accounts.error ? <p className="admin-tv-error">Không thể tải danh sách tài khoản: {accounts.error.message}</p> : (accounts.data ?? []).length === 0 ? <p>Chưa có tài khoản nào.</p> : (accounts.data ?? []).map((account) => {
+        const profile = account as typeof account & { avatar?: string | null; badge?: string | null };
+        return <article className={`admin-account-card${selectedUserId === account.id ? " is-selected" : ""}`} key={account.id}>
         <div className="admin-account-main">
-          <div className="admin-account-avatar"><ShieldCheck size={17} /></div>
-          <div className="admin-account-copy"><strong>{account.name || "Chưa đặt tên"}</strong><span>{account.email || "Không có email"} · ID #{account.id} · {account.role}</span><small>Đăng ký: {formatDate(account.createdAt)} · Đăng nhập gần nhất: {formatDate(account.lastSignedIn)}</small></div>
+          <div className="admin-account-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <ShieldCheck size={17} />}</div>
+          <div className="admin-account-copy"><strong>{account.name || "Chưa đặt tên"}{profile.badge && <span className="admin-account-badge">{profile.badge}</span>}</strong><span>{account.email || "Không có email"} · ID #{account.id} · {account.role}</span><small>Đăng ký: {formatDate(account.createdAt)} · Đăng nhập gần nhất: {formatDate(account.lastSignedIn)}</small></div>
           <div className="admin-account-stats"><b>{account.activeDeviceCount}/5</b><span>thiết bị</span><b>{account.favoriteCount}</b><span>yêu thích</span><b>{account.historyCount}</b><span>lịch sử</span></div>
           <button className="button button-ghost" onClick={() => setSelectedUserId(selectedUserId === account.id ? null : account.id)}><Smartphone size={14} /> Thiết bị</button>
           <button className="button button-ghost" onClick={() => editingUserId === account.id ? setEditingUserId(null) : beginEdit(account)}><Edit3 size={14} /> Sửa</button>
@@ -50,9 +56,11 @@ export default function AdminAccounts() {
           <div className="admin-account-edit-heading"><strong>Chỉnh sửa thông tin tài khoản</strong><button type="button" className="admin-tv-refresh" onClick={() => setEditingUserId(null)}><X size={14} /></button></div>
           <div className="admin-account-edit-grid"><label>Tên hiển thị<input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} required minLength={2} /></label><label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} required /></label><label>Mật khẩu mới<input type="password" value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Để trống nếu không đổi" minLength={8} /></label><label>Quyền<select value={form.role} onChange={event => setForm({ ...form, role: event.target.value as "user" | "admin" })}><option value="user">user</option><option value="admin">admin</option></select></label></div>
           <button className="button button-primary" disabled={updateAccount.isPending}><Save size={14} /> {updateAccount.isPending ? "Đang lưu…" : "Lưu thông tin"}</button>{updateAccount.error && <span className="admin-tv-error">{updateAccount.error.message}</span>}
+          <div className="admin-account-badge-editor"><label>Nhãn hiển thị (badge)<input value={badgeDraft} maxLength={24} onChange={event => setBadgeDraft(event.target.value)} placeholder="VIP, MOD, Thành viên vàng…" /><small>Nhãn này hiện cạnh tên khi người đó bình luận, ví dụ Test v1 (VIP).</small></label><button type="button" className="button button-ghost" disabled={setBadge.isPending || badgeDraft.length > 24} onClick={() => setBadge.mutate({ userId: account.id, badge: badgeDraft.trim() })}><Save size={14} /> {setBadge.isPending ? "Đang lưu…" : "Lưu badge"}</button>{setBadge.error && <span className="admin-tv-error">{setBadge.error.message}</span>}</div>
         </form>}
         {selectedUserId === account.id && <div className="admin-account-devices">{devices.isLoading ? <span>Đang tải thiết bị…</span> : (devices.data ?? []).length ? devices.data?.map(device => <div className="admin-account-device" key={device.id}><span className={`device-status-dot${device.isOnline ? " online" : ""}`} /><strong>{device.deviceName}</strong><span>{device.ipAddress} · {device.location} · {device.isOnline ? "Online" : "Offline"}</span><small>Hoạt động: {formatDate(device.lastSeenAt)} · Tạo: {formatDate(device.createdAt)}</small></div>) : <span>Không có phiên đang hoạt động.</span>}</div>}
-      </article>)}
+      </article>;
+      })}
     </section>
   </main></PageShell>;
 }

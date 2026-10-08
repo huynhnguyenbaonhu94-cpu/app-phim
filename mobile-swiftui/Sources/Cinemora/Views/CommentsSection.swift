@@ -366,6 +366,22 @@ struct CommentsSection: View {
     @ViewBuilder
     private func avatar(_ comment: MovieComment, isReply: Bool) -> some View {
         let size: CGFloat = isReply ? 26 : 34
+        if let image = AvatarImageCache.image(for: comment.avatar) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
+                .opacity(comment.isPending ? 0.6 : 1)
+                .accessibilityLabel("Ảnh đại diện của \(comment.authorName)")
+        } else {
+            initialsAvatar(comment, size: size)
+        }
+    }
+
+    @ViewBuilder
+    private func initialsAvatar(_ comment: MovieComment, size: CGFloat) -> some View {
         Text(comment.initials)
             .font(.system(size: isReply ? 11 : 14, weight: .black, design: .rounded))
             .foregroundStyle(comment.isAdmin ? .white : Color.auroraVoid)
@@ -386,21 +402,26 @@ struct CommentsSection: View {
 
     @ViewBuilder
     private func nameLabel(_ comment: MovieComment) -> some View {
-        if comment.isAdmin {
-            // Tên của quản trị viên phải nổi bật giữa danh sách.
-            Text(comment.authorName)
-                .font(.auroraLabel(12, weight: .heavy))
-                .foregroundStyle(LinearGradient(
-                    colors: [Color(red: 0.44, green: 0.72, blue: 1.0), Color(red: 0.16, green: 0.48, blue: 1.0)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                ))
-                .lineLimit(1)
-        } else {
-            Text(comment.authorName)
-                .font(.auroraLabel(12, weight: .bold))
-                .foregroundStyle(comment.isMine ? Color.auroraViolet : Color.white.opacity(0.92))
-                .lineLimit(1)
+        HStack(spacing: 6) {
+            if comment.isAdmin {
+                // Tên của quản trị viên phải nổi bật giữa danh sách.
+                Text(comment.displayName)
+                    .font(.auroraLabel(12, weight: .heavy))
+                    .foregroundStyle(LinearGradient(
+                        colors: [Color(red: 0.44, green: 0.72, blue: 1.0), Color(red: 0.16, green: 0.48, blue: 1.0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ))
+                    .lineLimit(1)
+            } else {
+                Text(comment.displayName)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(comment.isMine ? Color.auroraViolet : Color.white.opacity(0.92))
+                    .lineLimit(1)
+            }
+            if comment.isPinned {
+                statusChip(text: "ĐÃ GHIM", icon: "pin.fill", tint: Color.auroraSky)
+            }
         }
     }
 

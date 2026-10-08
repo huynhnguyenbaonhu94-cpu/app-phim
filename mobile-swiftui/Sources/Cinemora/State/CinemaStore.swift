@@ -280,6 +280,17 @@ final class CinemaStore {
         }
     }
 
+    /// Lưu ảnh đại diện mới (hoặc xoá khi truyền nil) rồi làm mới hồ sơ để mọi
+    /// nơi trong app thấy ảnh mới ngay, kể cả bình luận đã viết trước đó.
+    func updateAvatar(dataURL: String?) async throws {
+        if let dataURL {
+            try await api.setAvatar(dataUrl: dataURL)
+        } else {
+            try await api.clearAvatar()
+        }
+        await checkAccountSession()
+    }
+
     func refreshCloudLibrary() async {
         guard let expectedUserID = accountUser?.id else { return }
         do {

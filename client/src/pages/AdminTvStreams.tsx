@@ -64,7 +64,7 @@ export default function AdminTvStreams() {
   }
   const filterLabels: Array<[HealthFilter, string]> = [["all", "Tất cả"], ["online", "Đang hoạt động"], ["offline", "Gặp lỗi"], ["unknown", "Chưa xác minh"]];
   return <PageShell><main className="content-wrap inner-page admin-tv-page">
-    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/accounts" className="text-link">Quản lý tài khoản</Link> · Quản trị viên</span></div>
+    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/accounts" className="text-link">Quản lý tài khoản</Link> · <Link href="/admin/movies" className="text-link">Quản lý phim</Link> · Quản trị viên</span></div>
     <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý Truyền hình" />
     <form ref={formRef} className="admin-tv-form" onSubmit={submit}>
       <div className="admin-tv-form-heading"><div><strong>{form.id ? "Chỉnh sửa kênh" : "Thêm kênh mới"}</strong><span>Hỗ trợ HLS `.m3u8` và các URL stream trực tiếp. Sau khi lưu hệ thống sẽ tự kiểm tra.</span></div>{form.id && <button type="button" className="button button-ghost" onClick={() => setForm(emptyForm)}><X size={15} /> Hủy sửa</button>}</div>

@@ -5,6 +5,10 @@ struct RemoteAccountUser: Decodable, Identifiable, Hashable {
     let name: String?
     let email: String?
     let role: String?
+    /// Nhãn tuỳ chỉnh admin đặt, ví dụ "VIP".
+    let badge: String?
+    /// Ảnh đại diện dạng data URL.
+    let avatar: String?
     let createdAt: String?
     var displayName: String { name?.isEmpty == false ? name! : email ?? "Cinemora User" }
 }

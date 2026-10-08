@@ -134,6 +134,14 @@ struct MovieComment: Identifiable, Hashable, Codable {
     let authorID: String?
     let authorEmail: String?
     let createdAt: Date?
+    /// Nhãn tuỳ chỉnh do admin đặt, ví dụ "VIP".
+    let badge: String?
+    /// Ảnh đại diện dạng data URL, đọc trực tiếp từ hồ sơ hiện tại.
+    let avatar: String?
+    /// Quản trị viên đã ghim bình luận này lên đầu.
+    let isPinned: Bool
+    /// Người xem được phép xoá bình luận này (chủ bình luận hoặc quản trị viên).
+    let canDelete: Bool
 
     // Trạng thái phía client, không đến từ máy chủ.
     /// Bình luận chỉ nằm trên thiết bị này (máy chủ chưa hỗ trợ bình luận).
@@ -152,6 +160,12 @@ struct MovieComment: Identifiable, Hashable, Codable {
         // mình vào `CommentAuthor.fallbackAdminEmails` là huy hiệu hiện ngay.
         guard let email = authorEmail?.lowercased(), !email.isEmpty else { return false }
         return CommentAuthor.fallbackAdminEmails.contains(email)
+    }
+
+    /// Tên kèm nhãn tuỳ chỉnh, ví dụ "Test v1 (VIP)".
+    var displayName: String {
+        guard let badge, !badge.isEmpty else { return authorName }
+        return "\(authorName) (\(badge))"
     }
 
     var initials: String {
@@ -183,6 +197,10 @@ struct MovieComment: Identifiable, Hashable, Codable {
         authorID: String?,
         authorEmail: String? = nil,
         createdAt: Date?,
+        badge: String? = nil,
+        avatar: String? = nil,
+        isPinned: Bool = false,
+        canDelete: Bool = false,
         isLocal: Bool = false,
         isPending: Bool = false,
         isFailed: Bool = false,
@@ -196,6 +214,10 @@ struct MovieComment: Identifiable, Hashable, Codable {
         self.authorID = authorID
         self.authorEmail = authorEmail
         self.createdAt = createdAt
+        self.badge = badge
+        self.avatar = avatar
+        self.isPinned = isPinned
+        self.canDelete = canDelete
         self.isLocal = isLocal
         self.isPending = isPending
         self.isFailed = isFailed
@@ -213,6 +235,10 @@ struct MovieComment: Identifiable, Hashable, Codable {
         case createdAt, created_at, time, date, timestamp
         case isMine, mine, isOwner, is_owner
         case user, author_user, authorUser
+        case badge, customRole, custom_role, label
+        case avatar, userAvatar, user_avatar, photo, picture
+        case isPinned, pinned, is_pinned
+        case canDelete, can_delete
         case isLocal, isPending, isFailed
     }
 
@@ -227,6 +253,10 @@ struct MovieComment: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(authorID, forKey: .authorId)
         try container.encodeIfPresent(authorEmail, forKey: .authorEmail)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(badge, forKey: .badge)
+        try container.encodeIfPresent(avatar, forKey: .avatar)
+        try container.encode(isPinned, forKey: .isPinned)
+        try container.encode(canDelete, forKey: .canDelete)
         try container.encode(isLocal, forKey: .isLocal)
         try container.encode(isPending, forKey: .isPending)
         try container.encode(isFailed, forKey: .isFailed)
@@ -275,6 +305,46 @@ struct MovieComment: Identifiable, Hashable, Codable {
         createdAt = flexible?.date
 
         isMine = try firstValue(Bool.self, in: container, keys: [.isMine, .mine, .isOwner, .is_owner]) ?? false
+
+        let rawBadge = try firstValue(String.self, in: container, keys: [.badge, .customRole, .custom_role, .label])
+        badge = (rawBadge?.isEmpty ?? true) ? nil : rawBadge
+
+        let rawAvatar = try firstValue(String.self, in: container, keys: [.avatar, .userAvatar, .user_avatar, .photo, .picture])
+        avatar = (rawAvatar?.isEmpty ?? true) ? nil : rawAvatar
+
+        isPinned = try firstValue(Bool.self, in: container, keys: [.isPinned, .pinned, .is_pinned]) ?? false
+        canDelete = try firstValue(Bool.self, in: container, keys: [.canDelete, .can_delete]) ?? false
+    }
+}
+
+/// Kết quả của `cinema.comments` và `cinema.watchComments`.
+///
+/// `watchComments` giữ kết nối tới 25 giây và trả về ngay khi có thay đổi, nên app
+/// thấy bình luận của người khác gần như tức thì thay vì chờ hết chu kỳ làm mới.
+struct MovieCommentFeed: Decodable {
+    let items: [MovieComment]
+    let revision: Int
+    let changed: Bool
+
+    init(_ items: [MovieComment], revision: Int = 0, changed: Bool = false) {
+        self.items = items
+        self.revision = revision
+        self.changed = changed
+    }
+
+    private enum Keys: String, CodingKey { case items, revision, changed }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        revision = (try? container.decode(Int.self, forKey: .revision)) ?? 0
+        changed = (try? container.decode(Bool.self, forKey: .changed)) ?? false
+        if let list = try? container.decode(LenientCommentList.self, forKey: .items) {
+            items = list.items
+        } else if let array = try? LenientCommentList(from: decoder) {
+            items = array.items
+        } else {
+            items = []
+        }
     }
 }
 

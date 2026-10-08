@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct AccountSettingsScreen: View {
@@ -18,6 +19,10 @@ struct AccountSettingsScreen: View {
     @State private var qrActionError: String?
     @State private var lastScannedNonce: String?
     @State private var lastScannedAt = Date.distantPast
+    @State private var avatarPick: PhotosPickerItem?
+    @State private var avatarBusy = false
+    @State private var avatarNote: String?
+    @State private var avatarPreview: String?
     @FocusState private var focusedField: String?
     @Namespace private var authModeNamespace
 
@@ -245,22 +250,60 @@ struct AccountSettingsScreen: View {
             .auroraReveal(0)
 
             HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient.auroraPrimary)
-                        .frame(width: 56, height: 56)
-                        .auroraHalo(.auroraViolet, radius: 18, opacity: 0.45)
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 22, weight: .black))
-                        .foregroundStyle(Color.auroraVoid)
+                // Chạm vào ảnh để chọn ảnh đại diện mới từ thư viện.
+                PhotosPicker(selection: $avatarPick, matching: .images, photoLibrary: .shared()) {
+                    ZStack(alignment: .bottomTrailing) {
+                        AvatarCircle(
+                            raw: avatarPreview ?? user.avatar,
+                            initials: accountInitials(user),
+                            size: 56
+                        )
+                        Image(systemName: avatarBusy ? "hourglass" : "camera.fill")
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundStyle(Color.auroraVoid)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(LinearGradient.auroraPrimary))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.8))
+                            .offset(x: 2, y: 2)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(avatarBusy)
+                .onChange(of: avatarPick) { _, item in
+                    Task { await applyAvatar(item) }
+                }
+                .accessibilityLabel("Đổi ảnh đại diện")
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(user.displayName)
-                        .font(.auroraLabel(18, weight: .black))
-                        .foregroundStyle(.white)
+                    HStack(spacing: 6) {
+                        Text(user.displayName)
+                            .font(.auroraLabel(18, weight: .black))
+                            .foregroundStyle(.white)
+                        if let badge = user.badge, !badge.isEmpty {
+                            Text(badge.uppercased())
+                                .font(.system(size: 9, weight: .black, design: .rounded))
+                                .tracking(0.5)
+                                .foregroundStyle(Color.auroraMint)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.auroraMint.opacity(0.15)))
+                                .overlay(Capsule().strokeBorder(Color.auroraMint.opacity(0.35), lineWidth: 0.8))
+                        }
+                    }
                     Text(user.email ?? "")
                         .font(.auroraBody(11))
                         .foregroundStyle(Color.auroraTextSecondary)
+                    HStack(spacing: 8) {
+                        Text(avatarNote ?? "Chạm vào ảnh để đổi ảnh đại diện")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(avatarNote == nil ? Color.auroraTextSecondary : Color.auroraMint)
+                        if user.avatar != nil || avatarPreview != nil {
+                            Button("Xoá ảnh") { Task { await removeAvatar() } }
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraAmber)
+                                .disabled(avatarBusy)
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -432,6 +475,51 @@ struct AccountSettingsScreen: View {
     }
 
     // MARK: - QR helpers
+
+    private func accountInitials(_ user: RemoteAccountUser) -> String {
+        let name = user.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = name.first else { return "C" }
+        return String(first).uppercased()
+    }
+
+    private func applyAvatar(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        avatarBusy = true
+        avatarNote = nil
+        defer {
+            avatarBusy = false
+            avatarPick = nil
+        }
+        do {
+            guard
+                let data = try await item.loadTransferable(type: Data.self),
+                let image = UIImage(data: data),
+                let dataURL = AvatarUploader.dataURL(from: image)
+            else {
+                avatarNote = "Không đọc được ảnh này, bạn chọn ảnh khác nhé."
+                return
+            }
+            avatarPreview = dataURL
+            try await store.updateAvatar(dataURL: dataURL)
+            avatarNote = "Đã cập nhật ảnh đại diện."
+        } catch {
+            avatarPreview = nil
+            avatarNote = "Chưa lưu được ảnh: \(error.localizedDescription)"
+        }
+    }
+
+    private func removeAvatar() async {
+        avatarBusy = true
+        avatarNote = nil
+        defer { avatarBusy = false }
+        do {
+            avatarPreview = nil
+            try await store.updateAvatar(dataURL: nil)
+            avatarNote = "Đã xoá ảnh đại diện."
+        } catch {
+            avatarNote = "Chưa xoá được ảnh: \(error.localizedDescription)"
+        }
+    }
 
     private func handleScannedQr(_ rawValue: String) {
         let prefix = "cinemora-qr-v1:"

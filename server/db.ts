@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { migrate } from "drizzle-orm/mysql2/migrator";
 import { InsertUser, movieComments, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
@@ -111,6 +111,7 @@ export async function initializeDatabase() {
     await ensureAccountSessionsCompatibility();
     await ensureQrLoginCompatibility(db);
     await ensureMovieCommentsCompatibility(db);
+    await ensureUsersProfileCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -301,8 +302,23 @@ export type MovieCommentView = {
   createdAt: string;
   userName: string;
   userRole: string | null;
+  badge: string | null;
+  userAvatar: string | null;
   userId: string;
   isMine: boolean;
+  isPinned: boolean;
+  canDelete: boolean;
+};
+
+/** Người đang xem, dùng để tính `isMine` và `canDelete`. */
+export type CommentViewer = { id: number; isAdmin: boolean } | null;
+
+type CommentProfile = {
+  id: number;
+  name: string | null;
+  role: string | null;
+  badge: string | null;
+  avatar: string | null;
 };
 
 /** Tạo bảng nếu database chưa có, theo cùng cách các bảng mới khác đang dùng. */
@@ -315,38 +331,113 @@ export async function ensureMovieCommentsCompatibility(db: ReturnType<typeof dri
     userName varchar(160) NOT NULL,
     userRole varchar(20) NULL,
     content text NOT NULL,
+    pinnedAt timestamp NULL,
     createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX movie_comments_slug_created_idx (movieSlug, createdAt),
     INDEX movie_comments_user_created_idx (userId, createdAt)
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  for (const statement of [
+    "ALTER TABLE `movie_comments` ADD COLUMN `pinnedAt` timestamp NULL",
+    "ALTER TABLE `movie_comments` MODIFY COLUMN `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP",
+  ]) {
+    try { await db.execute(sql.raw(statement)); } catch { /* cột đã có */ }
+  }
 }
 
-function toCommentView(row: MovieCommentRow, viewerId: number | null): MovieCommentView {
+/** Thêm cột hồ sơ (ảnh đại diện, nhãn tuỳ chỉnh) cho bảng users đã tồn tại. */
+export async function ensureUsersProfileCompatibility(db: ReturnType<typeof drizzle>) {
+  const [rows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`);
+  const columns = new Set(((rows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
+  if (columns.size === 0) return;
+  const missing: Record<string, string> = {
+    avatar: "ALTER TABLE `users` ADD COLUMN `avatar` mediumtext NULL",
+    badge: "ALTER TABLE `users` ADD COLUMN `badge` varchar(40) NULL",
+  };
+  for (const [column, statement] of Object.entries(missing)) {
+    if (!columns.has(column)) {
+      await db.execute(sql.raw(statement));
+      console.log(`[Database] Added missing users column: ${column}`);
+    }
+  }
+}
+
+/**
+ * Lấy hồ sơ hiện tại của những người đã bình luận.
+ *
+ * Quyền, nhãn và ảnh đại diện được đọc lại từ bảng users ở mỗi lần tải danh sách,
+ * nên khi admin cấp quyền hay đổi nhãn thì các bình luận cũ hiện ngay, không phải
+ * bình luận lại.
+ */
+async function loadCommentProfiles(db: ReturnType<typeof drizzle>, userIds: number[]) {
+  const unique = Array.from(new Set(userIds)).filter((id) => Number.isFinite(id) && id > 0);
+  const profiles = new Map<number, CommentProfile>();
+  if (unique.length === 0) return profiles;
+  const rows = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      role: users.role,
+      badge: users.badge,
+      avatar: users.avatar,
+    })
+    .from(users)
+    .where(inArray(users.id, unique));
+  for (const row of rows) {
+    profiles.set(row.id, {
+      id: row.id,
+      name: row.name,
+      role: row.role ?? null,
+      badge: row.badge ?? null,
+      avatar: row.avatar ?? null,
+    });
+  }
+  return profiles;
+}
+
+function toCommentView(row: MovieCommentRow, profile: CommentProfile | undefined, viewer: CommentViewer): MovieCommentView {
   const createdAt = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+  const isMine = viewer !== null && row.userId === viewer.id;
   return {
     id: String(row.id),
     parentId: row.parentId === null || row.parentId === undefined ? null : String(row.parentId),
     content: row.content,
     createdAt: createdAt.toISOString(),
-    userName: row.userName,
-    userRole: row.userRole ?? null,
+    userName: profile?.name?.trim() || row.userName,
+    userRole: profile?.role ?? row.userRole,
+    badge: profile?.badge ?? null,
+    userAvatar: profile?.avatar ?? null,
     userId: String(row.userId),
-    isMine: viewerId !== null && row.userId === viewerId,
+    isMine,
+    isPinned: row.pinnedAt !== null && row.pinnedAt !== undefined,
+    canDelete: isMine || viewer?.isAdmin === true,
   };
 }
 
-export async function listMovieComments(movieSlug: string, viewerId: number | null): Promise<MovieCommentView[]> {
+export async function listMovieComments(movieSlug: string, viewer: CommentViewer): Promise<MovieCommentView[]> {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  // Lấy mới nhất trước để phim quá đông vẫn giữ được bình luận gần đây, rồi đảo lại
-  // cho app hiển thị theo thứ tự thời gian.
+  // Lấy mới nhất trước để phim quá đông vẫn giữ được bình luận gần đây.
   const rows = await db
     .select()
     .from(movieComments)
     .where(eq(movieComments.movieSlug, movieSlug))
     .orderBy(desc(movieComments.id))
     .limit(COMMENT_LIMIT);
-  return rows.reverse().map((row) => toCommentView(row, viewerId));
+  if (rows.length === 0) return [];
+  const profiles = await loadCommentProfiles(db, rows.map((row) => row.userId));
+  // Ghim lên đầu (ghim mới nhất trước), phần còn lại theo thời gian tăng dần.
+  const ordered = [...rows].sort((a, b) => {
+    const aPinned = a.pinnedAt ? 1 : 0;
+    const bPinned = b.pinnedAt ? 1 : 0;
+    if (aPinned !== bPinned) return bPinned - aPinned;
+    if (aPinned === 1 && bPinned === 1) {
+      const aTime = a.pinnedAt instanceof Date ? a.pinnedAt.getTime() : new Date(a.pinnedAt as unknown as string).getTime();
+      const bTime = b.pinnedAt instanceof Date ? b.pinnedAt.getTime() : new Date(b.pinnedAt as unknown as string).getTime();
+      return bTime - aTime;
+    }
+    return a.id - b.id;
+  });
+  return ordered.map((row) => toCommentView(row, profiles.get(row.userId), viewer));
 }
 
 export async function findMovieComment(id: number) {
@@ -365,7 +456,7 @@ export async function addMovieComment(
     userRole: string | null;
     content: string;
   },
-  viewerId: number | null,
+  viewer: CommentViewer,
 ): Promise<MovieCommentView> {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
@@ -380,7 +471,8 @@ export async function addMovieComment(
   const id = inserted[0]?.id;
   const row = id ? await findMovieComment(id) : null;
   if (!row) throw new Error("Không lưu được bình luận.");
-  return toCommentView(row, viewerId);
+  const profiles = await loadCommentProfiles(db, [row.userId]);
+  return toCommentView(row, profiles.get(row.userId), viewer);
 }
 
 /** Xoá bình luận và các trả lời trực thuộc để không còn trả lời mồ côi. */
@@ -388,4 +480,25 @@ export async function deleteMovieComment(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   await db.delete(movieComments).where(or(eq(movieComments.id, id), eq(movieComments.parentId, id)));
+}
+
+/** Ghim hoặc bỏ ghim một bình luận (chỉ admin gọi được). */
+export async function pinMovieComment(input: { id: number; pinned: boolean }): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(movieComments).set({ pinnedAt: input.pinned ? new Date() : null }).where(eq(movieComments.id, input.id));
+}
+
+/** Đặt hoặc xoá nhãn tuỳ chỉnh của một tài khoản. */
+export async function setUserBadge(userId: number, badge: string | null): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ badge }).where(eq(users.id, userId));
+}
+
+/** Đặt hoặc xoá ảnh đại diện của một tài khoản. */
+export async function setUserAvatar(userId: number, avatar: string | null): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ avatar }).where(eq(users.id, userId));
 }

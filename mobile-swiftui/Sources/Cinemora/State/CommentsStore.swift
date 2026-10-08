@@ -24,6 +24,8 @@ final class CommentsStore: ObservableObject {
     private var slug = ""
     private var pollTask: Task<Void, Never>?
     private var lastLoad = Date.distantPast
+    /// Số hiệu danh sách bình luận gần nhất máy chủ báo về.
+    private var revision = 0
 
     private var api: CinemaAPI { .shared }
 
@@ -45,14 +47,29 @@ final class CommentsStore: ObservableObject {
         isLocalOnly = false
         loadedOnce = false
         Task { await load(author: author, showSpinner: true) }
+        // Chờ bình luận mới kiểu long-poll: máy chủ giữ kết nối và trả về ngay khi
+        // có người vừa bình luận, nên không phải làm mới theo chu kỳ cố định. Nếu
+        // máy chủ không hỗ trợ (ví dụ dịch vụ PHP), tự lùi về làm mới mỗi 6 giây.
         pollTask = Task { [weak self] in
+            let current = slug
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(7))
-                guard !Task.isCancelled, let self else { return }
-                // Chế độ chỉ-trong-máy thì không có gì mới để chờ, và không làm mới
-                // khi đang có bình luận bay lên máy chủ.
-                guard !self.isLocalOnly, !self.all.contains(where: { $0.isPending }) else { continue }
-                await self.load(author: author, showSpinner: false)
+                guard let self, self.slug == current else { return }
+                if self.isLocalOnly {
+                    try? await Task.sleep(for: .seconds(5))
+                    continue
+                }
+                do {
+                    let feed = try await self.api.watchComments(slug: current, since: self.revision)
+                    guard !Task.isCancelled else { return }
+                    self.revision = feed.revision
+                    if feed.changed, !feed.items.isEmpty {
+                        self.applyRemote(feed.items, author: author)
+                    }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    await self.load(author: author, showSpinner: false)
+                    try? await Task.sleep(for: .seconds(6))
+                }
             }
         }
     }
@@ -80,33 +97,12 @@ final class CommentsStore: ObservableObject {
         let drafts = all.filter { $0.isPending || $0.isFailed }
 
         do {
-            let remote = try await api.comments(slug: slug)
+            let feed = try await api.comments(slug: slug)
             isLocalOnly = false
             error = nil
             loadedOnce = true
-
-            var merged: [MovieComment] = remote.map { comment in
-                var value = comment
-                if author.matches(value) { value.isMine = true }
-                return value
-            }
-
-            // Bình luận của chính mình đã lưu trên máy vẫn phải hiện, kể cả khi
-            // máy chủ đã có danh sách riêng.
-            let remoteIDs = Set(merged.map(\.id))
-            for item in LocalCommentStore.load(slug: slug) where !remoteIDs.contains(item.id) {
-                var value = item
-                value.isLocal = true
-                merged.insert(value, at: 0)
-            }
-
-            let mergedIDs = Set(merged.map(\.id))
-            for draft in drafts where !mergedIDs.contains(draft.id) {
-                merged.insert(draft, at: 0)
-            }
-
-            all = merged
-            rebuild()
+            revision = feed.revision
+            merge(feed.items, drafts: drafts, author: author)
         } catch {
             loadedOnce = true
             if Self.isUnsupported(error) {
@@ -119,6 +115,38 @@ final class CommentsStore: ObservableObject {
                 rebuild()
             }
         }
+    }
+
+    /// Ghép danh sách từ máy chủ với bản nháp đang gửi và bản lưu trên máy.
+    private func merge(_ remote: [MovieComment], drafts: [MovieComment], author: CommentAuthor) {
+        var merged: [MovieComment] = remote.map { comment in
+            var value = comment
+            if author.matches(value) { value.isMine = true }
+            return value
+        }
+
+        // Bình luận của chính mình đã lưu trên máy vẫn phải hiện, kể cả khi
+        // máy chủ đã có danh sách riêng.
+        let remoteIDs = Set(merged.map(\.id))
+        for item in LocalCommentStore.load(slug: slug) where !remoteIDs.contains(item.id) {
+            var value = item
+            value.isLocal = true
+            merged.insert(value, at: 0)
+        }
+
+        let mergedIDs = Set(merged.map(\.id))
+        for draft in drafts where !mergedIDs.contains(draft.id) {
+            merged.insert(draft, at: 0)
+        }
+
+        all = merged
+        rebuild()
+    }
+
+    /// Danh sách mới từ long-poll: ghép y như lúc tải lần đầu.
+    private func applyRemote(_ remote: [MovieComment], author: CommentAuthor) {
+        let drafts = all.filter { $0.isPending || $0.isFailed }
+        merge(remote, drafts: drafts, author: author)
     }
 
     /// tRPC trả 404 khi procedure không tồn tại — dấu hiệu backend chưa làm phần
@@ -188,7 +216,11 @@ final class CommentsStore: ObservableObject {
                         authorRole: resolved.authorRole ?? draft.authorRole,
                         authorID: resolved.authorID ?? draft.authorID,
                         authorEmail: resolved.authorEmail ?? draft.authorEmail,
-                        createdAt: resolved.createdAt ?? draft.createdAt
+                        createdAt: resolved.createdAt ?? draft.createdAt,
+                        badge: resolved.badge,
+                        avatar: resolved.avatar,
+                        isPinned: resolved.isPinned,
+                        canDelete: resolved.canDelete
                     )
                 }
                 resolved.isMine = true
@@ -277,19 +309,25 @@ final class CommentsStore: ObservableObject {
             }
         }
 
-        roots.sort { rank($0) > rank($1) }
+        roots.sort { lhs, rhs in
+            let left = rank(lhs)
+            let right = rank(rhs)
+            if left != right { return left > right }
+            return (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
+        }
         var built: [MovieCommentThread] = []
         for root in roots {
-            let replies = (byParent[root.id] ?? []).sorted { rank($0) < rank($1) }
+            let replies = (byParent[root.id] ?? []).sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
             built.append(MovieCommentThread(root: root, replies: replies))
         }
         threads = built
     }
 
-    /// Bình luận đang gửi hoặc gửi lỗi luôn đứng đầu; còn lại theo thời gian.
-    private func rank(_ comment: MovieComment) -> Date {
-        if comment.isPending || comment.isFailed { return .distantFuture }
-        return comment.createdAt ?? .distantPast
+    /// Thứ tự ưu tiên: đang gửi hoặc gửi lỗi (3), được ghim (2), còn lại (1).
+    private func rank(_ comment: MovieComment) -> Int {
+        if comment.isPending || comment.isFailed { return 3 }
+        if comment.isPinned { return 2 }
+        return 1
     }
 
     private func persist() {

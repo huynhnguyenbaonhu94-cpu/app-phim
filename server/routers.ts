@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, recordWatchHistory, removeFavorite, removeWatchHistory, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
+import { addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, pinMovieComment, recordWatchHistory, removeFavorite, removeWatchHistory, setUserAvatar, setUserBadge, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -13,11 +13,18 @@ import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubt
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
 import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
+import { commentRevision, publishComments, waitForComments } from "./commentFeed";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
 // Id bình luận đến từ app dưới dạng chuỗi, nhưng vẫn nhận cả số cho tiện thử nghiệm.
 const commentIdInput = z.union([z.string(), z.number()]);
+/** Rút gọn người đang xem thành thông tin cần cho danh sách bình luận. */
+function viewerOf(user: { id: number; role?: string | null } | null | undefined) {
+  if (!user) return null;
+  return { id: user.id, isAdmin: user.role === "admin" };
+}
+
 function toCommentId(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
@@ -108,7 +115,39 @@ export const appRouter = router({
     // Bình luận của phim: khách đọc được, chỉ thành viên đã đăng nhập mới gửi được.
     comments: publicProcedure
       .input(z.object({ slug: slugInput }))
-      .query(async ({ ctx, input }) => ({ items: await listMovieComments(input.slug, ctx.user?.id ?? null) })),
+      .query(async ({ ctx, input }) => ({
+        items: await listMovieComments(input.slug, viewerOf(ctx.user)),
+        revision: commentRevision(input.slug),
+      })),
+
+    // Giữ kết nối tối đa 25 giây và trả về ngay khi phim có bình luận mới, nhờ vậy
+    // app và website thấy bình luận của người khác gần như tức thì.
+    watchComments: publicProcedure
+      .input(z.object({ slug: slugInput, since: z.number().int().min(0).default(0) }))
+      .query(async ({ ctx, input }) => {
+        const waited = await waitForComments(input.slug, input.since, 25_000);
+        if (!waited.changed) return { revision: waited.revision, items: null, changed: false };
+        return {
+          revision: waited.revision,
+          items: await listMovieComments(input.slug, viewerOf(ctx.user)),
+          changed: true,
+        };
+      }),
+
+    // Ghim bình luận lên đầu danh sách (chỉ quản trị viên).
+    pinComment: adminProcedure
+      .input(z.object({ slug: slugInput, id: commentIdInput, pinned: z.boolean() }))
+      .mutation(async ({ input }) => {
+        const id = toCommentId(input.id);
+        if (!id) throw new TRPCError({ code: "BAD_REQUEST", message: "Bình luận không hợp lệ." });
+        const existing = await findMovieComment(id);
+        if (!existing || existing.movieSlug !== input.slug) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Bình luận không còn tồn tại." });
+        }
+        await pinMovieComment({ id, pinned: input.pinned });
+        publishComments(input.slug);
+        return { success: true } as const;
+      }),
 
     addComment: protectedProcedure
       .input(z.object({
@@ -132,7 +171,8 @@ export const appRouter = router({
           userName: ctx.user.name?.trim() || ctx.user.email?.split("@")[0] || "Người xem",
           userRole: ctx.user.role,
           content: input.content,
-        }, ctx.user.id);
+        }, viewerOf(ctx.user));
+        publishComments(input.slug);
         return { comment };
       }),
 
@@ -150,6 +190,7 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Bạn chỉ xoá được bình luận của mình." });
         }
         await deleteMovieComment(id);
+        publishComments(input.slug);
         return { success: true };
       }),
     submitRequest: publicProcedure.input(z.object({
@@ -225,6 +266,20 @@ export const appRouter = router({
   }),
   account: router({
     devices: protectedProcedure.query(({ ctx }) => listAccountDevices(ctx.user.id)),
+    // Ảnh đại diện: app gửi lên dạng data URL base64 đã thu nhỏ sẵn.
+    setAvatar: protectedProcedure
+      .input(z.object({
+        dataUrl: z.string().min(32).max(400_000).regex(/^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/, "Ảnh không hợp lệ."),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        enforceRateLimit(ctx.req, "account.setAvatar", 12, 60_000, String(ctx.user.id));
+        await setUserAvatar(ctx.user.id, input.dataUrl);
+        return { success: true } as const;
+      }),
+    clearAvatar: protectedProcedure.mutation(async ({ ctx }) => {
+      await setUserAvatar(ctx.user.id, null);
+      return { success: true } as const;
+    }),
     changePassword: protectedProcedure.input(changePasswordInput).mutation(async ({ ctx, input }) => {
       enforceRateLimit(ctx.req, "account.changePassword", SECURITY_LIMITS.loginPerEmail.limit, SECURITY_LIMITS.loginPerEmail.windowMs, String(ctx.user.id));
       const user = await getUserById(ctx.user.id);
@@ -278,6 +333,13 @@ export const appRouter = router({
   }),
   adminAccounts: router({
     list: adminProcedure.query(() => listAllAccountSummaries()),
+    // Nhãn tuỳ chỉnh hiện cạnh tên khi bình luận, ví dụ "VIP". Chuỗi rỗng là xoá nhãn.
+    setBadge: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), badge: z.string().trim().max(24).optional().default("") }))
+      .mutation(async ({ input }) => {
+        await setUserBadge(input.userId, input.badge.length > 0 ? input.badge : null);
+        return { success: true } as const;
+      }),
     devices: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => listAccountDevices(input.userId)),
     logoutAll: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(({ input }) => revokeAllSessions(input.userId)),
     update: adminProcedure.input(z.object({

@@ -1,4 +1,4 @@
-import { boolean, int, index, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, int, index, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -8,6 +8,10 @@ export const users = mysqlTable("users", {
   passwordHash: text("passwordHash"),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  /** Ảnh đại diện dạng data URL base64 do app gửi lên. */
+  avatar: mediumtext("avatar"),
+  /** Nhãn tuỳ chỉnh do admin đặt, hiện cạnh tên khi bình luận, ví dụ "VIP". */
+  badge: varchar("badge", { length: 40 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -171,6 +175,8 @@ export const movieComments = mysqlTable("movie_comments", {
   userName: varchar("userName", { length: 160 }).notNull(),
   userRole: varchar("userRole", { length: 20 }),
   content: text("content").notNull(),
+  /** Thời điểm admin ghim; null là chưa ghim. */
+  pinnedAt: timestamp("pinnedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   slugCreatedIndex: index("movie_comments_slug_created_idx").on(table.movieSlug, table.createdAt),

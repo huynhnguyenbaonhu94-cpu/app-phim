@@ -1202,3 +1202,79 @@ Thêm một thay đổi nhỏ: phần bỏ dấu để nhận diện tên quản
 - Kiểm tra cú pháp toàn bộ 26 tệp: 0 lỗi.
 - Ba tệp còn lại của tính năng bình luận (`CommentsStore.swift`, `CommentsSection.swift`,
   `CinemaAPI.swift`) đã rà lại theo cùng tiêu chí, không có biểu thức nào thuộc dạng này.
+
+## 32. Bình luận real-time, nhãn quyền tuỳ chỉnh, ghim bình luận, ảnh đại diện
+
+Bốn yêu cầu, làm cùng lúc ở cả ba phần: backend, app iOS và website quản trị.
+
+### 1. Real-time thật sự, không còn chờ theo chu kỳ
+
+Trước đây app làm mới danh sách mỗi 7 giây. Nay có thêm procedure `cinema.watchComments`:
+máy chủ **giữ kết nối tối đa 25 giây** và trả về ngay khi phim đó có bình luận mới, xoá
+hoặc ghim. Nhờ vậy người khác vừa bình luận là mọi người đang xem phim đó thấy ngay,
+không phải chờ hết chu kỳ.
+
+Cơ chế nằm ở `server/commentFeed.ts`: mỗi phim giữ một số `revision` tăng dần, ai đang
+chờ thì được đánh thức khi số đó đổi. Vẫn là HTTP thường nên chạy được cả trên hosting
+cPanel, không cần websocket. Bộ nhớ được giới hạn ở 500 phim gần nhất.
+
+Nếu máy chủ không hỗ trợ long-poll (ví dụ bạn dùng dịch vụ PHP thay thế), app tự lùi về
+làm mới mỗi 6 giây — tính năng vẫn chạy, chỉ chậm hơn.
+
+### 2. Cấp quyền xong là bình luận cũ đổi ngay
+
+Trước đây quyền được lưu kèm từng bình luận lúc gửi, nên cấp admin cho một tài khoản
+rồi mà bình luận cũ vẫn trắng trơn, phải bình luận mới thấy tích xanh. Nay **quyền, nhãn
+và ảnh đại diện được đọc lại từ bảng `users` mỗi lần tải danh sách**
+(`loadCommentProfiles` trong `server/db.ts`). Cấp admin, đổi nhãn hay đổi ảnh đại diện
+đều hiện lên ngay ở cả bình luận cũ, không cần bình luận lại.
+
+### 3. Nhãn quyền tuỳ chỉnh, ví dụ "VIP"
+
+- Thêm cột `users.badge` (tối đa 40 ký tự) và procedure `adminAccounts.setBadge`.
+- Trên website, trang Quản lý tài khoản có ô "Nhãn hiển thị (badge)" riêng, gợi ý
+  `VIP`, `MOD`, `Thành viên vàng`… Bấm lưu là hiện ngay.
+- Trên app, tên hiển thị thành `Test v1 (VIP)`. Nhãn và tích xanh độc lập nhau: một tài
+  khoản vừa là admin vừa có nhãn sẽ hiện cả hai.
+
+### 4. Ghim bình luận
+
+- Thêm cột `movie_comments.pinnedAt` và procedure `cinema.pinComment` (chỉ admin).
+- Bình luận đã ghim luôn nằm đầu danh sách, ghim mới nhất trước; trên app có chip
+  "ĐÃ GHIM", trên website có nút Ghim/Bỏ ghim và dấu ghim rõ ràng.
+- Sắp xếp ba mức ở app: đang gửi hoặc gửi lỗi → đã ghim → còn lại theo thời gian.
+
+### 5. Ảnh đại diện
+
+- Thêm cột `users.avatar` và hai procedure `account.setAvatar`, `account.clearAvatar`.
+- Trong app, vào **Tài khoản & thiết bị**, chạm vào ảnh đại diện để chọn ảnh mới từ thư
+  viện, có nút "Xoá ảnh". Ảnh được thu nhỏ về tối đa 256 điểm ảnh và hạ chất lượng dần
+  cho tới khi dưới 220 KB (`AvatarUploader`) trước khi gửi.
+- Ảnh được nhớ lại trong `AvatarImageCache` nên danh sách bình luận dựng lại liên tục
+  cũng không giải mã lại ảnh.
+- Đổi ảnh xong, hồ sơ được làm mới ngay nên ảnh mới hiện ở mọi nơi trong app và ở tất cả
+  bình luận người đó đã viết — kể cả trên thiết bị khác.
+
+### 6. Trang quản trị phim trên website
+
+Thêm `/admin/movies` (`client/src/pages/AdminMovies.tsx`):
+
+- Cột trái: tìm phim (debounce 350ms, từ 2 ký tự) hoặc duyệt danh sách mới cập nhật;
+  bấm để chọn phim, có nút mở phim trên web.
+- Cột phải: bình luận của phim đang chọn, **cập nhật trực tiếp** bằng chính
+  `watchComments`, kèm nút làm mới tay, nút **Ghim lên đầu / Bỏ ghim** và nút **Xoá**
+  (có xác nhận). Có nhãn "Đang cập nhật trực tiếp" và trạng thái rỗng rõ ràng.
+- Trang Quản lý tài khoản nay hiện avatar và nhãn của từng tài khoản.
+
+### Kiểm tra đã chạy
+
+- Backend: `npx tsc --noEmit` (strict) **0 lỗi**, `npx vitest run` **14/14 pass**.
+- Website: `npx tsc --noEmit` **0 lỗi**, `npx vite build` **thành công**.
+- App: kiểm cú pháp toàn bộ 27 tệp **0 lỗi**, mọi ký hiệu mới đều có định nghĩa.
+
+### Điều cần biết
+
+Long-poll, nhãn quyền, ghim và ảnh đại diện đều cần backend Node trong zip này. Dịch vụ
+PHP độc lập (`cpanel-comments/`) vẫn chỉ có bình luận cơ bản: app sẽ tự chuyển sang làm
+mới mỗi 6 giây, không có ghim và không có nhãn quyền. Website luôn dùng backend Node nên
+phần quản trị chạy đủ tính năng trong cả hai trường hợp.

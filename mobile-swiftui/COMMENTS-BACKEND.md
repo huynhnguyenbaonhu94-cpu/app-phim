@@ -146,3 +146,27 @@ chạy migration tay:
 Đã kiểm: `tsc --noEmit` sạch (chế độ strict, gồm cả `server/**`), và 14/14 test cũ vẫn
 pass. Khi dùng cách này, để trống `COMMENTS_API_BASE_URL` — bình luận chạy chung máy chủ
 chính, đồng bộ thật giữa mọi người dùng.
+## 8. Real-time, nhãn quyền, ghim, ảnh đại diện (bản mới nhất)
+
+Backend Node trong zip đã có thêm:
+
+| Procedure | Input | Quyền | Ghi chú |
+| --- | --- | --- | --- |
+| `cinema.comments` | `{ slug }` | công khai | trả `{ items, revision }` |
+| `cinema.watchComments` | `{ slug, since }` | công khai | long-poll tối đa 25 giây, trả ngay khi có thay đổi |
+| `cinema.pinComment` | `{ slug, id, pinned }` | admin | ghim lên đầu danh sách |
+| `account.setAvatar` | `{ dataUrl }` | đăng nhập | data URL base64, tối đa 400.000 ký tự |
+| `account.clearAvatar` | – | đăng nhập | xoá ảnh đại diện |
+| `adminAccounts.setBadge` | `{ userId, badge }` | admin | nhãn tuỳ chỉnh, tối đa 24 ký tự, `""` để xoá |
+
+Cột mới được tự thêm khi máy chủ khởi động: `users.avatar`, `users.badge`,
+`movie_comments.pinnedAt`.
+
+Hai điểm hành vi quan trọng:
+
+- **Quyền, nhãn và ảnh đại diện được đọc lại từ bảng `users` ở mỗi lần tải danh sách**,
+  nên cấp quyền hoặc đổi nhãn cho một tài khoản là mọi bình luận cũ của người đó đổi
+  theo ngay, không phải bình luận lại.
+- **Long-poll là HTTP thường**, không phải websocket, nên chạy được trên hosting cPanel.
+  Nếu bạn dùng dịch vụ PHP độc lập thay cho backend Node thì app tự lùi về làm mới mỗi
+  6 giây và không có ghim hay nhãn quyền.
