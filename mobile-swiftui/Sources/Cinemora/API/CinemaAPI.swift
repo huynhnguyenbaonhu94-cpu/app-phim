@@ -180,7 +180,7 @@ struct CinemaAPI {
     }
 
     func clearAvatar() async throws {
-        let _: SuccessResponse = try await mutate("account.clearAvatar", input: nil)
+        let _: SuccessResponse = try await mutate("account.clearAvatar", input: [:])
     }
 
     func addComment(slug: String, content: String, parentID: String?) async throws -> MovieComment? {

@@ -383,7 +383,7 @@ struct CommentsSection: View {
     @ViewBuilder
     private func initialsAvatar(_ comment: MovieComment, size: CGFloat) -> some View {
         Text(comment.initials)
-            .font(.system(size: isReply ? 11 : 14, weight: .black, design: .rounded))
+            .font(.system(size: max(10, size * 0.42), weight: .black, design: .rounded))
             .foregroundStyle(comment.isAdmin ? .white : Color.auroraVoid)
             .frame(width: size, height: size)
             .background {

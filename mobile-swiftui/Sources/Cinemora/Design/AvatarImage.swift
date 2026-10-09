@@ -45,7 +45,9 @@ enum AvatarUploader {
         )
         let renderer = UIGraphicsImageRenderer(size: target)
         var quality: CGFloat = 0.72
-        var data = renderer.jpegData(withCompressionQuality: quality) { _ in
+        // jpegData trả về Data không tuỳ chọn, nhưng vòng lặp bên dưới cần bản
+        // tuỳ chọn để hạ dần chất lượng, nên khai báo rõ kiểu ở đây.
+        var data: Data? = renderer.jpegData(withCompressionQuality: quality) { _ in
             image.draw(in: CGRect(origin: .zero, size: target))
         }
         while let current = data, current.count > maxBytes, quality > 0.3 {
