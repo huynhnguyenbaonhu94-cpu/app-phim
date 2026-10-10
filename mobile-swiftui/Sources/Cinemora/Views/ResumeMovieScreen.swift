@@ -85,7 +85,7 @@ struct ResumeMovieScreen: View {
             selectedEpisode = index
         }
         guard episodes.indices.contains(selectedEpisode),
-              episodes[selectedEpisode].streamURL != nil || episodes[selectedEpisode].embedURL != nil else {
+              episodes[selectedEpisode].playbackURL != nil else {
             resumeError = "Nguồn phát của tập này không còn khả dụng. Hãy mở trang chi tiết và chọn nguồn khác."
             return
         }

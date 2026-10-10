@@ -2,7 +2,6 @@ import AVKit
 import Combine
 import SwiftUI
 import UIKit
-import WebKit
 
 @MainActor
 final class PlaybackController: ObservableObject {
@@ -123,10 +122,10 @@ final class PlaybackController: ObservableObject {
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
         itemObservation = nil
-        guard let url = episode.streamURL else {
+        guard let url = episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
-            if episode.embedURL == nil { errorMessage = "Tập này hiện chưa có đường dẫn phát." }
+            errorMessage = "Tập này hiện chưa có đường dẫn phát."
             return
         }
         activeURL = url
@@ -608,13 +607,11 @@ struct CinemaPlayerScreen: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
-                } else if let embed = episode?.embedURL, selectedRelatedMovie == nil {
-                    EmbedWebPlayer(url: embed).ignoresSafeArea()
                 } else {
                     PosterArt(url: movie.backdropURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
                 }
 
-                if playback.activeURL != nil || episode?.embedURL != nil {
+                if playback.activeURL != nil {
                     VStack {
                         HStack {
                             Spacer()
@@ -644,7 +641,7 @@ struct CinemaPlayerScreen: View {
                         }
                         if let error = playback.errorMessage {
                             errorCard(error)
-                        } else if episode?.streamURL == nil && episode?.embedURL == nil {
+                        } else if episode?.playbackURL == nil {
                             errorCard("Tập này chưa có nguồn phát khả dụng.")
                         }
                         Spacer()
@@ -1921,7 +1918,7 @@ struct CinemaPlayerScreen: View {
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
-            if (playback.isPlaying || (episode?.streamURL == nil && episode?.embedURL != nil)) && picker == nil { withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false } }
+            if playback.isPlaying && picker == nil { withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false } }
         }
     }
 
@@ -1953,30 +1950,6 @@ struct CinemaPlayerScreen: View {
         guard value.isFinite, value >= 0 else { return "00:00" }
         let total = Int(value), hours = total / 3600, minutes = total / 60 % 60, seconds = total % 60
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
-    }
-}
-
-private struct EmbedWebPlayer: UIViewRepresentable {
-    let url: URL
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
-        // Without this the inline web player can never hand off to Picture in
-        // Picture, which is why PiP did nothing for streams that play in the
-        // web view.
-        configuration.allowsPictureInPictureMediaPlayback = true
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.isOpaque = false; view.backgroundColor = .black; view.scrollView.isScrollEnabled = false
-        view.load(URLRequest(url: url))
-        return view
-    }
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        if uiView.url != url { uiView.load(URLRequest(url: url)) }
-    }
-
-    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
-        uiView.stopLoading()
-        uiView.evaluateJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.removeAttribute('src'); media.load(); }); window.stop();", completionHandler: nil)
     }
 }
 

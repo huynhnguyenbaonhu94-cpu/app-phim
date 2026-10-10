@@ -7,7 +7,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource } from "../cinema";
+import { getEmbedSource, getImageSource, getStreamSource, registerStreamSource, registerStreamSourceFromPlaylist } from "../cinema";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { currentTvStreamsVersion, listTvStreams, refreshAllTvStreamsHealth, subscribeTvStreams } from "../tvStreams";
@@ -209,43 +209,93 @@ async function startServer() {
       return res.status(502).send("Image unavailable");
     }
   });
+/**
+ * Các CDN HLS (kkphimplayer, kvp726…) thường chặn theo Referer/Origin và có thể
+ * chặn cả User-Agent. Trình duyệt không tự đặt được các header này, nên máy chủ
+ * thử lần lượt vài hồ sơ rồi ghi nhớ hồ sơ chạy được cho từng host.
+ */
+const STREAM_HEADER_PROFILES: Array<{ label: string; referer?: string; origin?: string; selfOrigin?: boolean }> = [
+  { label: "khong-referer" },
+  { label: "phimapi", referer: "https://player.phimapi.com/", origin: "https://player.phimapi.com" },
+  { label: "kkphim", referer: "https://kkphim.com/", origin: "https://kkphim.com" },
+  { label: "phim1280", referer: "https://phim1280.tv/", origin: "https://phim1280.tv" },
+  { label: "cung-host", selfOrigin: true },
+];
+const streamProfileCache = new Map<string, number>();
+const STREAM_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+async function fetchStreamUpstream(url: string, range?: string): Promise<Response | null> {
+  const parsed = new URL(url);
+  const cached = streamProfileCache.get(parsed.hostname);
+  const order: number[] = [];
+  if (typeof cached === "number") order.push(cached);
+  STREAM_HEADER_PROFILES.forEach((_profile, index) => { if (!order.includes(index)) order.push(index); });
+  let lastResponse: Response | null = null;
+  for (const index of order) {
+    const profile = STREAM_HEADER_PROFILES[index];
+    const headers: Record<string, string> = { "user-agent": STREAM_USER_AGENT, accept: "*/*" };
+    if (profile.selfOrigin) {
+      headers.referer = `${parsed.origin}/`;
+      headers.origin = parsed.origin;
+    } else if (profile.referer) {
+      headers.referer = profile.referer;
+      if (profile.origin) headers.origin = profile.origin;
+    }
+    if (range) headers.range = range;
+    try {
+      const response = await fetch(url, { headers });
+      if (response.ok) {
+        streamProfileCache.set(parsed.hostname, index);
+        return response;
+      }
+      lastResponse = response;
+      console.warn(`[Cinema] ${parsed.hostname} trả ${response.status} với hồ sơ "${profile.label}".`);
+    } catch (error) {
+      console.warn(`[Cinema] Không gọi được ${parsed.hostname} với "${profile.label}":`, error instanceof Error ? error.message : error);
+    }
+  }
+  return lastResponse;
+}
+
   app.get("/api/cinema/stream/:token", async (req, res) => {
     const source = getStreamSource(req.params.token);
     if (!source) return res.status(404).send("Stream not found");
     try {
-      const requestHeaders: Record<string, string> = {
-        "user-agent": "Cinemora/1.0",
-        accept: "*/*",
-        referer: "https://player.phimapi.com/",
-        origin: "https://player.phimapi.com",
-      };
-      if (req.headers.range) requestHeaders.range = req.headers.range;
-      const upstream = await fetch(source, { headers: requestHeaders });
-      if (!upstream.ok) return res.status(502).send("Stream unavailable");
+      const upstream = await fetchStreamUpstream(source, typeof req.headers.range === "string" ? req.headers.range : undefined);
+      if (!upstream || !upstream.ok) return res.status(502).send("Stream unavailable");
       const contentType = upstream.headers.get("content-type") || "";
       const isPlaylist = source.includes(".m3u8") || contentType.includes("mpegurl") || contentType.includes("vnd.apple");
       res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
       res.setHeader("Cache-Control", isPlaylist ? "no-store" : "public, max-age=60");
       if (isPlaylist) {
         const playlist = await upstream.text();
         const rewritten = playlist.split("\n").map((line) => {
           const trimmed = line.trim();
           if (!trimmed) return line;
+          // URI="..." gồm cả EXT-X-KEY và EXT-X-MAP. Nếu tạo token thất bại thì
+          // phải giữ nguyên link gốc — trả về chuỗi rỗng sẽ làm hỏng cả playlist.
           const withUris = line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
-            const tokenUrl = registerStreamSource(new URL(uri, source).toString());
-            return `URI="${tokenUrl || ""}"`;
+            const absolute = new URL(uri, source).toString();
+            return `URI="${registerStreamSourceFromPlaylist(absolute) || absolute}"`;
           });
           if (trimmed.startsWith("#")) return withUris;
-          const tokenUrl = registerStreamSource(new URL(trimmed, source).toString());
-          return tokenUrl || "";
+          const absolute = new URL(trimmed, source).toString();
+          return registerStreamSourceFromPlaylist(absolute) || absolute;
         }).join("\n");
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
         return res.status(200).send(rewritten);
       }
+      const acceptRanges = upstream.headers.get("accept-ranges");
+      if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
+      const contentRange = upstream.headers.get("content-range");
+      if (contentRange) res.setHeader("Content-Range", contentRange);
       res.setHeader("Content-Type", contentType || "video/mp2t");
       const bytes = Buffer.from(await upstream.arrayBuffer());
       return res.status(upstream.status === 206 ? 206 : 200).send(bytes);
-    } catch {
+    } catch (error) {
+      console.warn("[Cinema] Proxy luồng phim lỗi:", error instanceof Error ? error.message : error);
       return res.status(502).send("Stream unavailable");
     }
   });
@@ -262,6 +312,37 @@ async function startServer() {
       createContext,
     })
   );
+  // Cho biết bản build đang chạy có những tính năng nào. Dùng để kiểm tra nhanh
+  // sau khi triển khai: mở /api/health và xem hasBadgeProcedure, hasWatchComments.
+  app.get("/api/health", (_req, res) => {
+    let procedures: string[] = [];
+    try {
+      const def = (appRouter as unknown as { _def?: { procedures?: Record<string, unknown> } })._def;
+      procedures = Object.keys(def?.procedures ?? {});
+    } catch {
+      procedures = [];
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      node: process.version,
+      uptimeSeconds: Math.round(process.uptime()),
+      procedureCount: procedures.length,
+      hasBadgeProcedure: procedures.includes("adminAccounts.setBadge"),
+      hasWatchComments: procedures.includes("cinema.watchComments"),
+      hasPinComment: procedures.includes("cinema.pinComment"),
+      hasAvatarProcedures: procedures.includes("account.setAvatar") && procedures.includes("account.clearAvatar"),
+    });
+  });
+  // Mọi đường dẫn /api không khớp phải trả JSON. Nếu để rơi xuống catch-all bên
+  // dưới, máy chủ sẽ trả index.html và trình duyệt báo lỗi khó hiểu:
+  // "Unexpected token '<', "<!DOCTYPE "... is not valid JSON".
+  app.use("/api", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(404).json({
+      error: "Không tìm thấy API này. Bản build đang chạy có thể chưa được cập nhật — hãy build lại và Restart ứng dụng.",
+    });
+  });
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

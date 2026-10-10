@@ -41,6 +41,8 @@ import { createPortal } from "react-dom";
 /* ─── types ─────────────────────────────────────────────── */
 interface CinemaPlayerProps {
   streamUrl?: string;
+  /** Link M3U8 gốc, không qua proxy — thử trước nếu có */
+  directStreamUrl?: string;
   fallbackEmbedUrl?: string;
   title?: string;
   posterUrl?: string;
@@ -193,9 +195,17 @@ function getFullscreenElement(): Element | null {
   );
 }
 
+/* Safari (iOS/macOS) đã có sẵn HLS; dùng trình phát gốc ổn định hơn hls.js. */
+function isAppleSafari() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /safari/i.test(ua) && !/chrome|chromium|crios|fxios|edg|android/i.test(ua);
+}
+
 /* ─── Main component ─────────────────────────────────────── */
 export function CinemaPlayer({
   streamUrl,
+  directStreamUrl,
   fallbackEmbedUrl,
   title,
   posterUrl,
@@ -236,7 +246,14 @@ export function CinemaPlayer({
   const videoRef    = useRef<HTMLVideoElement>(null);
   const adVideoRef  = useRef<HTMLVideoElement>(null);
   const hlsRef      = useRef<Hls | null>(null);
-  const streamUrlRef = useRef<string | undefined>(streamUrl);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Chỉ dùng nguồn M3U8: thử link gốc trước, rồi tới link qua proxy của máy chủ.
+  const streamSources = [directStreamUrl, streamUrl].filter(
+    (item, index, all): item is string => Boolean(item && item.trim()) && all.indexOf(item) === index
+  );
+  const activeStream = streamSources[sourceIndex];
+  const streamUrlRef = useRef<string | undefined>(activeStream);
   const wrapRef     = useRef<HTMLDivElement>(null);
   const hideTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStart  = useRef<{ x: number; y: number } | null>(null);
@@ -320,7 +337,8 @@ export function CinemaPlayer({
   }, [playing, buffering, sourceReady, error, resetHideTimer]);
 
   /* keep streamUrlRef current for retry callback */
-  useEffect(() => { streamUrlRef.current = streamUrl; }, [streamUrl]);
+  useEffect(() => { streamUrlRef.current = activeStream; }, [activeStream]);
+  useEffect(() => { setSourceIndex(0); }, [streamUrl, directStreamUrl]);
 
   /* ── onProgress pulse every 5s while playing ── */
   useEffect(() => {
@@ -339,7 +357,8 @@ export function CinemaPlayer({
   /* ── HLS setup ── */
   useEffect(() => {
     const v = videoRef.current;
-    if (!v || !streamUrl) return;
+    if (!v || !activeStream) return;
+    const hasNextSource = sourceIndex + 1 < streamSources.length;
 
     /* reset state on src change */
     setPlaying(false);
@@ -378,8 +397,10 @@ export function CinemaPlayer({
     }
 
     let fatalRetries = 0;
+    const prefersNativeHls =
+      isAppleSafari() && Boolean(v.canPlayType("application/vnd.apple.mpegurl"));
 
-    if (Hls.isSupported()) {
+    if (!prefersNativeHls && Hls.isSupported()) {
       destroyHls();
       const hls = new Hls({
         enableWorker: true,
@@ -395,12 +416,16 @@ export function CinemaPlayer({
 
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && fatalRetries < 3) {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !hasNextSource && fatalRetries < 3) {
           fatalRetries++;
           setTimeout(() => hls.startLoad(), 1000 * fatalRetries);
         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && fatalRetries < 2) {
           fatalRetries++;
           hls.recoverMediaError();
+        } else if (hasNextSource) {
+          // Nguồn đang dùng lỗi: chuyển sang nguồn M3U8 còn lại.
+          setSourceIndex(sourceIndex + 1);
+          setBuffering(true);
         } else {
           setError("Nguồn phim lỗi hoặc không khả dụng.");
           setBuffering(false);
@@ -412,7 +437,7 @@ export function CinemaPlayer({
         // Manifest parsing only proves that metadata is available. Waiting for
         // canplay prevents a false "playing" state and a frozen black frame.
       });
-      hls.loadSource(streamUrl);
+      hls.loadSource(activeStream);
 
     } else if (
       v.canPlayType("application/vnd.apple.mpegurl") ||
@@ -420,7 +445,7 @@ export function CinemaPlayer({
     ) {
       /* Safari / native fallback */
       destroyHls();
-      v.src = streamUrl;
+      v.src = activeStream;
       v.load();
       // Playback is started by the shared canplay handler below.
     } else {
@@ -430,7 +455,24 @@ export function CinemaPlayer({
 
     return destroyHls;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamUrl]);
+  }, [activeStream, reloadKey]);
+
+  /* ── Nguồn tải quá lâu mà chưa phát được: chuyển nguồn thay vì quay mãi ── */
+  useEffect(() => {
+    if (!activeStream || error || !buffering) return;
+    const timer = window.setTimeout(() => {
+      const v = videoRef.current;
+      if (v && v.currentTime >= 0.5) return;
+      if (sourceIndex + 1 < streamSources.length) {
+        setSourceIndex(sourceIndex + 1);
+        setBuffering(true);
+        return;
+      }
+      setBuffering(false);
+      setError("Nguồn phim tải quá lâu. Bấm Thử lại hoặc chọn tập khác.");
+    }, 18000);
+    return () => window.clearTimeout(timer);
+  }, [activeStream, sourceIndex, streamSources.length, error, buffering]);
 
   /* ── video event listeners ── */
   useEffect(() => {
@@ -989,7 +1031,7 @@ export function CinemaPlayer({
     );
   }
 
-  if (!streamUrl) return null;
+  if (!activeStream) return null;
 
   /* ─── Render ──────────────────────────────────────────── */
   return (
@@ -1102,29 +1144,8 @@ export function CinemaPlayer({
                     setSourceReady(false);
                     setPlaying(false);
                     userPausedRef.current = false;
-                    const v = videoRef.current;
-                    const src = streamUrlRef.current;
-                    if (!v || !src) return;
-                    if (Hls.isSupported()) {
-                      const hls = new Hls({ enableWorker: true, backBufferLength: 60 });
-                      hlsRef.current = hls;
-                      hls.attachMedia(v);
-                      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        // The shared canplay handler starts playback only after
-                        // HLS has supplied decodable media data.
-                      });
-                      hls.on(Hls.Events.ERROR, (_e: any, d: any) => {
-                        if (d.fatal) {
-                          setError("Nguồn phim lỗi hoặc không khả dụng.");
-                          setBuffering(false);
-                          setSourceReady(false);
-                        }
-                      });
-                      hls.loadSource(src);
-                    } else {
-                      v.src = src;
-                      v.load();
-                    }
+                    setSourceIndex(0);
+                    setReloadKey((key) => key + 1);
                   }}
                 >
                   <RefreshCw size={14} /> Thử lại

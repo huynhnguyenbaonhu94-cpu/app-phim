@@ -181,20 +181,27 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     let filename: String
     let embedUrl: String?
     let streamUrl: String?
+    /// Link M3U8 gốc do máy chủ trả về. CDN phim chỉ phát cho mạng người xem,
+    /// nên phải ưu tiên link này thay vì đi qua proxy của máy chủ.
+    let directStreamUrl: String?
     let subtitleUrl: String?
     let bilingualSubtitleUrl: String?
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
+    var directStreamURL: URL? { CinemaAPI.absoluteURL(directStreamUrl) }
+    /// Nguồn phát nên dùng: link M3U8 gốc trước, proxy chỉ là phương án sau.
+    var playbackURL: URL? { directStreamURL ?? streamURL }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
 
-    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, subtitleUrl: String? = nil, bilingualSubtitleUrl: String? = nil) {
+    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, directStreamUrl: String? = nil, subtitleUrl: String? = nil, bilingualSubtitleUrl: String? = nil) {
         self.name = name
         self.slug = slug
         self.filename = filename
         self.embedUrl = embedUrl
         self.streamUrl = streamUrl
+        self.directStreamUrl = directStreamUrl
         self.subtitleUrl = subtitleUrl
         self.bilingualSubtitleUrl = bilingualSubtitleUrl
     }
@@ -203,6 +210,7 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
         case name, slug, filename
         case embedUrl, embedURLSnake = "embed_url", linkEmbed = "link_embed"
         case streamUrl, streamURLSnake = "stream_url", linkM3U8 = "link_m3u8", link
+        case directStreamUrl, directStreamURLSnake = "direct_stream_url"
         case subtitleUrl, subtitleURLSnake = "subtitle_url", bilingualSubtitleUrl, bilingualSubtitleURLSnake = "bilingual_subtitle_url"
     }
 
@@ -218,6 +226,8 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
             ?? container.decodeIfPresent(String.self, forKey: .streamURLSnake)
             ?? container.decodeIfPresent(String.self, forKey: .linkM3U8)
             ?? container.decodeIfPresent(String.self, forKey: .link)
+        directStreamUrl = try container.decodeIfPresent(String.self, forKey: .directStreamUrl)
+            ?? container.decodeIfPresent(String.self, forKey: .directStreamURLSnake)
         subtitleUrl = try container.decodeIfPresent(String.self, forKey: .subtitleUrl)
             ?? container.decodeIfPresent(String.self, forKey: .subtitleURLSnake)
         bilingualSubtitleUrl = try container.decodeIfPresent(String.self, forKey: .bilingualSubtitleUrl)

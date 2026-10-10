@@ -344,21 +344,113 @@ export async function ensureMovieCommentsCompatibility(db: ReturnType<typeof dri
   }
 }
 
-/** Thêm cột hồ sơ (ảnh đại diện, nhãn tuỳ chỉnh) cho bảng users đã tồn tại. */
-export async function ensureUsersProfileCompatibility(db: ReturnType<typeof drizzle>) {
-  const [rows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`);
-  const columns = new Set(((rows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
-  if (columns.size === 0) return;
-  const missing: Record<string, string> = {
-    avatar: "ALTER TABLE `users` ADD COLUMN `avatar` mediumtext NULL",
-    badge: "ALTER TABLE `users` ADD COLUMN `badge` varchar(40) NULL",
-  };
-  for (const [column, statement] of Object.entries(missing)) {
-    if (!columns.has(column)) {
-      await db.execute(sql.raw(statement));
+/**
+ * Thêm cột hồ sơ (ảnh đại diện, nhãn tuỳ chỉnh) cho bảng users đã tồn tại.
+ *
+ * Hai điều cần cẩn thận, đều đã từng gây lỗi thật:
+ * - Bảng `users` của bản cũ có thể đang là latin1, khi đó nhãn có dấu tiếng Việt như
+ *   "Đẹp zai" bị MySQL từ chối (`Incorrect string value`). Vì vậy chuyển cả bảng sang
+ *   utf8mb4 trước, rồi tạo cột với bảng mã utf8mb4 chỉ định rõ.
+ * - Không phụ thuộc vào việc đọc INFORMATION_SCHEMA: kể cả khi truy vấn đó không trả
+ *   về gì, câu ALTER vẫn được chạy và lỗi "cột đã tồn tại" được bỏ qua.
+ *
+ * Trả về true khi cả hai cột đã sẵn sàng.
+ */
+export async function ensureUsersProfileCompatibility(db: ReturnType<typeof drizzle>): Promise<boolean> {
+  let columns = new Set<string>();
+  try {
+    const [rows] = await db.execute(sql`SELECT COLUMN_NAME, CHARACTER_SET_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`);
+    const columnRows = ((rows as unknown) as Array<{ COLUMN_NAME?: string; CHARACTER_SET_NAME?: string | null }>);
+    columns = new Set(columnRows.map((row) => row.COLUMN_NAME).filter((name): name is string => typeof name === "string"));
+    if (columnRows.some((row) => row.CHARACTER_SET_NAME === "latin1")) {
+      await db.execute(sql.raw("ALTER TABLE `users` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"));
+      console.log("[Database] Converted users charset from latin1 to utf8mb4.");
+    }
+  } catch (error) {
+    console.warn("[Database] Không đọc được thông tin cột users:", error instanceof Error ? error.message : error);
+  }
+
+  const columnsToEnsure: Array<[string, string]> = [
+    ["avatar", "mediumtext"],
+    ["badge", "varchar(40)"],
+  ];
+  for (const [column, type] of columnsToEnsure) {
+    const definition = `${type} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL`;
+    if (columns.has(column)) {
+      // Cột đã có: bảo đảm đúng bảng mã để lưu được tiếng Việt có dấu.
+      try {
+        await db.execute(sql.raw(`ALTER TABLE \`users\` MODIFY COLUMN \`${column}\` ${definition}`));
+      } catch (error) {
+        console.warn(`[Database] Không đổi được bảng mã cột users.${column}:`, error instanceof Error ? error.message : error);
+      }
+      continue;
+    }
+    try {
+      await db.execute(sql.raw(`ALTER TABLE \`users\` ADD COLUMN \`${column}\` ${definition}`));
       console.log(`[Database] Added missing users column: ${column}`);
+    } catch (error) {
+      console.warn(`[Database] Không thêm được cột users.${column}:`, error instanceof Error ? error.message : error);
     }
   }
+
+  try {
+    const [checkRows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME IN ('avatar','badge')`);
+    const found = new Set(((checkRows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
+    return found.has("avatar") && found.has("badge");
+  } catch {
+    // Không đọc được INFORMATION_SCHEMA thì coi như đã xử lý xong để không ALTER lặp lại.
+    return true;
+  }
+}
+
+let usersProfileReady = false;
+let usersProfileAttempt: Promise<boolean> | null = null;
+let usersProfileRetryAfter = 0;
+
+/**
+ * Bảo đảm cột hồ sơ đã sẵn sàng, chỉ chạy một lần cho mỗi tiến trình.
+ * Nếu lần đầu thất bại thì thử lại sau 30 giây thay vì ALTER liên tục mỗi request.
+ */
+export async function ensureUsersProfileReady(): Promise<boolean> {
+  if (usersProfileReady) return true;
+  if (usersProfileAttempt) return usersProfileAttempt;
+  if (Date.now() < usersProfileRetryAfter) return false;
+  usersProfileAttempt = (async () => {
+    const db = await getDb();
+    if (!db) return false;
+    const ready = await ensureUsersProfileCompatibility(db);
+    usersProfileReady = ready;
+    if (!ready) usersProfileRetryAfter = Date.now() + 30_000;
+    return ready;
+  })();
+  try {
+    return await usersProfileAttempt;
+  } catch (error) {
+    usersProfileRetryAfter = Date.now() + 30_000;
+    console.warn("[Database] Không sửa được hồ sơ users:", error instanceof Error ? error.message : error);
+    return false;
+  } finally {
+    usersProfileAttempt = null;
+  }
+}
+
+/** Nhận ra lỗi thiếu cột hoặc sai bảng mã để tự sửa rồi thử lại. */
+function needsProfileRepair(error: unknown): boolean {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  const text = `${error instanceof Error ? error.message : String(error)} ${cause instanceof Error ? cause.message : ""}`.toLowerCase();
+  return (
+    text.includes("unknown column") ||
+    text.includes("incorrect string value") ||
+    text.includes("er_bad_field_error") ||
+    text.includes("db_bad_field_error")
+  );
+}
+
+/** Buộc chạy lại phần sửa hồ sơ rồi trả về kết quả. */
+async function repairUsersProfile(): Promise<boolean> {
+  usersProfileReady = false;
+  usersProfileRetryAfter = 0;
+  return ensureUsersProfileReady();
 }
 
 /**
@@ -491,14 +583,30 @@ export async function pinMovieComment(input: { id: number; pinned: boolean }): P
 
 /** Đặt hoặc xoá nhãn tuỳ chỉnh của một tài khoản. */
 export async function setUserBadge(userId: number, badge: string | null): Promise<void> {
+  await ensureUsersProfileReady();
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  await db.update(users).set({ badge }).where(eq(users.id, userId));
+  const value = badge === null ? null : badge.trim();
+  try {
+    await db.update(users).set({ badge: value }).where(eq(users.id, userId));
+  } catch (error) {
+    if (!needsProfileRepair(error)) throw error;
+    // Cột hoặc bảng mã còn thiếu: sửa ngay rồi thử lại, không cần khởi động lại.
+    await repairUsersProfile();
+    await db.update(users).set({ badge: value }).where(eq(users.id, userId));
+  }
 }
 
 /** Đặt hoặc xoá ảnh đại diện của một tài khoản. */
 export async function setUserAvatar(userId: number, avatar: string | null): Promise<void> {
+  await ensureUsersProfileReady();
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  await db.update(users).set({ avatar }).where(eq(users.id, userId));
+  try {
+    await db.update(users).set({ avatar }).where(eq(users.id, userId));
+  } catch (error) {
+    if (!needsProfileRepair(error)) throw error;
+    await repairUsersProfile();
+    await db.update(users).set({ avatar }).where(eq(users.id, userId));
+  }
 }

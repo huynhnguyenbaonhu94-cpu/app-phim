@@ -106,6 +106,10 @@ export function SiteHeader() {
       </header>
 
       {mobileSearchOpen && (
+        <div className="mobile-search-backdrop" onClick={() => setMobileSearchOpen(false)} aria-hidden="true" />
+      )}
+
+      {mobileSearchOpen && (
         <form className="mobile-search-panel" onSubmit={submit} role="search">
           <Search size={18} />
           <input autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder="Tìm tên phim, diễn viên..." aria-label="Tìm kiếm phim trên mobile" />

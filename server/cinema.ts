@@ -27,7 +27,7 @@ export type Movie = {
   isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null;
   createdAt: string | null; updatedAt: string | null;
 };
-export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
+export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
 
 function cleanText(value: unknown, fallback = "") {
   if (typeof value !== "string") return fallback;
@@ -122,7 +122,23 @@ export function registerStreamSource(value: string) {
     const url = new URL(value);
     if (url.protocol !== "https:" || !Array.from(allowedStreamHosts).some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) return null;
     const token = randomUUID().replaceAll("-", "");
-    streamTokens.set(token, { url: url.toString(), expires: Date.now() + 10 * 60_000 });
+    streamTokens.set(token, { url: url.toString(), expires: Date.now() + 6 * 60 * 60_000 });
+    return apiRoute(`/api/cinema/stream/${token}`);
+  } catch { return null; }
+}
+
+/**
+ * Dùng riêng cho URI nằm trong playlist đã tải về (biến thể, khoá giải mã,
+ * segment). Vẫn bắt buộc https nhưng cho phép host ngoài danh sách CDN đã biết,
+ * vì nhiều nguồn trỏ sang host phụ. Token chỉ do máy chủ tạo từ playlist nên
+ * bên ngoài không thể lợi dụng proxy để gọi host tuỳ ý.
+ */
+export function registerStreamSourceFromPlaylist(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    const token = randomUUID().replaceAll("-", "");
+    streamTokens.set(token, { url: url.toString(), expires: Date.now() + 6 * 60 * 60_000 });
     return apiRoute(`/api/cinema/stream/${token}`);
   } catch { return null; }
 }
@@ -139,6 +155,28 @@ function streamUrlFromEmbed(value: unknown) {
     if (!allowedEmbedHosts.has(embed.hostname)) return null;
     const nested = embed.searchParams.get("url");
     return nested ? streamUrl(nested) : null;
+  } catch { return null; }
+}
+
+/**
+ * Link M3U8 gốc, không qua proxy. Trình phát web thử link này trước vì nhiều CDN
+ * chặn máy chủ nhưng cho trình duyệt tải bình thường; nếu lỗi thì mới quay về proxy.
+ */
+function directStreamUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const allowed = url.protocol === "https:" && Array.from(allowedStreamHosts).some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+    return allowed ? url.toString() : null;
+  } catch { return null; }
+}
+
+function directStreamUrlFromEmbed(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const embed = new URL(value.trim());
+    if (!allowedEmbedHosts.has(embed.hostname)) return null;
+    return directStreamUrl(embed.searchParams.get("url"));
   } catch { return null; }
 }
 
@@ -337,7 +375,8 @@ export async function getMovieDetail(rawSlug: string): Promise<MovieDetail> {
   const servers = Array.isArray(rawServers) ? rawServers.map((server: any) => ({ name: cleanText(server?.server_name, "Nguồn phim"), isAi: Boolean(server?.is_ai), episodes: Array.isArray(server?.server_data) ? server.server_data.map((episode: any) => {
     const embed = embedUrl(episode?.link_embed);
     const stream = streamUrl(episode?.link_m3u8) || streamUrlFromEmbed(episode?.link_embed);
-    return { name: cleanText(episode?.name, "Tập phim"), slug: cleanText(episode?.slug), filename: cleanText(episode?.filename), embedUrl: embed, streamUrl: stream };
+    const direct = directStreamUrl(episode?.link_m3u8) || directStreamUrlFromEmbed(episode?.link_embed);
+    return { name: cleanText(episode?.name, "Tập phim"), slug: cleanText(episode?.slug), filename: cleanText(episode?.filename), embedUrl: embed, streamUrl: stream, directStreamUrl: direct };
   }).filter((episode: any) => episode.slug) : [] })).filter((server: any) => server.episodes.length > 0) : [];
   const actorProfiles = await getMoviePeople(slug);
   return { ...movie, actorProfiles, servers };
