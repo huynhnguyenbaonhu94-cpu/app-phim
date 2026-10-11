@@ -67,7 +67,7 @@ final class DownloadManager {
     /// Thông báo cho màn cài đặt khi thư mục đổi hoặc quyền truy cập bị thu hồi.
     var folderMessage: String?
 
-    private var tasks: [String: Task<Void, Never>] = []
+    private var tasks: [String: Task<Void, Never>] = [:]
     /// Số tập tải song song tối đa.
     private let maxConcurrent = 2
     /// Thư mục mặc định nằm trong Documents để hiện được trong app Tệp.

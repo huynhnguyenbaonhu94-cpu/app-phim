@@ -1326,3 +1326,15 @@ phần quản trị chạy đủ tính năng trong cả hai trường hợp.
 - Màn cài đặt hiển thị đường dẫn đầy đủ, dung lượng đã tải và dung lượng còn trống của thiết bị.
 - Sửa lỗi phát hiện khi rà lại: thuộc tính `maxConcurrent` của hàng đợi tải chưa được chèn ở
   lần vá trước (bản build sẽ không biên dịch được), nay đã bổ sung cùng hàng đợi 2 tập song song.
+
+## 34. Sửa lỗi build IPA
+
+Ba lỗi biên dịch và cách xử lý:
+- `CinemoraApp.swift:338 cannot find 'downloads' in scope`: dòng inject trùng được thêm vào
+  `TabShell` (view không có `downloads` trong phạm vi). Gốc app đã inject sẵn cho cả cây view
+  nên dòng trùng được bỏ.
+- `DownloadManager.swift:70 use [:] to get an empty dictionary literal`: `tasks` là từ điển nên
+  khởi tạo phải là `[:]`, không phải `[]`.
+- `LibraryScreen.swift:214 argument 'reset' must precede argument 'kinds'`: Swift yêu cầu tham
+  số theo đúng thứ tự khai báo, nên lời gọi phân trang đổi thành
+  `loadCatalog(kind:reset:kinds:categories:countries:years:)`.

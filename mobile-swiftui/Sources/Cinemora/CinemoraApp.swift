@@ -335,7 +335,6 @@ private struct AuroraTabScreen: View {
                 .environment(store)
                 .environment(tvStore)
                 .environment(connectivity)
-                .environment(downloads)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
                 }

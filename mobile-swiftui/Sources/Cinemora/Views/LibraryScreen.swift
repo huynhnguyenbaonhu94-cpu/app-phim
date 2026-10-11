@@ -211,7 +211,7 @@ struct LibraryScreen: View {
                         .id("library-movie-\(movie.id)")
                         .task {
                             if store.catalogHasMore && store.catalogMovies.suffix(4).contains(where: { $0.id == movie.id }) {
-                                store.loadCatalog(kind: primaryKind, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years), reset: false)
+                                store.loadCatalog(kind: primaryKind, reset: false, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years))
                             }
                         }
                 }
