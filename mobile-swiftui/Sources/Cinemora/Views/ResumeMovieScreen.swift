@@ -38,7 +38,7 @@ struct ResumeMovieScreen: View {
         .fullScreenCover(isPresented: $showPlayer, onDismiss: { dismiss() }) {
             if let loadedMovie, !loadedMovie.availableServers.isEmpty {
                 let servers = loadedMovie.availableServers
-                CinemaPlayerScreen(movie: loadedMovie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode, subtitleCustomizationEnabled: true, resumeTime: record.watchedSeconds)
+                CinemaPlayerScreen(movie: loadedMovie, servers: servers, initialServer: selectedServer, initialEpisode: selectedEpisode, resumeTime: record.watchedSeconds, subtitleCustomizationEnabled: true)
                     .environment(store)
                     .preferredColorScheme(.dark)
             }
