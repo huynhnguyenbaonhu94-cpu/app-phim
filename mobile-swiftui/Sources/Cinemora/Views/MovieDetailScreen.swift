@@ -123,6 +123,7 @@ struct MovieDetailScreen: View {
                         servers: servers,
                         initialServer: selectedServer,
                         initialEpisode: selectedEpisode,
+                        subtitleCustomizationEnabled: true,
                         onOpenRelated: { related in relatedMovieRoute = related }
                     )
                         .preferredColorScheme(.dark)

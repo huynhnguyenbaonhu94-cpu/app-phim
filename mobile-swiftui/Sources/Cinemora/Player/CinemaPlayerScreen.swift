@@ -942,10 +942,16 @@ struct CinemaPlayerScreen: View {
         playback.playbackRate == 1 ? "1x" : "\(formatRate(playback.playbackRate))x"
     }
 
-    private var hasCurrentSubtitle: Bool {
-        guard subtitleCustomizationEnabled, let episode else { return false }
-        return episode.subtitleURL != nil
+    /// Tập hiện tại có phụ đề rời hay không (từ API hoặc nguồn admin thêm thủ công).
+    ///
+    /// Trước đây điều kiện này còn đòi `subtitleCustomizationEnabled` — cờ chỉ được
+    /// bật ở màn Truyền Hình — nên phim lẻ/phim bộ tải phụ đề rời về nhưng không bao
+    /// giờ hiện. Giờ chỉ cần tập có phụ đề là hiện.
+    private var subtitleAvailable: Bool {
+        guard let episode else { return false }
+        return episode.subtitleURL != nil || episode.bilingualSubtitleURL != nil
     }
+    private var hasCurrentSubtitle: Bool { subtitleAvailable }
 
     private var visibleSettingsTabs: [SettingsTab] {
         // Chỉ cho chỉnh phụ đề khi tập hiện tại thật sự có subtitle đã đăng.
@@ -1806,7 +1812,7 @@ struct CinemaPlayerScreen: View {
         guard let episode else { return }
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
-        subtitles.load(url: hasCurrentSubtitle ? episode.subtitleURL : nil, bilingualURL: nil)
+        subtitles.load(url: episode.subtitleURL, bilingualURL: episode.bilingualSubtitleURL)
         // Ưu tiên bản đã tải về máy để xem được khi mất mạng.
         let offlineURL = downloads.localURL(
             movieSlug: movie.slug,

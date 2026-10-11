@@ -40,7 +40,9 @@ function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpi
     sourceId: row.sourceId,
     name: row.name,
     streamUrl: row.streamUrl,
-    subtitleUrl: row.subtitleUrl ?? (row.subtitleVtt ? `/api/movies/subtitle/${row.id}.vtt` : null),
+    // Luôn phát phụ đề qua route của máy chủ: file admin tải lên dùng trực tiếp,
+    // link ngoài được máy chủ tải về và đổi sang WebVTT (AVPlayer chỉ đọc VTT).
+    subtitleUrl: row.subtitleVtt || row.subtitleUrl ? `/api/movies/subtitle/${row.id}.vtt` : null,
     hasUploadedSubtitle: Boolean(row.subtitleVtt && row.subtitleVtt.length > 0),
     sortOrder: row.sortOrder,
   };
@@ -114,14 +116,19 @@ export async function addMovieEpisode(input: {
     .select()
     .from(movieSourceEpisodes)
     .where(eq(movieSourceEpisodes.sourceId, input.sourceId));
+  const subtitleLink = input.subtitleUrl?.trim() ? input.subtitleUrl.trim() : null;
+  // Đổi ngay link SRT/VTT sang WebVTT khi lưu để lúc phát không phải chờ và
+  // không phụ thuộc việc máy chủ nguồn có cho tải lại hay không.
+  const subtitleVtt =
+    input.subtitleVtt ?? (subtitleLink ? await fetchSubtitleAsVtt(subtitleLink) : null);
   const [inserted] = await db
     .insert(movieSourceEpisodes)
     .values({
       sourceId: input.sourceId,
       name: input.name,
       streamUrl: input.streamUrl,
-      subtitleUrl: input.subtitleUrl?.trim() ? input.subtitleUrl.trim() : null,
-      subtitleVtt: input.subtitleVtt ?? null,
+      subtitleUrl: subtitleLink,
+      subtitleVtt: subtitleVtt,
       sortOrder: episodes.length,
     })
     .$returningId();
@@ -143,7 +150,12 @@ export async function updateMovieEpisode(
   if (input.name !== undefined) patch.name = input.name;
   if (input.streamUrl !== undefined) patch.streamUrl = input.streamUrl;
   if (input.subtitleUrl !== undefined) {
-    patch.subtitleUrl = input.subtitleUrl?.trim() ? input.subtitleUrl.trim() : null;
+    const link = input.subtitleUrl?.trim() ? input.subtitleUrl.trim() : null;
+    patch.subtitleUrl = link;
+    // Đổi link mới sang WebVTT; xoá link thì bỏ luôn VTT đã lưu.
+    if (input.subtitleVtt === undefined) {
+      patch.subtitleVtt = link ? await fetchSubtitleAsVtt(link) : null;
+    }
   }
   if (input.subtitleVtt !== undefined) patch.subtitleVtt = input.subtitleVtt;
   if (Object.keys(patch).length === 0) return;
@@ -192,6 +204,38 @@ export async function saveMovieSubtitle(input: {
   return { url: `${SUBTITLE_DIR}/${name}`, content };
 }
 
+/**
+ * Tải phụ đề từ link ngoài và đổi sang WebVTT.
+ *
+ * Trả về `null` khi không tải được (link sai, mạng chặn, file rỗng) để nơi gọi
+ * biết mà giữ nguyên link gốc làm phương án dự phòng.
+ */
+export async function fetchSubtitleAsVtt(link: string): Promise<string | null> {
+  const trimmed = link.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+    const response = await fetch(trimmed, { signal: controller.signal, redirect: "follow" });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const text = await response.text();
+    if (!text.trim()) return null;
+    return toWebVTT(text);
+  } catch {
+    return null;
+  }
+}
+
+/** Link phụ đề gốc của một tập, dùng khi máy chủ không tải được phụ đề. */
+export async function movieSubtitleFallbackUrl(episodeId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(movieSourceEpisodes).where(eq(movieSourceEpisodes.id, episodeId));
+  const link = row?.subtitleUrl?.trim();
+  return link && /^https?:\/\//i.test(link) ? link : null;
+}
+
 /** Nội dung VTT đã lưu của một tập, dùng cho route công khai. */
 export async function movieSubtitleVtt(episodeId: number): Promise<string | null> {
   const db = await getDb();
@@ -202,14 +246,7 @@ export async function movieSubtitleVtt(episodeId: number): Promise<string | null
     .where(eq(movieSourceEpisodes.id, episodeId));
   if (!row) return null;
   if (row.subtitleVtt && row.subtitleVtt.length > 0) return row.subtitleVtt;
-  if (row.subtitleUrl) {
-    try {
-      const response = await fetch(row.subtitleUrl);
-      if (response.ok) return toWebVTT(await response.text());
-    } catch {
-      return null;
-    }
-  }
+  if (row.subtitleUrl) return fetchSubtitleAsVtt(row.subtitleUrl);
   return null;
 }
 

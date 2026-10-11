@@ -1455,3 +1455,21 @@ không kiểm tra lại phim có đúng lọc hay không — đó là lý do l�
 - **App**: chip lọc hiện thêm số phim ("Hành động · 7.711"), tiêu đề hiện tổng số phim chính
   xác khi có, và ghi rõ "N phim đã tải" khi bộ lọc nhiều tổ hợp không có tổng.
 - **Website**: nút "Trang sau" hoạt động cả khi không có tổng số trang (dựa vào `hasNextPage`).
+
+## 42. Sửa phụ đề của nguồn thêm thủ công không hiện trong app
+
+Hai lỗi cộng lại làm phụ đề thêm tay không bao giờ hiện:
+
+- **Trình phát**: điều kiện hiện phụ đề là `hasCurrentSubtitle` nhưng hàm này còn đòi cờ
+  `subtitleCustomizationEnabled` — cờ chỉ được bật ở màn Truyền Hình. Phim lẻ/phim bộ vì
+  thế vẫn **nạp** phụ đề rời nhưng **không vẽ** ra. Giờ tách thành `subtitleAvailable`
+  (chỉ cần tập có phụ đề), và phụ đề song ngữ cũng được nạp cùng.
+- **Máy chủ**: `toEpisode` trả thẳng link ngoài admin dán vào; nếu link là SRT hoặc máy chủ
+  nguồn chặn tải thì app không đọc được gì. Giờ mọi tập có phụ đề đều trỏ về
+  `/api/movies/subtitle/<id>.vtt`: máy chủ trả VTT đã lưu, hoặc tự tải link ngoài và
+  **đổi SRT → WebVTT** rồi trả về; nếu vẫn không tải được thì `302` sang link gốc để trình
+  phát tự thử.
+- **Lúc lưu**: `addMovieEpisode` / `updateMovieEpisode` đổi link phụ đề sang WebVTT ngay khi
+  admin bấm Thêm tập, nên lúc xem không phải chờ và không phụ thuộc nguồn cho tải lại.
+  Link sai thì vẫn lưu nhưng phần phụ đề để trống.
+- Phim lẻ/phim bộ được bật luôn tuỳ chỉnh phụ đề (cỡ chữ, vị trí) như Truyền Hình.
