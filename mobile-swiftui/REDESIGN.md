@@ -1338,3 +1338,59 @@ Ba lỗi biên dịch và cách xử lý:
 - `LibraryScreen.swift:214 argument 'reset' must precede argument 'kinds'`: Swift yêu cầu tham
   số theo đúng thứ tự khai báo, nên lời gọi phân trang đổi thành
   `loadCatalog(kind:reset:kinds:categories:countries:years:)`.
+
+## 35. Tiến trình theo dung lượng, mở thư mục, dừng/xoá tải
+
+### Vì sao "Mở thư mục" báo không mở được
+`UIApplication.open` chỉ mở **tệp** hoặc **app**, không mở được URL trỏ tới một thư mục — nên
+lệnh cũ luôn thất bại. Nay dùng scheme riêng của app Tệp: `shareddocuments://<đường dẫn>`.
+Kèm hai lớp dự phòng: nút **Sao chép đường dẫn** (chắc chắn dùng được) và thông báo hướng dẫn
+cụ thể `Tệp → Trên iPhone của tôi → Cinemora → Downloads`.
+
+### Màn Đã tải xuống
+- Hai nhóm tách bạch: **Đang tải (n)** và **Đã tải (n)**, kèm hành động gộp
+  **Dừng tất cả** / **Xoá tất cả** (xoá tất cả chỉ tác động bản đã tải xong).
+- Mỗi dòng: thanh tiến trình, **dung lượng đã tải trên tổng dung lượng ước tính**
+  (`1,2 GB / 50 GB`), phần trăm, tốc độ (`MB/s`), thời gian còn lại và số phân đoạn.
+- Nút **Dừng tải** / **Tiếp tục** / **Xoá tải** cho từng tập.
+
+### Ước tính tổng dung lượng
+Playlist HLS không khai dung lượng tệp, nên tổng dung lượng được suy ra hai cách: băng thông
+`#EXT-X-STREAM-INF` nhân tổng thời lượng `#EXTINF` (trước khi tải), và số đo thực tế
+(trung bình phân đoạn × số phân đoạn) khi đã xong từ 3 phân đoạn. Nếu hai con số lệch nhau
+hơn 3 lần (playlist tổng khai băng thông cao hơn thực tế) thì tin vào số đo.
+
+## 36. Xem tệp trong app, gộp mục tải xuống, sửa lỗi khi bấm Dừng
+
+### "Mở thư mục" thay bằng trình duyệt tệp trong app
+Mở thư mục bằng app Tệp không đáng tin trên iOS (và bất khả thi với thư mục nằm ngoài vùng
+lưu của app). Nay nút **Xem tệp đã tải** mở `DownloadedFilesBrowser` — danh sách tệp ngay
+trong app: tên tệp, dung lượng, ngày tải, nút **Chia sẻ** cho từng tệp và nút **Xoá tệp**.
+Xoá tệp thì mục tương ứng trong danh sách tải xuống cũng được gỡ (tra theo `fileName`).
+
+### Gộp hai mục trong tab Lưu
+Bỏ mục riêng "Thư mục tải xuống"; tab Lưu chỉ còn **Đã tải xuống**. Toàn bộ cài đặt thư mục
+(đường dẫn hiện tại, dung lượng, chọn thư mục khác, sao chép đường dẫn, dùng mặc định) nằm
+cuối màn này trong khối `DownloadFolderSection`. Đã bỏ dòng ghi chú về quyền truy cập iOS.
+
+### Nút trở ra
+Màn Đã tải xuống có nút **Trở lại** ở đầu và vuốt từ mép trái sang phải để trở ra (dải nhận
+vuốt 16pt, không cản việc cuộn danh sách).
+
+### Sửa lỗi báo lỗi khi bấm Dừng
+Khi tác vụ tải bị huỷ, `URLSession` ném `URLError(.cancelled)` — **không phải**
+`CancellationError` như mã cũ chỉ bắt. Vì vậy lỗi rơi vào nhánh xử lý chung và hiện
+"Tải thất bại…" dù không có lỗi gì. Nay: trạng thái được đánh dấu tạm dừng **trước** khi huỷ,
+cả hai loại lỗi huỷ đều xử lý như tạm dừng, và nhánh lỗi chung từ chối ghi đè trạng thái đã
+tạm dừng. Bấm Dừng chỉ hiện "Tạm dừng", giữ nguyên tiến trình; bấm **Tiếp tục** thì ghi tiếp
+từ phân đoạn dang dở chứ không tải lại từ đầu.
+
+## 37. Xoá trong app là xoá luôn tệp trong thư mục
+
+- `DownloadManager.remove(_:)` xoá **tệp phim thật** trong thư mục tải xuống rồi mới bỏ mục
+  khỏi danh sách — người dùng không phải xoá thủ công lần nữa. "Xoá tất cả" cũng vậy.
+- Nếu tệp không xoá được (mất quyền truy cập thư mục đã chọn), mục được **giữ lại kèm lời
+  báo** thay vì biến mất trong khi tệp vẫn chiếm dung lượng máy.
+- Thêm `deleteFile(at:)` cho trình duyệt tệp: xoá tệp trước, chỉ gỡ mục khi tệp đã xoá xong,
+  báo lỗi ngay trong màn duyệt nếu thất bại.
+- Màn Đã tải xuống ghi rõ: "Xoá ở đây là xoá luôn tệp trong thư mục".

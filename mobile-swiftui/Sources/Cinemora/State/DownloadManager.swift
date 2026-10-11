@@ -49,6 +49,14 @@ final class DownloadManager {
         var totalSegments: Int
         var message: String?
         var updatedAt: Date
+        /// Tổng thời lượng phim (giây) lấy từ các thẻ #EXTINF của playlist.
+        var durationSeconds: Double?
+        /// Băng thông của biến thể đã chọn (bit/giây) lấy từ #EXT-X-STREAM-INF.
+        var bandwidth: Int?
+        /// Tốc độ tải trung bình của phiên hiện tại (byte/giây).
+        var speed: Double?
+        /// Thời điểm bắt đầu tải phiên hiện tại.
+        var startedAt: Date?
 
         var progress: Double {
             if totalSegments > 0 { return min(1, Double(doneSegments) / Double(totalSegments)) }
@@ -56,11 +64,57 @@ final class DownloadManager {
             return phase == .finished ? 1 : 0
         }
         var isRunning: Bool { phase == .downloading || phase == .waiting }
+
+        /// Tổng dung lượng ước tính của cả tập phim. Khi đã tải đủ phân đoạn thì
+        /// suy ra từ số đo thực tế (chính xác nhất); trước đó dùng băng thông khai
+        /// báo trong playlist nhân với tổng thời lượng.
+        var estimatedTotalBytes: Int64 {
+            if phase == .finished { return max(receivedBytes, 0) }
+            let measured: Int64 = (doneSegments >= 3 && receivedBytes > 0 && totalSegments > 0)
+                ? Int64(Double(receivedBytes) / Double(doneSegments) * Double(totalSegments))
+                : 0
+            var declared: Int64 = 0
+            if let bandwidth, bandwidth > 0, let durationSeconds, durationSeconds > 0 {
+                declared = Int64(Double(bandwidth) / 8 * durationSeconds)
+            }
+            if measured > 0 && declared > 0 {
+                // Playlist tổng có thể khai băng thông gấp nhiều lần thực tế; khi
+                // hai con số lệch quá xa thì tin vào số đo.
+                return measured > declared * 3 ? measured : max(measured, declared)
+            }
+            return measured > 0 ? measured : declared
+        }
+
+        /// "1,2 GB / 50 GB" — đúng dạng người dùng cần thấy.
         var sizeText: String {
             let done = ByteCountFormatter.string(fromByteCount: max(receivedBytes, 0), countStyle: .file)
-            guard totalBytes > 0 else { return done }
-            return "\(done) / \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))"
+            let total = estimatedTotalBytes
+            guard total > 0 else { return done }
+            return "\(done) / \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))"
         }
+
+        var percentText: String { "\(Int((progress * 100).rounded()))%" }
+
+        var speedText: String {
+            guard let speed, speed > 0 else { return "" }
+            return "\(ByteCountFormatter.string(fromByteCount: Int64(speed), countStyle: .file))/s"
+        }
+
+        /// Thời gian còn lại ước tính, chỉ hiện khi đã có số đo tốc độ.
+        var etaText: String {
+            guard let speed, speed > 0, phase == .downloading else { return "" }
+            let remaining = Double(estimatedTotalBytes) - Double(receivedBytes)
+            guard remaining > 0 else { return "" }
+            let seconds = Int(remaining / speed)
+            if seconds < 60 { return "còn <1 phút" }
+            if seconds < 3600 { return "còn ~\(seconds / 60) phút" }
+            let hours = seconds / 3600
+            let minutes = (seconds % 3600) / 60
+            return "còn ~\(hours) giờ \(minutes) phút"
+        }
+
+        /// Tệp có sẵn trong máy và đang chờ xoá hay không.
+        var canStart: Bool { phase == .paused || phase == .failed || phase == .waiting }
     }
 
     private(set) var items: [Item] = []
@@ -145,13 +199,44 @@ final class DownloadManager {
     }
 
     /// Mở thư mục hiện tại trong app Tệp.
+    ///
+    /// `UIApplication.open` **không** mở được URL trỏ tới một thư mục, nên phải
+    /// dùng scheme riêng của app Tệp (`shareddocuments://`) kèm đường dẫn.
     func openCurrentFolder() {
-        let url = root
+        let path = root.path
+        let isDefault = isUsingDefaultFolder
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "shareddocuments://" + encoded) else {
+            folderMessage = "Không tạo được liên kết tới thư mục này."
+            return
+        }
         UIApplication.shared.open(url, options: [:]) { [weak self] success in
             guard !success else { return }
             Task { @MainActor in
-                self?.folderMessage = "Không mở được thư mục này trong app Tệp. Bạn có thể mở bằng ứng dụng Tệp → Trên iPhone của tôi."
+                self?.folderMessage = isDefault
+                    ? "App Tệp không mở trực tiếp được thư mục này. Hãy mở app Tệp → Trên iPhone của tôi → Cinemora → Downloads."
+                    : "App Tệp không mở trực tiếp được thư mục này. Hãy mở app Tệp rồi chọn thư mục bạn đã đặt, hoặc bấm “Sao chép đường dẫn” để dán vào ô tìm kiếm."
             }
+        }
+    }
+
+    /// Sao chép đường dẫn thư mục để người dùng dán vào app Tệp.
+    func copyFolderPath() {
+        UIPasteboard.general.string = root.path
+        folderMessage = "Đã sao chép đường dẫn thư mục."
+    }
+
+    /// Tạm dừng mọi bản đang tải.
+    func pauseAll() {
+        for item in items where item.phase == .downloading || item.phase == .waiting {
+            pause(item.id)
+        }
+    }
+
+    /// Xoá toàn bộ bản đã tải xong (không đụng tới bản đang tải dở).
+    func removeFinished() {
+        for item in items where item.phase == .finished {
+            remove(item.id)
         }
     }
 
@@ -197,6 +282,9 @@ final class DownloadManager {
     }
 
     func item(id: String) -> Item? { items.first { $0.id == id } }
+
+    /// Tra mục tải xuống theo tên tệp trong thư mục.
+    func item(fileName: String) -> Item? { items.first { $0.fileName == fileName } }
 
     /// Tệp đã tải xong của một tập, dùng để phát offline.
     func localURL(movieSlug: String, episodeSlug: String) -> URL? {
@@ -274,28 +362,65 @@ final class DownloadManager {
         }
     }
 
-    func pause(_ id: String) {
-        tasks[id]?.cancel()
-        tasks[id] = nil
-        mutate(id) { item in
-            if item.phase == .downloading || item.phase == .waiting { item.phase = .paused }
+    /// Đánh dấu tạm dừng mà không báo lỗi, giữ nguyên phân đoạn đã tải.
+    private func markPaused(_ id: String) {
+        mutate(id) {
+            if $0.phase == .downloading || $0.phase == .waiting {
+                $0.phase = .paused
+                $0.message = nil
+            }
         }
         save()
     }
 
+    func pause(_ id: String) {
+        // Đổi trạng thái trước khi huỷ để tác vụ đang chạy không ghi đè thành lỗi.
+        markPaused(id)
+        tasks[id]?.cancel()
+        tasks[id] = nil
+    }
+
+    /// Tải tiếp đúng tiến trình đang dừng: tệp tạm đã có sẵn các phân đoạn đầu
+    /// nên chỉ tải những phân đoạn còn lại.
     func retry(_ id: String) {
         mutate(id) { $0.phase = .waiting; $0.message = nil }
         start(id)
     }
 
+    /// Xoá một bản tải xuống: **xoá luôn tệp phim trong thư mục tải xuống**,
+    /// người dùng không phải xoá thủ công lần nữa.
+    ///
+    /// Nếu tệp không xoá được (thường là do mất quyền truy cập thư mục đã chọn)
+    /// thì mục được giữ lại kèm lời báo, thay vì biến mất khỏi danh sách trong khi
+    /// tệp vẫn còn chiếm dung lượng máy.
     func remove(_ id: String) {
+        guard let item = item(id: id) else { return }
         tasks[id]?.cancel()
         tasks[id] = nil
-        if let item = item(id: id) {
-            try? FileManager.default.removeItem(at: root.appendingPathComponent(item.fileName))
+        let file = root.appendingPathComponent(item.fileName)
+        do {
+            if FileManager.default.fileExists(atPath: file.path) {
+                try FileManager.default.removeItem(at: file)
+            }
+        } catch {
+            mutate(id) { $0.message = "Không xoá được tệp trong thư mục tải xuống. Hãy kiểm tra quyền truy cập thư mục rồi thử lại." }
+            save()
+            return
         }
         items.removeAll { $0.id == id }
         save()
+    }
+
+    /// Xoá tệp trực tiếp theo đường dẫn (dùng cho trình duyệt tệp).
+    @discardableResult
+    func deleteFile(at url: URL) -> Bool {
+        do {
+            try FileManager.default.removeItem(at: url)
+            if let item = item(fileName: url.lastPathComponent) { remove(item.id) }
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Tải cả một nguồn: dùng cho nút "Tải tất cả" trong danh sách tập.
@@ -337,6 +462,10 @@ final class DownloadManager {
                 $0.totalSegments = resolved.segments.count
                 $0.doneSegments = written
                 $0.receivedBytes = bytes
+                $0.durationSeconds = resolved.duration > 0 ? resolved.duration : $0.durationSeconds
+                $0.bandwidth = resolved.bandwidth > 0 ? resolved.bandwidth : $0.bandwidth
+                $0.startedAt = Date()
+                $0.speed = nil
             }
 
             var index = written
@@ -361,6 +490,10 @@ final class DownloadManager {
                     $0.doneSegments = index
                     $0.receivedBytes = bytes
                     $0.totalBytes = max($0.totalBytes, bytes)
+                    if let started = $0.startedAt {
+                        let elapsed = Date().timeIntervalSince(started)
+                        if elapsed > 1 { $0.speed = Double(bytes) / elapsed }
+                    }
                 }
                 save()
             }
@@ -375,10 +508,16 @@ final class DownloadManager {
             }
             save()
         } catch is CancellationError {
-            mutate(id) { if $0.phase == .downloading { $0.phase = .paused } }
-            save()
+            // Người dùng bấm Dừng: giữ nguyên tiến trình, không phải lỗi.
+            markPaused(id)
+        } catch let error as URLError where error.code == .cancelled {
+            // URLSession huỷ tác vụ giữa chừng cũng là do bấm Dừng.
+            markPaused(id)
         } catch {
             mutate(id) {
+                // Tác vụ có thể kết thúc sau khi người dùng đã bấm Dừng; lúc đó
+                // trạng thái đã là "Tạm dừng" và không được ghi đè thành lỗi.
+                if $0.phase == .paused { return }
                 $0.phase = .failed
                 $0.message = (error as? LocalizedError)?.errorDescription ?? "Tải thất bại. Kiểm tra kết nối rồi thử lại."
             }
@@ -401,6 +540,10 @@ final class DownloadManager {
     private struct ResolvedPlaylist {
         var segments: [URL]
         var encrypted: Bool
+        /// Tổng thời lượng (giây) tính từ các thẻ #EXTINF.
+        var duration: Double
+        /// Băng thông biến thể đã chọn (bit/giây), 0 nếu playlist không khai.
+        var bandwidth: Int
     }
 
     /// Trả về danh sách phân đoạn. Nếu là playlist tổng (có `#EXT-X-STREAM-INF`)
@@ -413,11 +556,19 @@ final class DownloadManager {
         var body = text
         var currentBase = base
         var depth = 0
+        var bandwidth = 0
         while body.contains("#EXT-X-STREAM-INF") && depth < 3 {
             guard let variant = bestVariant(in: body, base: currentBase) else { break }
+            bandwidth = max(bandwidth, Self.variantBandwidth(in: body, base: currentBase))
             body = try await Self.text(from: try await fetch(variant))
             currentBase = variant
             depth += 1
+        }
+        let duration = body.split(separator: "\n").reduce(0.0) { total, rawLine in
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("#EXTINF") else { return total }
+            let value = line.dropFirst("#EXTINF:".count).split(separator: ",").first ?? ""
+            return total + (Double(value.trimmingCharacters(in: .whitespaces)) ?? 0)
         }
         let encrypted = body.split(separator: "\n").contains { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -429,7 +580,18 @@ final class DownloadManager {
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
             if let url = URL(string: line, relativeTo: currentBase)?.absoluteURL { segments.append(url) }
         }
-        return ResolvedPlaylist(segments: segments, encrypted: encrypted)
+        return ResolvedPlaylist(segments: segments, encrypted: encrypted, duration: duration, bandwidth: bandwidth)
+    }
+
+    /// Băng thông của biến thể tốt nhất trong playlist tổng.
+    nonisolated private static func variantBandwidth(in text: String, base: URL) -> Int {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        var best = 0
+        for (index, line) in lines.enumerated() where line.hasPrefix("#EXT-X-STREAM-INF") {
+            guard index + 1 < lines.count, !lines[index + 1].hasPrefix("#") else { continue }
+            best = max(best, Int(attribute("BANDWIDTH", in: line) ?? "") ?? 0)
+        }
+        return best
     }
 
     /// Biến thể có BANDWIDTH lớn nhất — tương ứng chất lượng cao nhất có sẵn.
