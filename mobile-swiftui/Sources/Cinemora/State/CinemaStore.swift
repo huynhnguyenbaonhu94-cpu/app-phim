@@ -18,6 +18,12 @@ final class CinemaStore {
     private(set) var homeHasMore = false
     private(set) var homeError: String?
     private(set) var catalogMeta: CatalogMeta?
+    /// Tổng số phim của bộ lọc hiện tại, chỉ có khi bộ lọc cho số liệu chính xác.
+    private(set) var catalogTotal: Int?
+    /// Số phim của từng lựa chọn lọc: nhóm lọc -> (giá trị -> số phim).
+    private(set) var filterCounts: [String: [String: Int]] = [:]
+    /// Nhóm lọc đang được đếm.
+    private(set) var filterCountsPending: Set<String> = []
     private(set) var searchResults: [Movie] = []
     private(set) var searchLoading = false
     private(set) var searchError: String?
@@ -521,6 +527,36 @@ final class CinemaStore {
         }
     }
 
+    /// Đếm số phim cho từng lựa chọn trong một nhóm lọc.
+    ///
+    /// Mỗi lựa chọn được máy chủ đếm bằng một truy vấn riêng nên con số là chính xác
+    /// theo đúng các bộ lọc khác đang bật.
+    func loadFilterCounts(
+        dimension: String,
+        options: [String],
+        kind: String = "latest",
+        kinds: [String] = [],
+        categories: [String] = [],
+        countries: [String] = [],
+        years: [Int] = []
+    ) {
+        guard !options.isEmpty else { return }
+        filterCountsPending.insert(dimension)
+        Task {
+            defer { filterCountsPending.remove(dimension) }
+            let counts = try? await api.filterCounts(
+                dimension: dimension,
+                options: options,
+                kind: kind,
+                kinds: kinds,
+                categories: categories,
+                countries: countries,
+                years: years
+            )
+            if let counts, !counts.isEmpty { filterCounts[dimension] = counts }
+        }
+    }
+
     func loadCatalog(
         kind: String = "latest",
         category: String? = nil,
@@ -537,14 +573,17 @@ final class CinemaStore {
         catalogRequestID += 1
         let requestID = catalogRequestID
         let nextPage = reset ? 1 : catalogPage + 1
-        if reset { catalogMovies = []; catalogPage = 1; catalogHasMore = false }
+        if reset { catalogMovies = []; catalogPage = 1; catalogHasMore = false; catalogTotal = nil }
         catalogLoading = true; catalogError = nil
         catalogTask = Task {
             defer { if requestID == catalogRequestID { catalogLoading = false } }
             do {
                 let page = try await api.list(page: nextPage, kind: kind, category: category, country: country, year: year, kinds: kinds, categories: categories, countries: countries, years: years)
                 guard !Task.isCancelled, requestID == catalogRequestID else { return }
-                if reset { catalogMovies = page.items }
+                if reset {
+                    catalogMovies = page.items
+                    catalogTotal = page.pagination?.totalItems
+                }
                 else {
                     let existing = Set(catalogMovies.map(\.slug))
                     catalogMovies.append(contentsOf: page.items.filter { !existing.contains($0.slug) })

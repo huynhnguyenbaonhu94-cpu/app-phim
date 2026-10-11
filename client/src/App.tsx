@@ -11,6 +11,7 @@ import AccountPage from "./pages/Account";
 import AdminTvStreams from "./pages/AdminTvStreams";
 import AdminAccounts from "./pages/AdminAccounts";
 import AdminMovies from "./pages/AdminMovies";
+import AdminMovieSources from "./pages/AdminMovieSources";
 
 function Router() {
   return <Switch>
@@ -20,6 +21,7 @@ function Router() {
     <Route path="/admin/tv" component={AdminTvStreams} />
     <Route path="/admin/accounts" component={AdminAccounts} />
     <Route path="/admin/movies" component={AdminMovies} />
+    <Route path="/admin/movies/sources" component={AdminMovieSources} />
     <Route path="/catalog/latest"><CatalogPage kind="latest" /></Route>
     <Route path="/catalog/single"><CatalogPage kind="single" /></Route>
     <Route path="/catalog/series"><CatalogPage kind="series" /></Route>

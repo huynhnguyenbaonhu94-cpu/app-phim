@@ -87,17 +87,17 @@ final class DownloadManager {
 
         /// "1,2 GB / 50 GB" — đúng dạng người dùng cần thấy.
         var sizeText: String {
-            let done = ByteCountFormatter.string(fromByteCount: max(receivedBytes, 0), countStyle: .file)
+            let done = auroraByteText(receivedBytes)
             let total = estimatedTotalBytes
             guard total > 0 else { return done }
-            return "\(done) / \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))"
+            return "\(done) / \(auroraByteText(total))"
         }
 
         var percentText: String { "\(Int((progress * 100).rounded()))%" }
 
         var speedText: String {
             guard let speed, speed > 0 else { return "" }
-            return "\(ByteCountFormatter.string(fromByteCount: Int64(speed), countStyle: .file))/s"
+            return "\(auroraByteText(Int64(speed)))/s"
         }
 
         /// Thời gian còn lại ước tính, chỉ hiện khi đã có số đo tốc độ.
@@ -140,12 +140,23 @@ final class DownloadManager {
     var folderName: String { isUsingDefaultFolder ? "Cinemora/Downloads" : root.lastPathComponent }
     var folderPath: String { root.path }
 
-    /// Dung lượng còn trống của thiết bị, hiển thị trong màn cài đặt.
-    var freeSpaceText: String {
+    /// Dung lượng còn trống của thiết bị (byte).
+    var freeBytes: Int64 {
         let values = try? root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        let free = values?.volumeAvailableCapacityForImportantUsage ?? 0
+        return values?.volumeAvailableCapacityForImportantUsage ?? 0
+    }
+
+    /// Dung lượng còn trống, hiển thị trong màn cài đặt.
+    var freeSpaceText: String {
+        let free = freeBytes
         guard free > 0 else { return "Không xác định" }
-        return ByteCountFormatter.string(fromByteCount: free, countStyle: .file)
+        return auroraByteText(free)
+    }
+
+    /// Dung lượng còn phải tải của mọi bản đang chờ hoặc đang tải dở.
+    private var reservedBytes: Int64 {
+        items.filter { $0.phase != .finished }
+            .reduce(Int64(0)) { $0 + max(0, $1.estimatedTotalBytes - $1.receivedBytes) }
     }
 
     init() {
@@ -215,15 +226,9 @@ final class DownloadManager {
             Task { @MainActor in
                 self?.folderMessage = isDefault
                     ? "App Tệp không mở trực tiếp được thư mục này. Hãy mở app Tệp → Trên iPhone của tôi → Cinemora → Downloads."
-                    : "App Tệp không mở trực tiếp được thư mục này. Hãy mở app Tệp rồi chọn thư mục bạn đã đặt, hoặc bấm “Sao chép đường dẫn” để dán vào ô tìm kiếm."
+                    : "App Tệp không mở trực tiếp được thư mục này. Bạn vẫn xem và xoá tệp được bằng nút “Xem tệp đã tải”."
             }
         }
-    }
-
-    /// Sao chép đường dẫn thư mục để người dùng dán vào app Tệp.
-    func copyFolderPath() {
-        UIPasteboard.general.string = root.path
-        folderMessage = "Đã sao chép đường dẫn thư mục."
     }
 
     /// Tạm dừng mọi bản đang tải.
@@ -297,7 +302,7 @@ final class DownloadManager {
     var finishedCount: Int { items.filter { $0.phase == .finished }.count }
     var activeCount: Int { items.filter(\.isRunning).count }
     var totalBytes: Int64 { items.filter { $0.phase == .finished }.reduce(0) { $0 + max($1.receivedBytes, 0) } }
-    var totalSizeText: String { ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file) }
+    var totalSizeText: String { auroraByteText(totalBytes) }
 
     // MARK: - Hàng đợi
 
@@ -424,8 +429,33 @@ final class DownloadManager {
     }
 
     /// Tải cả một nguồn: dùng cho nút "Tải tất cả" trong danh sách tập.
-    func enqueueAll(movie: Movie, serverName: String, episodes: [MovieEpisode]) {
+    /// Xếp hàng nhiều tập cùng lúc.
+    ///
+    /// Trước khi xếp hàng, ước tính dung lượng của một tập từ playlist của tập đầu
+    /// rồi nhân cho số tập; nếu vượt dung lượng trống (kể cả phần đang chờ tải) thì
+    /// không nhận và trả về lời báo để màn hình hiển thị.
+    func enqueueAll(movie: Movie, serverName: String, episodes: [MovieEpisode]) async -> String? {
+        guard let first = episodes.first(where: { $0.playbackURL != nil }) else {
+            return "Nguồn này không có tập nào tải được về máy."
+        }
+        var perEpisode: Int64 = 0
+        if let url = first.playbackURL {
+            let session = self.session
+            if let resolved = try? await Self.resolvePlaylist(
+                try await Self.text(from: try await Self.fetch(url, session: session)),
+                base: url,
+                fetch: { try await Self.fetch($0, session: session) }
+            ), resolved.bandwidth > 0, resolved.duration > 0 {
+                perEpisode = Int64(Double(resolved.bandwidth) / 8 * resolved.duration)
+            }
+        }
+        let needed = perEpisode * Int64(episodes.count)
+        let available = freeBytes
+        if needed > 0, needed + reservedBytes > available {
+            return "Không đủ dung lượng: \(episodes.count) tập cần khoảng \(auroraByteText(needed)), máy còn \(auroraByteText(available)). Hãy chọn bớt tập, hoặc tải lượng phim thấp hơn dung lượng còn trống."
+        }
         for episode in episodes { enqueue(movie: movie, serverName: serverName, episode: episode) }
+        return nil
     }
 
     // MARK: - Tải
@@ -433,7 +463,6 @@ final class DownloadManager {
     private func run(_ id: String) async {
         guard let start = item(id: id), let url = URL(string: start.sourceURL) else { return }
         do {
-            try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let session = self.session
             let playlist = try await Self.text(from: try await Self.fetch(url, session: session))
@@ -468,6 +497,20 @@ final class DownloadManager {
                 $0.speed = nil
             }
 
+            // Ước tính dung lượng tập này; thiếu chỗ thì báo rõ cần bao nhiêu, còn
+            // bao nhiêu ngay từ đầu thay vì tải dở rồi mới lỗi.
+            if let need = item(id: id)?.estimatedTotalBytes, need > 0 {
+                let free = freeBytes
+                if need + reservedBytes > free {
+                    mutate(id) {
+                        $0.phase = .failed
+                        $0.message = "Không đủ dung lượng: tập này cần khoảng \(auroraByteText(need)) nhưng máy chỉ còn \(auroraByteText(free)). Hãy xoá bớt phim đã tải hoặc chọn lượng phim thấp hơn dung lượng còn trống."
+                    }
+                    save()
+                    return
+                }
+            }
+
             var index = written
             while index < resolved.segments.count {
                 try Task.checkCancellation()
@@ -494,6 +537,15 @@ final class DownloadManager {
                         let elapsed = Date().timeIntervalSince(started)
                         if elapsed > 1 { $0.speed = Double(bytes) / elapsed }
                     }
+                }
+                // Máy sắp hết chỗ thì dừng kèm lời báo rõ ràng.
+                if freeBytes < 300 * 1024 * 1024 {
+                    mutate(id) {
+                        $0.phase = .failed
+                        $0.message = "Máy đã hết dung lượng trống. Hãy xoá bớt phim đã tải rồi bấm Tiếp tục để tải tiếp."
+                    }
+                    save()
+                    return
                 }
                 save()
             }

@@ -90,7 +90,7 @@ struct DownloadsScreen: View {
         VStack(alignment: .leading, spacing: 8) {
             SectionEyebrow(text: "XEM KHI KHÔNG CÓ WIFI")
             AuroraGradientText(text: "Đã tải xuống", font: .auroraDisplay(28))
-            Text("Phim đã tải nằm trong bộ nhớ máy, phát được khi mất mạng. Chỉ nguồn không mã hoá mới tải được.")
+            Text("Phim đã tải nằm trong bộ nhớ máy, phát được khi mất mạng.")
                 .font(.auroraBody(12))
                 .foregroundStyle(Color.auroraTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -353,6 +353,7 @@ struct DownloadSheet: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer: Int
+    @State private var storageWarning: String?
 
     init(movie: Movie, servers: [MovieServer], initialServer: Int = 0) {
         self.movie = movie
@@ -370,11 +371,6 @@ struct DownloadSheet: View {
                 CinemaBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Chọn nguồn rồi tải từng tập về máy. Nguồn mã hoá AES-128 sẽ báo không hỗ trợ.")
-                            .font(.auroraBody(12))
-                            .foregroundStyle(Color.auroraTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
                         ScrollView(.horizontal) {
                             HStack(spacing: 8) {
                                 ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
@@ -396,8 +392,19 @@ struct DownloadSheet: View {
                         .scrollIndicators(.hidden)
 
                         if let server = servers.indices.contains(selectedServer) ? servers[selectedServer] : nil {
+                            if let storageWarning {
+                                Text(storageWarning)
+                                    .font(.auroraBody(11))
+                                    .foregroundStyle(Color.auroraAmber)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .auroraCard(cornerRadius: 14, tint: .auroraAmber)
+                            }
                             Button {
-                                downloads.enqueueAll(movie: movie, serverName: server.name, episodes: episodes)
+                                Task {
+                                    storageWarning = await downloads.enqueueAll(movie: movie, serverName: server.name, episodes: episodes)
+                                }
                             } label: {
                                 HStack(spacing: 7) {
                                     Image(systemName: "arrow.down.circle.fill").font(.system(size: 13, weight: .bold))

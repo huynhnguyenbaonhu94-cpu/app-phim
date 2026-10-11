@@ -141,6 +141,26 @@ struct CinemaAPI {
         try await query("cinema.detail", input: ["slug": slug])
     }
 
+    /// Đếm số phim của từng lựa chọn lọc (thể loại / quốc gia / năm) theo bộ lọc đang bật.
+    func filterCounts(
+        dimension: String,
+        options: [String],
+        kind: String = "latest",
+        kinds: [String] = [],
+        categories: [String] = [],
+        countries: [String] = [],
+        years: [Int] = []
+    ) async throws -> [String: Int] {
+        guard !options.isEmpty else { return [:] }
+        let serverKind = kind == "ongoing" || kind == "completed" ? "series" : kind
+        var input: [String: Any] = ["kind": serverKind, "dimension": dimension, "options": options]
+        if !kinds.isEmpty { input["kinds"] = kinds }
+        if !categories.isEmpty { input["categories"] = categories }
+        if !countries.isEmpty { input["countries"] = countries }
+        if !years.isEmpty { input["years"] = years }
+        return try await query("cinema.filterCounts", input: input)
+    }
+
     func meta() async throws -> CatalogMeta {
         try await query("cinema.meta", input: nil)
     }

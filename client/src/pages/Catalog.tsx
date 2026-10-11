@@ -20,7 +20,10 @@ export function CatalogPage({ kind }: { kind: CatalogKind }) {
   const query = trpc.cinema.list.useQuery({ kind, page, category, country, year }, { staleTime: 120_000, placeholderData: keepPreviousData, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: 1 });
   const meta = trpc.cinema.meta.useQuery(undefined, { staleTime: 300_000, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: 1 });
   const items: MovieCardMovie[] = query.data?.items || [];
-  const totalPages = Number(query.data?.pagination?.totalPages || query.data?.pagination?.pageRanges || 1);
+  const pageInfo: any = query.data?.pagination || {};
+  const totalPages = Number(pageInfo.totalPages || pageInfo.pageRanges || 1);
+  // Bộ lọc nhiều lựa chọn không có tổng số trang: vẫn cho sang trang khi nguồn còn dữ liệu.
+  const canGoNext = pageInfo.hasNextPage === true || page < totalPages;
   function setFilter(key: string, value: string) { const next = { ...filters, [key]: value, ...(key !== "page" ? { page: "1" } : {}) }; setFilters(next); const nextParams = new URLSearchParams(); Object.entries(next).forEach(([filterKey, filterValue]) => { if (filterValue) nextParams.set(filterKey, filterValue); }); startTransition(() => navigate(`/catalog/${kind}?${nextParams.toString()}`)); if (key === "page") window.scrollTo({ top: 0, behavior: "smooth" }); }
   return <PageShell><main className="content-wrap inner-page"><div className="page-topline"><Link href="/" className="back-link"><ArrowLeft size={15} /> Trang chủ</Link><span className="result-note">{query.isLoading ? "Đang tải thư viện..." : `${query.data?.pagination?.totalItems || items.length} tựa phim`}</span></div><SectionHeading eyebrow="THƯ VIỆN CINEMORA" title={labels[kind]} action={<div className="filter-icon"><SlidersHorizontal size={16} /> Bộ lọc</div>} /><div className="filter-row"><div className="filter-label"><Filter size={14} /> Lọc nhanh</div><SearchableSelect value={category || ""} onChange={(value) => setFilter("category", value)} placeholder="Tất cả thể loại" searchPlaceholder="Tìm thể loại..." ariaLabel="Lọc thể loại" options={(meta.data?.categories || []).map((item: { name: string; slug: string }) => ({ value: item.slug, label: item.name }))} /><SearchableSelect value={country || ""} onChange={(value) => setFilter("country", value)} placeholder="Tất cả quốc gia" searchPlaceholder="Tìm quốc gia..." ariaLabel="Lọc quốc gia" options={(meta.data?.countries || []).map((item: { name: string; slug: string }) => ({ value: item.slug, label: item.name }))} /><SearchableSelect value={year ? String(year) : ""} onChange={(value) => setFilter("year", value)} placeholder="Mọi năm" searchPlaceholder="Tìm năm..." ariaLabel="Lọc năm" options={(meta.data?.years || []).map((item: number) => ({ value: String(item), label: String(item) }))} compact includePlaceholderOption /></div>{query.isError ? <div className="empty-state"><SearchIcon size={30} /><h3>Không thể tải thư viện</h3><p>Thử tải lại sau ít phút nhé.</p></div> : <div className="movie-grid catalog-grid">{query.isLoading ? Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />) : items.map((movie, i) => <MovieCard key={movie.id} movie={movie} index={i} />)}</div>}{totalPages > 1 && <div className="pagination">
   <button className="pagination-button" aria-label="Trang trước" disabled={page <= 1} onClick={() => setFilter("page", String(page - 1))}><ChevronLeft size={15} /></button>
@@ -32,7 +35,7 @@ export function CatalogPage({ kind }: { kind: CatalogKind }) {
       <button key={itemPage} aria-label={`Trang ${itemPage}`} className={`pagination-num${itemPage === page ? " active" : ""}`} onClick={() => itemPage !== page && setFilter("page", String(itemPage))}>{itemPage}</button>
     ));
   })()}
-  <button className="pagination-button" aria-label="Trang sau" disabled={page >= totalPages} onClick={() => setFilter("page", String(page + 1))}><ChevronRight size={15} /></button>
+  <button className="pagination-button" aria-label="Trang sau" disabled={!canGoNext} onClick={() => setFilter("page", String(page + 1))}><ChevronRight size={15} /></button>
 </div>}</main></PageShell>;
 }
 

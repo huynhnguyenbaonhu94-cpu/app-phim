@@ -111,6 +111,7 @@ export async function initializeDatabase() {
     await ensureAccountSessionsCompatibility();
     await ensureQrLoginCompatibility(db);
     await ensureMovieCommentsCompatibility(db);
+    await ensureMovieSourcesCompatibility(db);
     await ensureUsersProfileCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
@@ -356,6 +357,14 @@ export async function ensureMovieCommentsCompatibility(db: ReturnType<typeof dri
  *
  * Trả về true khi cả hai cột đã sẵn sàng.
  */
+/**
+ * Bảng nguồn/tập do admin thêm thủ công cho phim lấy từ API.
+ */
+export async function ensureMovieSourcesCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS movie_sources (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, movieSlug varchar(200) NOT NULL, name varchar(120) NOT NULL, sortOrder int NOT NULL DEFAULT 0, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX movie_sources_slug_idx (movieSlug)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS movie_source_episodes (id int NOT NULL AUTO_INCREMENT PRIMARY KEY, sourceId int NOT NULL, name varchar(180) NOT NULL, streamUrl text NOT NULL, subtitleUrl text NULL, subtitleVtt mediumtext NULL, sortOrder int NOT NULL DEFAULT 0, createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX movie_source_episodes_source_idx (sourceId)) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
 export async function ensureUsersProfileCompatibility(db: ReturnType<typeof drizzle>): Promise<boolean> {
   let columns = new Set<string>();
   try {

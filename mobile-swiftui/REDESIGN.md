@@ -1404,3 +1404,54 @@ khai báo `FolderPicker` (và `DownloadFolderSection`, `DownloadedFilesBrowser`)
 Cách xử lý: **trả lại tên tệp gốc** `Views/DownloadFolderScreen.swift` để bản mới ghi đè bản cũ
 khi cập nhật, và xoá tệp `Views/DownloadFolderSection.swift` còn sót trong repo. Trong gói phát
 hành chỉ còn đúng một tệp, không còn tên nào trùng.
+
+## 39. Dọn màn tải xuống, định dạng dung lượng, chặn tải khi thiếu chỗ
+
+- Bỏ nút **Sao chép đường dẫn** và hai dòng ghi chú dài trong màn Đã tải xuống / bảng tải
+  xuống (phần nói về AES-128 và cách chọn nguồn).
+- Lỗi hiển thị **"Zero KB"**: `ByteCountFormatter` trả về đúng chuỗi đó cho giá trị 0. Toàn app
+  nay dùng hàm chung `auroraByteText()` trả về **"0 KB"**.
+- **Chặn tải khi thiếu dung lượng** (ba lớp):
+  1. Khi bấm "Tải tất cả N tập", hệ thống ước tính dung lượng một tập từ playlist rồi nhân cho
+     số tập, cộng phần đang chờ tải; vượt dung lượng trống thì **không xếp hàng** và báo rõ
+     "cần khoảng X, máy còn Y — hãy chọn bớt tập hoặc tải lượng phim thấp hơn dung lượng còn trống".
+  2. Mỗi tập khi bắt đầu tải đều được kiểm tra lại theo số đo thật của playlist; thiếu chỗ thì
+     dừng ngay kèm lời báo, không tải dở rồi mới lỗi.
+  3. Trong lúc tải, nếu dung lượng trống xuống dưới 300 MB thì tạm dừng và báo để người dùng
+     xoá bớt phim rồi bấm Tiếp tục.
+
+## 40. Nguồn và tập phim thêm thủ công (website admin + app)
+
+Phim lấy từ API giờ có thể được admin bổ sung nguồn và tập riêng ngay trên website.
+
+- **Bảng dữ liệu mới**: `movie_sources` (nguồn theo slug phim) và `movie_source_episodes`
+  (tập: tên, link M3U8, link phụ đề, nội dung VTT tải lên). Có hàm
+  `ensureMovieSourcesCompatibility` tự tạo bảng khi khởi động trên hosting.
+- **Lớp nghiệp vụ** `server/movieSources.ts`: thêm/xoá/đổi tên nguồn, thêm/sửa/xoá/sắp xếp tập,
+  lưu phụ đề tải lên và tự **chuyển SRT sang WebVTT** (AVPlayer chỉ đọc được VTT).
+- **Ghép vào API chi tiết phim**: `cinema.detail` trả thêm nguồn thủ công vào `servers`, mỗi tập
+  có cả link M3U8 gốc (`directStreamUrl`) và link qua proxy (`streamUrl`), kèm `subtitle_url`.
+- **Route công khai** `GET /api/movies/subtitle/:id.vtt` trả file phụ đề đúng chuẩn `text/vtt`.
+- **App**: không cần thêm mã — nguồn thủ công hiện như nguồn bình thường, phụ đề do
+  `episode.subtitleURL` nạp vào `AVPlayerItem` nên hiển thị đúng tiến trình phim và khi tua.
+- **Website admin**: trang `/admin/movies/sources?slug=...` xem nguồn/tập gốc từ API (chỉ đọc)
+  và quản lý nguồn thêm thủ công, kèm nút "Nguồn & tập" ở danh sách phim.
+
+## 41. Sửa bộ lọc cho chuẩn và hiển thị số phim chính xác
+
+Bộ lọc nhiều lựa chọn trước đây gộp kết quả theo từng tổ hợp nhưng **chỉ lấy 6 tổ hợp
+đầu**, trả về `pagination` của tổ hợp đầu tiên (nên "tổng số phim" và số trang sai) và
+không kiểm tra lại phim có đúng lọc hay không — đó là lý do lọc ra phim không đúng.
+
+- **Máy chủ**: `getMovies` viết lại — dựng đủ tổ hợp lọc (OR trong cùng nhóm, AND giữa các
+  nhóm), gọi song song, gộp và khử trùng theo slug, sắp xếp theo thời gian cập nhật, và
+  **kiểm tra lại từng phim** bằng `matchesCombo` (đúng thể loại, quốc gia, năm) nên không
+  thể lọt phim sai. Quá 12 tổ hợp thì báo lỗi rõ ràng thay vì âm thầm bỏ bớt lọc.
+- **Số liệu**: một tổ hợp lọc → dùng đúng tổng số phim của nguồn; nhiều tổ hợp → trả `null`
+  thay vì một con số sai (vẫn còn `hasNextPage` để cuộn tiếp).
+- **Đếm số phim theo từng lựa chọn** (`cinema.filterCounts`): mỗi lựa chọn được đếm bằng một
+  truy vấn chỉ có một giá trị mỗi nhóm nên con số chính xác theo các lọc khác đang bật
+  (đã đối chiếu: Hành động + Phim Bộ = 1.188 khớp truy vấn trực tiếp).
+- **App**: chip lọc hiện thêm số phim ("Hành động · 7.711"), tiêu đề hiện tổng số phim chính
+  xác khi có, và ghi rõ "N phim đã tải" khi bộ lọc nhiều tổ hợp không có tổng.
+- **Website**: nút "Trang sau" hoạt động cả khi không có tổng số trang (dựa vào `hasNextPage`).

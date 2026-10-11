@@ -4,11 +4,22 @@ import { addFavorite, addMovieComment, clearWatchHistory, createLocalUser, delet
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { getCatalogMeta, getDailyUpdates, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
+import { getCatalogMeta, getDailyUpdates, getFilterCounts, getHome, getMovieDetail, getMovies, getPersistentPosterSource, MAX_CINEMA_PAGE, protectImageSource, searchMovies } from "./cinema";
 import { createLocalSession, hashPassword, verifyPassword } from "./localAuth";
 import { listAccountDevices, listAllAccountSummaries, revokeAllSessions, revokeDevice, revokeSession } from "./accountSessions";
 import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
+import {
+  addMovieEpisode,
+  addMovieSource,
+  listMovieSources,
+  removeMovieEpisode,
+  removeMovieSource,
+  renameMovieSource,
+  reorderMovieEpisodes,
+  saveMovieSubtitle,
+  updateMovieEpisode,
+} from "./movieSources";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
@@ -116,6 +127,23 @@ export const appRouter = router({
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),
     dailyUpdates: publicProcedure.input(z.object({ page: pageInput }).optional()).query(({ input }) => getDailyUpdates(input?.page)),
     meta: publicProcedure.query(() => getCatalogMeta()),
+    // Đếm số phim cho từng lựa chọn lọc (thể loại / quốc gia / năm) theo bộ lọc đang bật.
+    filterCounts: publicProcedure
+      .input(
+        z.object({
+          kind: z.string().trim().max(40).optional(),
+          kinds: z.array(z.string().trim().max(40)).max(6).optional(),
+          category: z.string().trim().max(80).optional(),
+          country: z.string().trim().max(80).optional(),
+          year: z.number().int().min(1900).max(2100).optional(),
+          categories: z.array(z.string().trim().max(80)).max(6).optional(),
+          countries: z.array(z.string().trim().max(80)).max(6).optional(),
+          years: z.array(z.number().int().min(1900).max(2100)).max(6).optional(),
+          dimension: z.enum(["categories", "countries", "years"]),
+          options: z.array(z.string().trim().min(1).max(80)).max(40),
+        })
+      )
+      .query(({ input }) => getFilterCounts(input as Parameters<typeof getFilterCounts>[0])),
 
     // Bình luận của phim: khách đọc được, chỉ thành viên đã đăng nhập mới gửi được.
     comments: publicProcedure
@@ -336,6 +364,52 @@ export const appRouter = router({
       return clearWatchHistory(ctx.user.id);
     }),
   }),
+  // Nguồn và tập do admin thêm cho phim API (chỉ admin).
+  movieSources: router({
+    list: adminProcedure
+      .input(z.object({ slug: z.string().trim().min(1).max(200) }))
+      .query(({ input }) => listMovieSources(input.slug)),
+    addSource: adminProcedure
+      .input(z.object({ slug: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(120) }))
+      .mutation(({ input }) => addMovieSource(input.slug, input.name)),
+    renameSource: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), name: z.string().trim().min(1).max(120) }))
+      .mutation(({ input }) => renameMovieSource(input.id, input.name)),
+    removeSource: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ input }) => removeMovieSource(input.id)),
+    addEpisode: adminProcedure
+      .input(z.object({
+        sourceId: z.number().int().positive(),
+        name: z.string().trim().min(1).max(180),
+        streamUrl: z.string().trim().url().max(2000),
+        subtitleUrl: z.string().trim().max(2000).nullable().optional(),
+        subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+      }))
+      .mutation(({ input }) => addMovieEpisode(input)),
+    updateEpisode: adminProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        name: z.string().trim().min(1).max(180).optional(),
+        streamUrl: z.string().trim().url().max(2000).optional(),
+        subtitleUrl: z.string().trim().max(2000).nullable().optional(),
+        subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+      }))
+      .mutation(({ input }) => {
+        const { id, ...rest } = input;
+        return updateMovieEpisode(id, rest);
+      }),
+    removeEpisode: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ input }) => removeMovieEpisode(input.id)),
+    reorderEpisodes: adminProcedure
+      .input(z.object({ sourceId: z.number().int().positive(), ids: z.array(z.number().int().positive()).max(5000) }))
+      .mutation(({ input }) => reorderMovieEpisodes(input.sourceId, input.ids)),
+    uploadSubtitle: adminProcedure
+      .input(z.object({ base64: z.string().min(1).max(28_000_000), filename: z.string().max(180).optional() }))
+      .mutation(({ input }) => saveMovieSubtitle(input)),
+  }),
+
   adminAccounts: router({
     list: adminProcedure.query(() => listAllAccountSummaries()),
     // Nhãn tuỳ chỉnh hiện cạnh tên khi bình luận, ví dụ "VIP". Chuỗi rỗng là xoá nhãn.

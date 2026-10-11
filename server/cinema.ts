@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import { mergeCustomSources } from "./movieSources";
 
 const API_BASE = "https://phimapi.com";
 const IMAGE_BASE = "https://phimimg.com/";
@@ -27,7 +28,7 @@ export type Movie = {
   isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null;
   createdAt: string | null; updatedAt: string | null;
 };
-export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
+export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
 
 function cleanText(value: unknown, fallback = "") {
   if (typeof value !== "string") return fallback;
@@ -351,65 +352,49 @@ function isCompletedSeries(movie: Movie) {
 }
 type MovieListResult = { items: Movie[]; pagination: ReturnType<typeof unwrapItems>["pagination"] };
 
-export async function getMovies(input: {
-  kind: keyof typeof listEndpoints;
+export const MAX_FILTER_COMBOS = 12;
+const PAGE_LIMIT = 24;
+
+export type MovieFilterInput = {
+  kind?: keyof typeof listEndpoints;
   page?: number;
   category?: string;
   country?: string;
   year?: number;
   refresh?: boolean;
+  areas?: never;
   /** Lọc nhiều lựa chọn cùng lúc: ví dụ Phim Bộ + Phim Lẻ, nhiều thể loại… */
   kinds?: string[];
   categories?: string[];
   countries?: string[];
   years?: number[];
-}): Promise<MovieListResult> {
-  const extraKinds = (input.kinds || []).filter((value) => value && value in listEndpoints);
-  const extraCategories = (input.categories || []).map((value) => value.trim()).filter(Boolean);
-  const extraCountries = (input.countries || []).map((value) => value.trim()).filter(Boolean);
-  const extraYears = (input.years || []).filter((value) => Number.isInteger(value));
-  const multi = extraKinds.length > 0 || extraCategories.length > 0 || extraCountries.length > 0 || extraYears.length > 0;
-  if (multi) return getMoviesMulti(input, extraKinds, extraCategories, extraCountries, extraYears);
-  const category = input.category?.trim() || undefined;
-  const country = input.country?.trim() || undefined;
-  const year = input.year;
-  let endpoint = listEndpoints[input.kind];
-  let query: Record<string, string | number | undefined> = { page: safePage(input.page), limit: 24, category, country, year };
-  // KKPhim có endpoint chuyên biệt cho từng bộ lọc. Dùng chúng khi chỉ có
-  // một filter để API trả đúng params.pagination và tránh kết quả không lọc.
-  if (input.kind === "latest" && category && !country && !year) {
-    endpoint = `/v1/api/the-loai/${encodeURIComponent(safeFilterSlug(category))}`;
-    query = { page: safePage(input.page), limit: 24 };
-  } else if (input.kind === "latest" && country && !category && !year) {
-    endpoint = `/v1/api/quoc-gia/${encodeURIComponent(safeFilterSlug(country))}`;
-    query = { page: safePage(input.page), limit: 24 };
-  } else if (input.kind === "latest" && year && !category && !country) {
-    endpoint = `/v1/api/nam/${year}`;
-    query = { page: safePage(input.page), limit: 24 };
-  }
-  const payload = await upstream(endpoint, query, { bypassCache: Boolean(input.refresh) });
-  const { items, pagination, pathImage } = unwrapItems(payload);
-  const normalized: Movie[] = items.map((item: any) => normalizeMovie(item, pathImage));
-  const filtered = input.kind === "ongoing"
-    ? normalized.filter((movie) => !isCompletedSeries(movie))
-    : input.kind === "completed"
-      ? normalized.filter(isCompletedSeries)
-      : normalized;
-  return { items: filtered, pagination };
+};
+
+type Combo = { kind: keyof typeof listEndpoints; category?: string; country?: string; year?: number };
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
-/** Gộp kết quả của nhiều tổ hợp lọc, khử trùng theo slug rồi phân trang. */
-async function getMoviesMulti(
-  input: { kind: keyof typeof listEndpoints; page?: number; refresh?: boolean },
-  kinds: string[],
-  categories: string[],
-  countries: string[],
-  years: number[],
-): Promise<MovieListResult> {
-  const kindList = (kinds.length ? kinds : [input.kind]) as Array<keyof typeof listEndpoints>;
+
+/**
+ * Dựng danh sách tổ hợp lọc từ lựa chọn của người dùng.
+ *
+ * Quy ước: nhiều lựa chọn trong **cùng một nhóm** là HOẶC (Phim Bộ hoặc Phim Lẻ),
+ * giữa các nhóm là VÀ (thuộc thể loại đã chọn VÀ thuộc quốc gia đã chọn…).
+ * Mỗi tổ hợp là một truy vấn nguồn; kết quả được gộp và khử trùng theo slug.
+ */
+function buildCombos(input: MovieFilterInput): Combo[] {
+  const kinds = uniqueStrings((input.kinds || []).filter((value) => value && value in listEndpoints)) as Array<keyof typeof listEndpoints>;
+  const kindList: Array<keyof typeof listEndpoints> = kinds.length ? kinds : [input.kind ?? "latest"];
+  const categories = uniqueStrings(input.categories?.length ? input.categories : input.category ? [input.category] : []);
+  const countries = uniqueStrings(input.countries?.length ? input.countries : input.country ? [input.country] : []);
+  const years = Array.from(
+    new Set((input.years?.length ? input.years : input.year ? [input.year] : []).filter((value) => Number.isInteger(value)))
+  );
   const categoryList: Array<string | undefined> = categories.length ? categories : [undefined];
   const countryList: Array<string | undefined> = countries.length ? countries : [undefined];
   const yearList: Array<number | undefined> = years.length ? years : [undefined];
-  const combos: Array<{ kind: keyof typeof listEndpoints; category?: string; country?: string; year?: number }> = [];
+  const combos: Combo[] = [];
   for (const kind of kindList) {
     for (const category of categoryList) {
       for (const country of countryList) {
@@ -419,26 +404,140 @@ async function getMoviesMulti(
       }
     }
   }
-  // Mỗi tổ hợp là một lượt gọi upstream; giới hạn để không dội API nguồn.
-  const limited = combos.slice(0, 6);
-  const pages = await Promise.all(limited.map((combo) => getMovies({
-    kind: combo.kind,
-    page: input.page,
-    category: combo.category,
-    country: combo.country,
-    year: combo.year,
-    refresh: input.refresh,
-  })));
+  return combos;
+}
+
+/**
+ * Kiểm tra lại ngay tại máy chủ: phim trả về phải khớp đúng bộ lọc.
+ *
+ * API nguồn có những endpoint bỏ qua tham số lọc, nên bước này loại bỏ mọi phim
+ * không đúng thể loại / quốc gia / năm đã chọn — nhờ vậy kết quả không bao giờ
+ * "lọc mà ra phim khác".
+ */
+function matchesCombo(movie: Movie, combo: Combo): boolean {
+  if (combo.category && !movie.categories.some((item) => item.slug === combo.category || item.name === combo.category)) return false;
+  if (combo.country && !movie.countries.some((item) => item.slug === combo.country || item.name === combo.country)) return false;
+  if (combo.year && movie.year !== combo.year) return false;
+  return true;
+}
+
+/** Gọi nguồn cho đúng một tổ hợp lọc. */
+async function listCombo(combo: Combo, page: number, refresh: boolean) {
+  const endpoint = listEndpoints[combo.kind] ?? listEndpoints.latest;
+  const payload = await upstream(
+    endpoint,
+    { page, limit: PAGE_LIMIT, category: combo.category, country: combo.country, year: combo.year },
+    { bypassCache: refresh }
+  );
+  const { items, pagination, pathImage } = unwrapItems(payload);
+  return {
+    combo,
+    items: (items as any[]).map((item) => normalizeMovie(item, pathImage)),
+    pagination,
+  };
+}
+
+export async function getMovies(input: MovieFilterInput): Promise<MovieListResult> {
+  const combos = buildCombos(input);
+  if (combos.length > MAX_FILTER_COMBOS) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Bộ lọc đang có ${combos.length} tổ hợp. Hãy bớt lựa chọn (tối đa ${MAX_FILTER_COMBOS} tổ hợp).`,
+    });
+  }
+  const page = safePage(input.page);
+  const results = await Promise.all(combos.map((combo) => listCombo(combo, page, Boolean(input.refresh))));
+
   const seen = new Set<string>();
-  const items: Movie[] = [];
-  for (const page of pages) {
-    for (const movie of page.items) {
-      if (seen.has(movie.slug)) continue;
+  const merged: Movie[] = [];
+  for (const result of results) {
+    for (const movie of result.items) {
+      if (!movie.slug || seen.has(movie.slug)) continue;
+      if (!matchesCombo(movie, result.combo)) continue;
       seen.add(movie.slug);
-      items.push(movie);
+      merged.push(movie);
     }
   }
-  return { items, pagination: pages[0]?.pagination ?? null };
+  merged.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")));
+
+  const kindKey = combos[0]?.kind ?? "latest";
+  const filtered =
+    kindKey === "ongoing"
+      ? merged.filter((movie) => !isCompletedSeries(movie))
+      : kindKey === "completed"
+        ? merged.filter(isCompletedSeries)
+        : merged;
+
+  // Một tổ hợp: nguồn cho số liệu chính xác (tổng số phim, tổng số trang).
+  // Nhiều tổ hợp: không có tổng chính xác nên trả `null` thay vì con số sai.
+  const pagination =
+    results.length === 1
+      ? results[0].pagination
+      : {
+          currentPage: page,
+          totalItems: null,
+          totalPages: null,
+          itemsPerPage: filtered.length,
+          hasNextPage: results.some((result) => {
+            const info: any = result.pagination ?? {};
+            if (typeof info.hasNextPage === "boolean") return info.hasNextPage;
+            const total = Number(info.totalItems);
+            if (Number.isFinite(total) && total > 0) return total > page * PAGE_LIMIT;
+            return result.items.length >= PAGE_LIMIT;
+          }),
+        };
+
+  return { items: filtered, pagination };
+}
+
+export type FilterDimension = "categories" | "countries" | "years";
+
+/**
+ * Đếm số phim của từng lựa chọn trong một nhóm lọc.
+ *
+ * Mỗi lựa chọn được đếm bằng một truy vấn chỉ có một giá trị cho mỗi nhóm, nên
+ * `totalItems` của nguồn là con số chính xác (đã trừ các lựa chọn khác đang bật).
+ */
+export async function getFilterCounts(
+  input: MovieFilterInput & { dimension: FilterDimension; options: string[] }
+): Promise<Record<string, number>> {
+  const options = uniqueStrings(input.options).slice(0, 24);
+  if (options.length === 0) return {};
+  const kind = uniqueStrings((input.kinds || []).filter((value) => value && value in listEndpoints))[0] as
+    | keyof typeof listEndpoints
+    | undefined;
+  const base: Combo = {
+    kind: kind ?? input.kind ?? "latest",
+    category: uniqueStrings(input.categories?.length ? input.categories : input.category ? [input.category] : [])[0],
+    country: uniqueStrings(input.countries?.length ? input.countries : input.country ? [input.country] : [])[0],
+    year: (input.years?.length ? input.years : input.year ? [input.year] : [])[0],
+  };
+
+  const entries = await Promise.all(
+    options.map(async (option) => {
+      const combo: Combo = { ...base };
+      if (input.dimension === "categories") combo.category = option;
+      else if (input.dimension === "countries") combo.country = option;
+      else {
+        const value = Number.parseInt(option, 10);
+        if (!Number.isFinite(value)) return null;
+        combo.year = value;
+      }
+      try {
+        const result = await listCombo(combo, 1, false);
+        const total = Number((result.pagination as any)?.totalItems);
+        return Number.isFinite(total) ? ([option, total] as [string, number]) : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const counts: Record<string, number> = {};
+  for (const entry of entries) {
+    if (entry) counts[entry[0]] = entry[1];
+  }
+  return counts;
 }
 
 export async function searchMovies(input: { keyword: string; page?: number }) {
@@ -462,7 +561,8 @@ export async function getMovieDetail(rawSlug: string): Promise<MovieDetail> {
     return { name: cleanText(episode?.name, "Tập phim"), slug: cleanText(episode?.slug), filename: cleanText(episode?.filename), embedUrl: embed, streamUrl: stream, directStreamUrl: direct };
   }).filter((episode: any) => episode.slug) : [] })).filter((server: any) => server.episodes.length > 0) : [];
   const actorProfiles = await getMoviePeople(slug);
-  return { ...movie, actorProfiles, servers };
+  // Nguồn và tập do admin thêm thủ công được ghép vào như nguồn bình thường.
+  return { ...movie, actorProfiles, servers: await mergeCustomSources(rawSlug, servers) };
 }
 export async function getDailyUpdates(page = 1) {
   // Cache ngắn hơn (2 phút) vì đây là dữ liệu cập nhật liên tục trong ngày

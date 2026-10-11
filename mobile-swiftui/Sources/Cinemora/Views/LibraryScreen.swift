@@ -64,8 +64,12 @@ struct LibraryScreen: View {
                         Spacer()
                         if store.catalogLoading && !store.catalogMovies.isEmpty {
                             ProgressView().tint(.auroraViolet).scaleEffect(0.8)
+                        } else if let total = store.catalogTotal, total > 0 {
+                            Text("\(total.formatted(.number.grouping(.automatic))) phim")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraTextTertiary)
                         } else if !store.catalogMovies.isEmpty {
-                            Text("\(store.catalogMovies.count) phim")
+                            Text("\(store.catalogMovies.count) phim đã tải")
                                 .font(.auroraBody(10))
                                 .foregroundStyle(Color.auroraTextTertiary)
                         }
@@ -161,15 +165,15 @@ struct LibraryScreen: View {
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let meta = store.catalogMeta {
-                filterGroup("THỂ LOẠI", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: categories) { value in
+                filterGroup("THỂ LOẠI", dimension: "categories", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: categories, counts: store.filterCounts["categories"] ?? [:]) { value in
                     if categories.contains(value) { categories.remove(value) } else { categories.insert(value) }
                     load()
                 }
-                filterGroup("QUỐC GIA", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: countries) { value in
+                filterGroup("QUỐC GIA", dimension: "countries", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: countries, counts: store.filterCounts["countries"] ?? [:]) { value in
                     if countries.contains(value) { countries.remove(value) } else { countries.insert(value) }
                     load()
                 }
-                filterGroup("NĂM", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: Set(years.map(String.init))) { value in
+                filterGroup("NĂM", dimension: "years", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: Set(years.map(String.init)), counts: store.filterCounts["years"] ?? [:]) { value in
                     if let number = Int(value) {
                         if years.contains(number) { years.remove(number) } else { years.insert(number) }
                     }
@@ -192,6 +196,35 @@ struct LibraryScreen: View {
         }
         .padding(16)
         .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.7)
+        .onAppear { refreshCounts() }
+        .onChange(of: filterSignature) { _, _ in refreshCounts() }
+    }
+
+    /// Đếm số phim cho từng lựa chọn của cả ba nhóm lọc theo bộ lọc đang bật.
+    private func refreshCounts() {
+        guard let meta = store.catalogMeta else { return }
+        let kinds = Array(selectedKinds)
+        let selectedCategories = Array(categories)
+        let selectedCountries = Array(countries)
+        let selectedYears = Array(years)
+        store.loadFilterCounts(
+            dimension: "categories",
+            options: meta.categories.prefix(18).map(\.slug),
+            kind: primaryKind, kinds: kinds,
+            categories: selectedCategories, countries: selectedCountries, years: selectedYears
+        )
+        store.loadFilterCounts(
+            dimension: "countries",
+            options: meta.countries.prefix(18).map(\.slug),
+            kind: primaryKind, kinds: kinds,
+            categories: selectedCategories, countries: selectedCountries, years: selectedYears
+        )
+        store.loadFilterCounts(
+            dimension: "years",
+            options: meta.years.prefix(10).map(String.init),
+            kind: primaryKind, kinds: kinds,
+            categories: selectedCategories, countries: selectedCountries, years: selectedYears
+        )
     }
 
     // MARK: - Results
@@ -275,12 +308,24 @@ struct LibraryScreen: View {
         load()
     }
 
-    private func filterGroup(_ title: String, values: [LibraryFilterOption], selected: Set<String>, onSelect: @escaping (String) -> Void) -> some View {
+    private func filterGroup(
+        _ title: String,
+        dimension: String,
+        values: [LibraryFilterOption],
+        selected: Set<String>,
+        counts: [String: Int],
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(title)
-                .font(.auroraLabel(10, weight: .black))
-                .foregroundStyle(Color.auroraTextSecondary)
-            FlowChips(values: values, selected: selected, onSelect: onSelect)
+            HStack(spacing: 7) {
+                Text(title)
+                    .font(.auroraLabel(10, weight: .black))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                if store.filterCountsPending.contains(dimension) {
+                    ProgressView().tint(.auroraViolet).scaleEffect(0.55)
+                }
+            }
+            FlowChips(values: values, selected: selected, counts: counts, onSelect: onSelect)
         }
     }
 }
@@ -290,13 +335,20 @@ struct LibraryScreen: View {
 private struct FlowChips: View {
     let values: [LibraryFilterOption]
     let selected: Set<String>
+    let counts: [String: Int]
     let onSelect: (String) -> Void
+
+    /// Tên lựa chọn kèm số phim chính xác khi đã đếm xong.
+    private func title(for option: LibraryFilterOption) -> String {
+        guard let count = counts[option.value] else { return option.title }
+        return "\(option.title) · \(count.formatted(.number.grouping(.automatic)))"
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(values) { option in
-                    AuroraChip(title: option.title, selected: selected.contains(option.value)) {
+                    AuroraChip(title: title(for: option), selected: selected.contains(option.value)) {
                         onSelect(option.value)
                     }
                 }

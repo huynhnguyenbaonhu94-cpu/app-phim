@@ -24,7 +24,6 @@ struct DownloadFolderSection: View {
             VStack(spacing: 10) {
                 primaryButton("Xem tệp đã tải", icon: "folder") { showBrowser = true }
                 secondaryRow("Chọn thư mục khác", icon: "folder.badge.plus") { showFolderPicker = true }
-                secondaryRow("Sao chép đường dẫn", icon: "doc.on.doc") { downloads.copyFolderPath() }
                 secondaryRow("Dùng thư mục mặc định", icon: "arrow.uturn.backward", enabled: !downloads.isUsingDefaultFolder) {
                     showResetConfirm = true
                 }
@@ -156,7 +155,7 @@ struct DownloadedFilesBrowser: View {
         let url: URL
         let size: Int64
         let date: Date
-        var sizeText: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
+        var sizeText: String { auroraByteText(size) }
     }
 
     var body: some View {
@@ -173,7 +172,7 @@ struct DownloadedFilesBrowser: View {
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(Color.auroraTextSecondary)
                                 .lineLimit(2)
-                            Text("\(entries.count) tệp · \(ByteCountFormatter.string(fromByteCount: entries.reduce(0) { $0 + $1.size }, countStyle: .file))")
+                            Text("\(entries.count) tệp · \(auroraByteText(entries.reduce(0) { $0 + $1.size }))")
                                 .font(.auroraBody(11))
                                 .foregroundStyle(Color.auroraTextSecondary)
                         }

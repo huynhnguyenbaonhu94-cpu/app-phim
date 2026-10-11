@@ -3,6 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import path from "node:path";
+import { movieSubtitleVtt } from "../movieSources";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -304,6 +305,17 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
     if (!source) return res.status(404).send("Not found");
     return res.redirect(302, source);
   });
+  // Phụ đề VTT của tập do admin thêm: AVPlayer chỉ đọc được WebVTT.
+  app.get("/api/movies/subtitle/:id.vtt", async (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) return res.status(400).send("Bad request");
+    const vtt = await movieSubtitleVtt(id);
+    if (!vtt) return res.status(404).send("Not found");
+    res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.send(vtt);
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",

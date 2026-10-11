@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Định dạng dung lượng dùng chung cho toàn app.
+///
+/// `ByteCountFormatter` trả về chuỗi "Zero KB" cho giá trị 0 — không đúng cách
+/// đọc thông thường, nên hàm này trả về "0 KB".
+func auroraByteText(_ bytes: Int64) -> String {
+    let value = max(bytes, 0)
+    if value == 0 { return "0 KB" }
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
+    formatter.includesUnit = true
+    formatter.isAdaptive = true
+    return formatter.string(fromByteCount: value)
+}
+
 // MARK: - Palette
 //
 // "Studio" theme — the flat, editorial direction that replaced the Aurora

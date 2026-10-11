@@ -182,5 +182,29 @@ export const movieComments = mysqlTable("movie_comments", {
   slugCreatedIndex: index("movie_comments_slug_created_idx").on(table.movieSlug, table.createdAt),
   userCreatedIndex: index("movie_comments_user_created_idx").on(table.userId, table.createdAt),
 }));
+export const movieSources = mysqlTable("movie_sources", {
+  id: int("id").autoincrement().primaryKey(),
+  movieSlug: varchar("movieSlug", { length: 200 }).notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ slugIndex: index("movie_sources_slug_idx").on(table.movieSlug) }));
+
+export const movieSourceEpisodes = mysqlTable("movie_source_episodes", {
+  id: int("id").autoincrement().primaryKey(),
+  sourceId: int("sourceId").notNull(),
+  name: varchar("name", { length: 180 }).notNull(),
+  streamUrl: text("streamUrl").notNull(),
+  subtitleUrl: text("subtitleUrl"),
+  subtitleVtt: mediumtext("subtitleVtt"),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ sourceIndex: index("movie_source_episodes_source_idx").on(table.sourceId) }));
+
+export type MovieSource = typeof movieSources.$inferSelect;
+export type InsertMovieSource = typeof movieSources.$inferInsert;
+export type MovieSourceEpisode = typeof movieSourceEpisodes.$inferSelect;
+export type InsertMovieSourceEpisode = typeof movieSourceEpisodes.$inferInsert;
+
 export type MovieComment = typeof movieComments.$inferSelect;
 export type InsertMovieComment = typeof movieComments.$inferInsert;
