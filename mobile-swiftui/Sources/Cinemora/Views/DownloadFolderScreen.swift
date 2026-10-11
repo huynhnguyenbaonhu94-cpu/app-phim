@@ -1,64 +1,39 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Cài đặt thư mục lưu phim tải về: mặc định trong app, hoặc thư mục do người
-/// dùng chọn trong app Tệp (giữ quyền ghi bằng security-scoped bookmark).
-struct DownloadFolderScreen: View {
+/// Khối cài đặt thư mục lưu phim tải về, dùng chung trong màn Đã tải xuống.
+struct DownloadFolderSection: View {
     @Environment(DownloadManager.self) private var downloads
-    @State private var showPicker = false
+    @State private var showFolderPicker = false
+    @State private var showBrowser = false
     @State private var showResetConfirm = false
 
     var body: some View {
-        ZStack {
-            CinemaBackground()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SectionEyebrow(text: "CÀI ĐẶT TẢI XUỐNG")
-                        AuroraGradientText(text: "Thư mục tải xuống", font: .auroraDisplay(26))
-                        Text("Phim tải về được lưu trong thư mục này. Chọn thư mục khác trong app Tệp để dễ sao lưu hoặc chuyển sang máy khác.")
-                            .font(.auroraBody(12))
-                            .foregroundStyle(Color.auroraTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.top, 18)
+        VStack(alignment: .leading, spacing: 14) {
+            currentFolderCard
+            storageRow
 
-                    currentFolderCard
-                    storageCard
-
-                    if let message = downloads.folderMessage {
-                        Text(message)
-                            .font(.auroraBody(11))
-                            .foregroundStyle(Color.auroraAmber)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 4)
-                    }
-
-                    VStack(spacing: 10) {
-                        primaryButton("Chọn thư mục khác", icon: "folder.badge.plus") {
-                            showPicker = true
-                        }
-                        secondaryButton("Mở thư mục", icon: "folder") {
-                            downloads.openCurrentFolder()
-                        }
-                        secondaryButton("Dùng thư mục mặc định", icon: "arrow.uturn.backward", enabled: !downloads.isUsingDefaultFolder) {
-                            showResetConfirm = true
-                        }
-                    }
-
-                    Text("Lưu ý: iOS cho phép app ghi vào thư mục bạn chọn thông qua quyền truy cập do hệ thống cấp. Nếu bạn xoá app Tệp hoặc thu hồi quyền, Cinemora sẽ tự quay về thư mục mặc định.")
-                        .font(.auroraBody(11))
-                        .foregroundStyle(Color.auroraTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 120)
+            if let message = downloads.folderMessage {
+                Text(message)
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
-            .scrollIndicators(.hidden)
+
+            VStack(spacing: 10) {
+                primaryButton("Xem tệp đã tải", icon: "folder") { showBrowser = true }
+                secondaryRow("Chọn thư mục khác", icon: "folder.badge.plus") { showFolderPicker = true }
+                secondaryRow("Sao chép đường dẫn", icon: "doc.on.doc") { downloads.copyFolderPath() }
+                secondaryRow("Dùng thư mục mặc định", icon: "arrow.uturn.backward", enabled: !downloads.isUsingDefaultFolder) {
+                    showResetConfirm = true
+                }
+            }
         }
-        .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showPicker) {
+        .sheet(isPresented: $showBrowser) {
+            DownloadedFilesBrowser()
+        }
+        .sheet(isPresented: $showFolderPicker) {
             FolderPicker { url in
                 if let url { downloads.chooseFolder(url) }
             }
@@ -112,7 +87,7 @@ struct DownloadFolderScreen: View {
         .auroraCard(cornerRadius: 22, tint: .auroraSky)
     }
 
-    private var storageCard: some View {
+    private var storageRow: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Đã tải: \(downloads.totalSizeText)")
@@ -150,7 +125,7 @@ struct DownloadFolderScreen: View {
         .buttonStyle(.plain)
     }
 
-    private func secondaryButton(_ title: String, icon: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
+    private func secondaryRow(_ title: String, icon: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon).font(.system(size: 13, weight: .bold))
@@ -164,6 +139,163 @@ struct DownloadFolderScreen: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.6)
+    }
+}
+
+/// Duyệt các tệp đã tải **ngay trong app**: cùng kiểu danh sách tệp của bộ chọn
+/// thư mục, nhưng có thêm dung lượng, nút chia sẻ và xoá cho từng tệp.
+struct DownloadedFilesBrowser: View {
+    @Environment(DownloadManager.self) private var downloads
+    @Environment(\.dismiss) private var dismiss
+    @State private var entries: [FileEntry] = []
+    @State private var pendingRemoval: FileEntry?
+    @State private var errorText: String?
+
+    struct FileEntry: Identifiable {
+        var id: String { url.lastPathComponent }
+        let url: URL
+        let size: Int64
+        let date: Date
+        var sizeText: String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                CinemaBackground()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(downloads.folderName)
+                                .font(.auroraLabel(13, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text(downloads.folderPath)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.auroraTextSecondary)
+                                .lineLimit(2)
+                            Text("\(entries.count) tệp · \(ByteCountFormatter.string(fromByteCount: entries.reduce(0) { $0 + $1.size }, countStyle: .file))")
+                                .font(.auroraBody(11))
+                                .foregroundStyle(Color.auroraTextSecondary)
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .auroraCard(cornerRadius: 20, tint: .auroraSky)
+
+                        if let errorText {
+                            Text(errorText)
+                                .font(.auroraBody(11))
+                                .foregroundStyle(Color.auroraPink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .auroraCard(cornerRadius: 14, tint: .auroraPink)
+                        }
+
+                        if entries.isEmpty {
+                            Text("Thư mục đang trống. Hãy tải một tập phim về máy trước.")
+                                .font(.auroraBody(12))
+                                .foregroundStyle(Color.auroraTextSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 30)
+                                .auroraCard(cornerRadius: 20, tint: .auroraViolet)
+                        } else {
+                            ForEach(entries) { entry in
+                                entryRow(entry)
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .padding(.bottom, 40)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .navigationTitle("Tệp đã tải")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Xong") { dismiss() }
+                        .font(.auroraLabel(12, weight: .bold))
+                        .foregroundStyle(Color.auroraViolet)
+                }
+            }
+            .alert("Xoá tệp này?", isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })) {
+                Button("Xoá tệp", role: .destructive) {
+                    if let entry = pendingRemoval { remove(entry) }
+                    pendingRemoval = nil
+                }
+                Button("Giữ lại", role: .cancel) { pendingRemoval = nil }
+            } message: {
+                Text(pendingRemoval.map { "\($0.url.lastPathComponent) sẽ bị xoá khỏi máy." } ?? "")
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear(perform: reload)
+    }
+
+    private func entryRow(_ entry: FileEntry) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.auroraViolet.opacity(0.14))
+                    .frame(width: 38, height: 38)
+                Image(systemName: "film")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.auroraViolet)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.url.lastPathComponent)
+                    .font(.auroraLabel(11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Text("\(entry.sizeText) · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+            Spacer(minLength: 0)
+            ShareLink(item: entry.url) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.auroraSky)
+            }
+            Button {
+                pendingRemoval = entry
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.auroraPink)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .auroraCard(cornerRadius: 16, tint: .auroraSky)
+    }
+
+    private func reload() {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: downloads.root,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        entries = urls.map { url in
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            return FileEntry(
+                url: url,
+                size: Int64(values?.fileSize ?? 0),
+                date: values?.contentModificationDate ?? Date()
+            )
+        }
+        .sorted { $0.date > $1.date }
+    }
+
+    /// Xoá tệp trong thư mục và bỏ luôn mục tương ứng trong danh sách tải xuống.
+    private func remove(_ entry: FileEntry) {
+        guard downloads.deleteFile(at: entry.url) else {
+            errorText = "Không xoá được tệp này. Hãy kiểm tra quyền truy cập thư mục rồi thử lại."
+            return
+        }
+        errorText = nil
+        reload()
     }
 }
 

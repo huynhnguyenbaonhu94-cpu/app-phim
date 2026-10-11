@@ -1394,3 +1394,13 @@ từ phân đoạn dang dở chứ không tải lại từ đầu.
 - Thêm `deleteFile(at:)` cho trình duyệt tệp: xoá tệp trước, chỉ gỡ mục khi tệp đã xoá xong,
   báo lỗi ngay trong màn duyệt nếu thất bại.
 - Màn Đã tải xuống ghi rõ: "Xoá ở đây là xoá luôn tệp trong thư mục".
+
+## 38. Sửa lỗi build: invalid redeclaration of 'FolderPicker'
+
+Nguyên nhân: lần trước tôi **đổi tên** `Views/DownloadFolderScreen.swift` thành
+`DownloadFolderSection.swift`. Khi cập nhật vào repo, tệp cũ vẫn còn nên tồn tại hai tệp cùng
+khai báo `FolderPicker` (và `DownloadFolderSection`, `DownloadedFilesBrowser`) → trùng khai báo.
+
+Cách xử lý: **trả lại tên tệp gốc** `Views/DownloadFolderScreen.swift` để bản mới ghi đè bản cũ
+khi cập nhật, và xoá tệp `Views/DownloadFolderSection.swift` còn sót trong repo. Trong gói phát
+hành chỉ còn đúng một tệp, không còn tên nào trùng.

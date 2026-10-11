@@ -1,29 +1,11 @@
-# Cinemora — dịch vụ bình luận
-# Đưa các đường dẫn /api/trpc/... về index.php để app không cần biết bình luận
-# đang được chạy ở dịch vụ riêng.
+# Không cho tải trực tiếp cơ sở dữ liệu bình luận qua web.
 
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-
-    # Đích thay thế để dạng tương đối nên đúng cả khi đặt ở tên miền phụ, lẫn khi
-    # đặt trong thư mục con của tên miền chính.
-    RewriteRule ^api/trpc/([A-Za-z0-9_.\-]+)/?$ index.php?procedure=$1 [QSA,L]
-    RewriteRule ^api/health/?$ index.php?procedure=health [QSA,L]
-
-    # Không cho truy cập trực tiếp thư mục dữ liệu và thư viện.
-    RewriteRule ^(data|lib)/ - [F,L]
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
 </IfModule>
 
-# Không liệt kê file trong thư mục.
 Options -Indexes
-
-# Chặn đọc file cấu hình và dữ liệu nếu máy chủ bỏ qua rewrite ở trên.
-<FilesMatch "^(config\.php|.*\.sqlite|.*\.sqlite-.*|.*\.db)$">
-    <IfModule mod_authz_core.c>
-        Require all denied
-    </IfModule>
-    <IfModule !mod_authz_core.c>
-        Order allow,deny
-        Deny from all
-    </IfModule>
-</FilesMatch>
