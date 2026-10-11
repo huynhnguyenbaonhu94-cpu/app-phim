@@ -297,11 +297,16 @@ struct SubtitleCue: Identifiable, Equatable {
 @MainActor
 final class SubtitleController: ObservableObject {
     @Published private(set) var currentText: String?
+    /// Số câu đã nạp được, để màn cài đặt cho biết phụ đề có vào hay không.
+    @Published private(set) var cueCount = 0
+    /// Link phụ đề tải không được (nếu có) — hiện thẳng cho người xem biết.
+    @Published private(set) var failedURL: String?
     private var cues: [SubtitleCue] = []
     private var bilingualCues: [SubtitleCue] = []
     private var loadTask: Task<Void, Never>?
     func load(url: URL?, bilingualURL: URL? = nil) {
         loadTask?.cancel(); cues = []; bilingualCues = []; currentText = nil
+        cueCount = 0; failedURL = nil
         guard url != nil || bilingualURL != nil else { return }
         loadTask = Task { @MainActor [weak self] in
             // The TV API may expose the same uploaded file at both the
@@ -318,14 +323,22 @@ final class SubtitleController: ObservableObject {
                Self.normalizedTrack(text) != Self.normalizedTrack(primary ?? "") {
                 self.bilingualCues = Self.parse(text)
             }
+            self.cueCount = self.cues.count + self.bilingualCues.count
+            // Có link nhưng không đọc được câu nào: báo để người xem biết là link
+            // hỏng/chặn chứ không phải app im lặng.
+            if self.cueCount == 0, let url { self.failedURL = url.absoluteString }
         }
     }
     private static func fetchText(_ url: URL?) async -> String? {
         guard let url else { return nil }
+        var request = URLRequest(url: url)
+        // Vài CDN phim chặn client lạ; gửi header giống trình duyệt để chắc chắn tải được.
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("text/vtt,text/plain,*/*", forHTTPHeaderField: "Accept")
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode ?? 200 < 400 else { return nil }
-            return String(data: data, encoding: .utf8)
+            return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
         } catch { return nil }
     }
     func update(time: Double, bilingual: Bool) {
@@ -348,28 +361,86 @@ final class SubtitleController: ObservableObject {
             .lowercased()
     }
 
+    /// Phân tích phụ đề WebVTT/SRT thành các câu có mốc thời gian.
+    ///
+    /// Bản cũ bắt buộc mốc thời gian phải **đủ 3 phần** `HH:MM:SS.mmm`. WebVTT lại cho
+    /// phép `MM:SS.mmm` và rất nhiều nguồn phim phát đúng dạng đó, nên file tải về thành
+    /// công nhưng bị bỏ sạch: không dòng phụ đề nào hiện. Phần này đọc được cả
+    /// `HH:MM:SS.mmm`, `MM:SS.mmm`, `SS.mmm`, nhận dấu `,` của SRT, không cần dòng trống
+    /// giữa các câu và tự bỏ thẻ định dạng.
     private static func parse(_ source: String) -> [SubtitleCue] {
-        let blocks = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n")
-        return blocks.compactMap { block in
-            let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard let timingIndex = lines.firstIndex(where: { $0.contains("-->") }) else { return nil }
-            let parts = lines[timingIndex].components(separatedBy: "-->")
-            guard parts.count >= 2 else { return nil }
-            let right = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            let rightParts = right.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            guard let start = parseTime(parts[0]), let end = parseTime(rightParts.first.map(String.init) ?? "") else { return nil }
-            let inlineText = rightParts.count > 1 ? String(rightParts[1]) : ""
-            let followingText = lines.dropFirst(timingIndex + 1).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            let text = followingText.isEmpty ? inlineText : followingText
-            guard !text.isEmpty else { return nil }
-            return SubtitleCue(start: start, end: end, text: text)
-        }.sorted { $0.start < $1.start }
+        let normalized = source
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var cues: [SubtitleCue] = []
+        var start: Double?
+        var end: Double?
+        var text: [String] = []
+        func flush() {
+            defer { start = nil; end = nil; text = [] }
+            guard let start, let end, !text.isEmpty, end > start else { return }
+            let joined = text.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !joined.isEmpty else { return }
+            cues.append(SubtitleCue(start: start, end: end, text: joined))
+        }
+        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                flush()
+                continue
+            }
+            if trimmed.contains("-->") {
+                flush()
+                let parts = trimmed.components(separatedBy: "-->")
+                let right = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                let rightParts = right.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                start = parseTime(parts[0])
+                end = parseTime(rightParts.first.map(String.init) ?? "")
+                // Một số file đặt luôn nội dung trên cùng dòng với mốc thời gian.
+                if start != nil, end != nil, rightParts.count > 1 {
+                    text = [stripTags(String(rightParts[1]))]
+                }
+                continue
+            }
+            // Trước mốc thời gian đầu tiên là phần đầu file: WEBVTT, số thứ tự, ghi chú.
+            if start == nil, end == nil { continue }
+            text.append(stripTags(trimmed))
+        }
+        flush()
+        return cues.sorted { $0.start < $1.start }
     }
+    /// Mốc thời gian phụ đề: `HH:MM:SS.mmm`, `MM:SS.mmm` hoặc `SS.mmm` (dấu `,` của SRT cũng nhận).
     private static func parseTime(_ raw: String) -> Double? {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+        let value = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+            .replacingOccurrences(of: ";", with: ".")
+        guard !value.isEmpty else { return nil }
         let parts = value.split(separator: ":").map(String.init)
-        guard parts.count == 3, let h = Double(parts[0]), let m = Double(parts[1]), let sec = Double(parts[2]) else { return nil }
-        return h * 3600 + m * 60 + sec
+        guard parts.count >= 1, parts.count <= 3 else { return nil }
+        let numbers = parts.map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard !numbers.contains(where: { $0 == nil }) else { return nil }
+        let values = numbers.compactMap { $0 }
+        switch values.count {
+        case 3: return values[0] * 3600 + values[1] * 60 + values[2]
+        case 2: return values[0] * 60 + values[1]
+        default: return values[0]
+        }
+    }
+    /// Bỏ thẻ định dạng (`<i>`, `{\\an8}`…) để chữ hiện sạch.
+    private static func stripTags(_ line: String) -> String {
+        var out = ""
+        var inTag = false
+        for character in line {
+            if character == "<" { inTag = true; continue }
+            if character == ">" { inTag = false; continue }
+            if !inTag { out.append(character) }
+        }
+        while let open = out.firstIndex(of: "{"), let close = out[open...].firstIndex(of: "}") {
+            out.removeSubrange(open...close)
+        }
+        return out
     }
 }
 
@@ -1166,6 +1237,31 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    /// Cho biết phụ đề của tập đang xem đã nạp được hay chưa.
+    @ViewBuilder
+    private var subtitleStatusLine: some View {
+        if let failed = subtitles.failedURL {
+            HStack(spacing: 7) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .bold))
+                Text("Không tải được phụ đề — kiểm tra lại link phụ đề")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(Color.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+            .accessibilityLabel("Không tải được phụ đề từ \(failed)")
+        } else if subtitles.cueCount > 0 {
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 11, weight: .bold))
+                Text("Đã nạp \(subtitles.cueCount) câu phụ đề").font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(Color.auroraViolet)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+        }
+    }
+
     @ViewBuilder
     private var settingsTabContent: some View {
         switch effectiveSettingsTab {
@@ -1179,6 +1275,7 @@ struct CinemaPlayerScreen: View {
         case .subtitle:
             if hasCurrentSubtitle {
                 ScrollView(.vertical, showsIndicators: false) {
+                    subtitleStatusLine
                     subtitlePreview
                     SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2)
                 }

@@ -1473,3 +1473,16 @@ Hai lỗi cộng lại làm phụ đề thêm tay không bao giờ hiện:
   admin bấm Thêm tập, nên lúc xem không phải chờ và không phụ thuộc nguồn cho tải lại.
   Link sai thì vẫn lưu nhưng phần phụ đề để trống.
 - Phim lẻ/phim bộ được bật luôn tuỳ chỉnh phụ đề (cỡ chữ, vị trí) như Truyền Hình.
+
+## 43. Sửa gốc: phụ đề dạng `MM:SS.mmm` bị bỏ + báo trạng thái nạp phụ đề
+
+- **Bộ đọc phụ đề**: hàm `parseTime` cũ đòi mốc thời gian phải **đủ 3 phần**
+  `HH:MM:SS.mmm`. WebVTT cho phép `MM:SS.mmm` và nguồn phim phát đúng dạng đó, nên phần
+  lớn câu phụ đề bị bỏ lặng lẽ. Đo trên file thật của người dùng: thuật toán cũ đọc được
+  **1376/2344 câu**, thuật toán mới đọc đủ **2344 câu**. Bộ đọc mới nhận cả
+  `HH:MM:SS.mmm`, `MM:SS.mmm`, `SS.mmm`, dấu `,` của SRT, file không có dòng trống giữa
+  các câu, có BOM, và tự bỏ thẻ định dạng (`<i>`, `{\an8}`).
+- **Tải phụ đề**: gửi header giống trình duyệt (UA + Accept) và thử thêm bảng mã
+  Latin-1 nếu file không phải UTF-8 — vài CDN phim chặn client lạ.
+- **Thấy được tình trạng**: tab Phụ đề hiện “Đã nạp N câu phụ đề” hoặc “Không tải được
+  phụ đề — kiểm tra lại link phụ đề”, thay vì im lặng như trước.
