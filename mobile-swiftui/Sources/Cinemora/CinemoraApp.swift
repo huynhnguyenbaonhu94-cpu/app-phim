@@ -45,12 +45,14 @@ struct CinemoraApp: App {
     @State private var store = CinemaStore()
     @State private var connectivity = ConnectivityMonitor()
     @State private var tvStore = TvStore()
+    @State private var downloads = DownloadManager()
 
     var body: some Scene {
         WindowGroup {
             CinemoraTabShell(store: store, tvStore: tvStore)
                 .environment(store)
                 .environment(connectivity)
+                .environment(downloads)
                 .preferredColorScheme(.dark)
         }
     }
@@ -333,6 +335,7 @@ private struct AuroraTabScreen: View {
                 .environment(store)
                 .environment(tvStore)
                 .environment(connectivity)
+                .environment(downloads)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
                 }

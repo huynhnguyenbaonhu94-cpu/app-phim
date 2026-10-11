@@ -521,7 +521,17 @@ final class CinemaStore {
         }
     }
 
-    func loadCatalog(kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil, reset: Bool = true) {
+    func loadCatalog(
+        kind: String = "latest",
+        category: String? = nil,
+        country: String? = nil,
+        year: Int? = nil,
+        reset: Bool = true,
+        kinds: [String] = [],
+        categories: [String] = [],
+        countries: [String] = [],
+        years: [Int] = []
+    ) {
         if !reset && catalogLoading { return }
         catalogTask?.cancel()
         catalogRequestID += 1
@@ -532,7 +542,7 @@ final class CinemaStore {
         catalogTask = Task {
             defer { if requestID == catalogRequestID { catalogLoading = false } }
             do {
-                let page = try await api.list(page: nextPage, kind: kind, category: category, country: country, year: year)
+                let page = try await api.list(page: nextPage, kind: kind, category: category, country: country, year: year, kinds: kinds, categories: categories, countries: countries, years: years)
                 guard !Task.isCancelled, requestID == catalogRequestID else { return }
                 if reset { catalogMovies = page.items }
                 else {

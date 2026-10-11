@@ -106,6 +106,11 @@ export const appRouter = router({
       country: z.string().trim().max(80).optional(),
       year: z.number().int().min(1900).max(2100).optional(),
       refresh: z.boolean().optional(),
+      // Lọc nhiều lựa chọn: gửi kèm mảng để gộp kết quả của nhiều tổ hợp.
+      kinds: z.array(z.string().trim().max(40)).max(6).optional(),
+      categories: z.array(z.string().trim().max(80)).max(6).optional(),
+      countries: z.array(z.string().trim().max(80)).max(6).optional(),
+      years: z.array(z.number().int().min(1900).max(2100)).max(6).optional(),
     })).query(({ input }) => getMovies(input)),
     search: publicProcedure.input(z.object({ keyword: z.string().trim().min(2).max(80), page: pageInput })).query(({ input }) => searchMovies(input)),
     detail: publicProcedure.input(z.object({ slug: slugInput })).query(({ input }) => getMovieDetail(input.slug)),

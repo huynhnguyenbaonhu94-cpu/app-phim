@@ -110,7 +110,7 @@ final class PlaybackController: ObservableObject {
         player.play()
         isPlaying = true
     }
-    func load(_ episode: MovieEpisode, startAt: Double? = nil) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil) {
         configureAudioSession()
         loadTask?.cancel()
         activeRequestID = UUID()
@@ -122,7 +122,7 @@ final class PlaybackController: ObservableObject {
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
         itemObservation = nil
-        guard let url = episode.playbackURL else {
+        guard let url = localURL ?? episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
             errorMessage = "Tập này hiện chưa có đường dẫn phát."
@@ -471,6 +471,7 @@ struct CinemaPlayerScreen: View {
     let subtitleCustomizationEnabled: Bool
     let onOpenRelated: ((Movie) -> Void)?
     @Environment(CinemaStore.self) private var store
+    @Environment(DownloadManager.self) private var downloads
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = PlaybackController()
@@ -1806,7 +1807,12 @@ struct CinemaPlayerScreen: View {
         didHandleEpisodeEnd = false
         let startAt = hasAppliedResumeTime ? nil : resumeTime
         subtitles.load(url: hasCurrentSubtitle ? episode.subtitleURL : nil, bilingualURL: nil)
-        playback.load(episode, startAt: startAt)
+        // Ưu tiên bản đã tải về máy để xem được khi mất mạng.
+        let offlineURL = downloads.localURL(
+            movieSlug: movie.slug,
+            episodeSlug: episode.slug.isEmpty ? episode.name : episode.slug
+        )
+        playback.load(episode, startAt: startAt, localURL: offlineURL)
         if startAt != nil { hasAppliedResumeTime = true }
         saveLocalWatchProgress()
     }

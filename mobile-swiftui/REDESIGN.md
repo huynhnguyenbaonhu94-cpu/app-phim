@@ -1278,3 +1278,51 @@ Long-poll, nhãn quyền, ghim và ảnh đại diện đều cần backend Node
 PHP độc lập (`cpanel-comments/`) vẫn chỉ có bình luận cơ bản: app sẽ tự chuyển sang làm
 mới mỗi 6 giây, không có ghim và không có nhãn quyền. Website luôn dùng backend Node nên
 phần quản trị chạy đủ tính năng trong cả hai trường hợp.
+
+## 32. Tải phim offline, poster và bộ lọc nhiều lựa chọn
+
+### Poster trắng ở một số phim
+- **Nguyên nhân**: token ảnh `/api/cinema/image/<token>` chỉ sống **2 giờ**, trong khi
+  `Cache-Control` lại khai 2 giờ. Danh sách phim tải về lúc sáng tới chiều là hàng loạt
+  poster 404 dù API vẫn trả đúng đường dẫn.
+- **Sửa**: token ảnh nay là **URL nguồn mã hoá base64url**, không còn hạn và không cần
+  bảng tra trong bộ nhớ. Máy chủ giải mã rồi kiểm tra lại host nằm trong danh sách cho phép.
+  Ảnh `http://` cũng được nâng thành `https://` thay vì bị loại (iOS chặn http).
+
+### Tải phim về xem khi không có wifi
+- `State/DownloadManager.swift`: nguồn là HLS nên tải bằng playlist — chọn biến thể băng
+  thông cao nhất, tải từng phân đoạn theo lô 3 và **ghi theo đúng thứ tự**, nối thành tệp
+  `.ts` mà `AVPlayer` phát trực tiếp được.
+- Tải tiếp được sau khi tạm dừng: tệp tạm luôn chứa đúng các phân đoạn đầu, nên lần sau
+  ghi tiếp từ phân đoạn dang dở.
+- Giới hạn **2 tập tải song song**, phần còn lại xếp hàng — tránh nghẽn mạng và hao pin
+  khi bấm "Tải tất cả" cho bộ phim dài.
+- Nguồn có `#EXT-X-KEY` (AES-128) được đánh dấu **không hỗ trợ** kèm lời giải thích, thay
+  vì tải về một tệp hỏng.
+- `Views/DownloadsScreen.swift`: màn "Đã tải xuống" hiện tiến trình theo thời gian thực,
+  dung lượng đã tải, trạng thái từng tập, tạm dừng/tiếp tục/xoá; bảng `DownloadSheet` cho
+  phép chọn nguồn (vietsub, lồng tiếng, thuyết minh…) rồi tải từng tập hoặc tải cả nguồn.
+- Trình phát ưu tiên tệp đã tải trong máy, nên phim đã tải phát được khi mất mạng.
+
+### Bộ lọc nhiều lựa chọn
+- Thư viện: các nhóm **nguồn phim, thể loại, quốc gia, năm** nay chọn được nhiều giá trị
+  cùng lúc (ví dụ Phim Bộ + Phim Lẻ).
+- API `cinema.list` nhận mảng `kinds/categories/countries/years`, gộp kết quả của từng tổ
+  hợp (tối đa 6 lượt gọi nguồn) rồi khử trùng theo slug.
+
+## 33. Thư mục tải xuống trong cài đặt
+
+- Màn mới `Views/DownloadFolderScreen.swift`, vào từ tab **Lưu → Thư mục tải xuống** hoặc
+  nút **Thư mục** ở màn Đã tải xuống.
+- **Thư mục mặc định** chuyển từ `Application Support/Cinemora/Downloads` sang
+  `Documents/Downloads`, kèm `UIFileSharingEnabled` và `LSSupportsOpeningDocumentsInPlace`
+  trong `Info.plist` — nhờ vậy thư mục hiện được trong app Tệp và nút **Mở thư mục** hoạt động.
+- **Chọn thư mục khác**: `UIDocumentPickerViewController(forOpeningContentTypes: [.folder])`,
+  lưu quyền truy cập bằng security-scoped bookmark trong `UserDefaults`. Bookmark được làm mới
+  khi cũ (stale) và **tự quay về thư mục mặc định kèm thông báo** nếu quyền bị thu hồi, thay vì
+  để mọi bản tải xuống thất bại trong im lặng.
+- **Dùng thư mục mặc định**: trả bookmark, chuyển các tệp `.ts` đã tải về lại.
+- Đổi thư mục thì **di chuyển tệp đã tải** sang thư mục mới (bỏ qua tệp đã có ở đích).
+- Màn cài đặt hiển thị đường dẫn đầy đủ, dung lượng đã tải và dung lượng còn trống của thiết bị.
+- Sửa lỗi phát hiện khi rà lại: thuộc tính `maxConcurrent` của hàng đợi tải chưa được chèn ở
+  lần vá trước (bản build sẽ không biên dịch được), nay đã bổ sung cùng hàng đợi 2 tập song song.

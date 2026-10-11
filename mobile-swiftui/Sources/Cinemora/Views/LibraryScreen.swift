@@ -9,10 +9,10 @@ private struct LibraryFilterOption: Identifiable {
 struct LibraryScreen: View {
     @Environment(CinemaStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
-    @State private var kind = "latest"
-    @State private var category = ""
-    @State private var country = ""
-    @State private var year: Int?
+    @State private var selectedKinds: Set<String> = []
+    @State private var categories: Set<String> = []
+    @State private var countries: Set<String> = []
+    @State private var years: Set<Int> = []
     @State private var filtersExpanded = false
     @State private var loadedSignature: String?
     @State private var lastLoadAt: Date?
@@ -33,8 +33,10 @@ struct LibraryScreen: View {
     ]
 
     private var activeFilterCount: Int {
-        [category, country].filter { !$0.isEmpty }.count + (year == nil ? 0 : 1)
+        selectedKinds.count + categories.count + countries.count + years.count
     }
+    /// Nguồn chính gửi lên máy chủ; rỗng nghĩa là "phim mới" (tất cả).
+    private var primaryKind: String { selectedKinds.first ?? "latest" }
 
     var body: some View {
         ZStack {
@@ -93,7 +95,7 @@ struct LibraryScreen: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 9) {
                 ForEach(kinds) { option in
-                    AuroraChip(title: option.title, selected: kind == option.value) {
+                    AuroraChip(title: option.title, selected: selectedKinds.contains(option.value)) {
                         selectKind(option.value)
                     }
                 }
@@ -159,16 +161,18 @@ struct LibraryScreen: View {
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let meta = store.catalogMeta {
-                filterGroup("THỂ LOẠI", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: category) { value in
-                    category = category == value ? "" : value
+                filterGroup("THỂ LOẠI", values: meta.categories.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: categories) { value in
+                    if categories.contains(value) { categories.remove(value) } else { categories.insert(value) }
                     load()
                 }
-                filterGroup("QUỐC GIA", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: country) { value in
-                    country = country == value ? "" : value
+                filterGroup("QUỐC GIA", values: meta.countries.map { LibraryFilterOption(title: $0.name, value: $0.slug) }, selected: countries) { value in
+                    if countries.contains(value) { countries.remove(value) } else { countries.insert(value) }
                     load()
                 }
-                filterGroup("NĂM", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: year.map { String($0) } ?? "") { value in
-                    year = year == Int(value) ? nil : Int(value)
+                filterGroup("NĂM", values: meta.years.prefix(10).map { LibraryFilterOption(title: String($0), value: String($0)) }, selected: Set(years.map(String.init))) { value in
+                    if let number = Int(value) {
+                        if years.contains(number) { years.remove(number) } else { years.insert(number) }
+                    }
                     load()
                 }
             } else if store.catalogLoading {
@@ -207,12 +211,12 @@ struct LibraryScreen: View {
                         .id("library-movie-\(movie.id)")
                         .task {
                             if store.catalogHasMore && store.catalogMovies.suffix(4).contains(where: { $0.id == movie.id }) {
-                                store.loadCatalog(kind: kind, category: category.isEmpty ? nil : category, country: country.isEmpty ? nil : country, year: year, reset: false)
+                                store.loadCatalog(kind: primaryKind, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years), reset: false)
                             }
                         }
                 }
             }
-            .id("library-results-\(kind)-\(category)-\(country)-\(year.map(String.init) ?? "all")")
+            .id("library-results-\(primaryKind)-\(categories.sorted().joined())-\(countries.sorted().joined())-\(years.sorted().map(String.init).joined())")
 
             if store.catalogLoading {
                 HStack(spacing: 9) {
@@ -236,25 +240,25 @@ struct LibraryScreen: View {
     // MARK: - Helpers
 
     private func selectKind(_ value: String) {
-        withAnimation(Motion.gentle) { kind = value }
+        withAnimation(Motion.gentle) {
+            if selectedKinds.contains(value) { selectedKinds.remove(value) } else { selectedKinds.insert(value) }
+        }
         load()
     }
 
     private func resetFilters() {
-        category = ""
-        country = ""
-        year = nil
+        selectedKinds.removeAll(); categories.removeAll(); countries.removeAll(); years.removeAll()
         load()
     }
 
     private func load() {
         loadedSignature = filterSignature
         lastLoadAt = Date()
-        store.loadCatalog(kind: kind, category: category.isEmpty ? nil : category, country: country.isEmpty ? nil : country, year: year)
+        store.loadCatalog(kind: primaryKind, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years))
     }
 
     private var filterSignature: String {
-        "\(kind)|\(category)|\(country)|\(year.map(String.init) ?? "-")"
+        "\(primaryKind)|\(selectedKinds.sorted().joined() )|\(categories.sorted().joined())|\(countries.sorted().joined())|\(years.sorted().map(String.init).joined())"
     }
 
     /// `TabView` re-runs `.task` every time the tab becomes visible again.
@@ -271,20 +275,34 @@ struct LibraryScreen: View {
         load()
     }
 
-    private func filterGroup(_ title: String, values: [LibraryFilterOption], selected: String, action: @escaping (String) -> Void) -> some View {
+    private func filterGroup(_ title: String, values: [LibraryFilterOption], selected: Set<String>, onSelect: @escaping (String) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            SectionEyebrow(text: title)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(values) { option in
-                        AuroraChip(title: option.title, selected: selected == option.value) {
-                            action(option.value)
-                        }
+            Text(title)
+                .font(.auroraLabel(10, weight: .black))
+                .foregroundStyle(Color.auroraTextSecondary)
+            FlowChips(values: values, selected: selected, onSelect: onSelect)
+        }
+    }
+}
+
+
+/// Hàng chip cho phép chọn nhiều giá trị cùng lúc (ví dụ Phim Bộ + Phim Lẻ).
+private struct FlowChips: View {
+    let values: [LibraryFilterOption]
+    let selected: Set<String>
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(values) { option in
+                    AuroraChip(title: option.title, selected: selected.contains(option.value)) {
+                        onSelect(option.value)
                     }
                 }
-                .padding(.vertical, 2)
             }
-            .scrollClipDisabled()
+            .padding(.vertical, 2)
         }
+        .scrollClipDisabled()
     }
 }

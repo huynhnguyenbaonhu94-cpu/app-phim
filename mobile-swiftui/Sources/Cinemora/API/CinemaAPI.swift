@@ -106,12 +106,27 @@ struct CinemaAPI {
         try await query("cinema.dailyUpdates", input: ["page": page])
     }
 
-    func list(page: Int = 1, kind: String = "latest", category: String? = nil, country: String? = nil, year: Int? = nil) async throws -> MoviePage {
+    func list(
+        page: Int = 1,
+        kind: String = "latest",
+        category: String? = nil,
+        country: String? = nil,
+        year: Int? = nil,
+        kinds: [String] = [],
+        categories: [String] = [],
+        countries: [String] = [],
+        years: [Int] = []
+    ) async throws -> MoviePage {
         let serverKind = kind == "ongoing" || kind == "completed" ? "series" : kind
         var input: [String: Any] = ["page": page, "kind": serverKind]
         if let category, !category.isEmpty { input["category"] = category }
         if let country, !country.isEmpty { input["country"] = country }
         if let year { input["year"] = year }
+        // Bộ lọc nhiều lựa chọn: máy chủ gộp kết quả của từng tổ hợp.
+        if !kinds.isEmpty { input["kinds"] = kinds }
+        if !categories.isEmpty { input["categories"] = categories }
+        if !countries.isEmpty { input["countries"] = countries }
+        if !years.isEmpty { input["years"] = years }
         let pageResult: MoviePage = try await query("cinema.list", input: input)
         guard kind == "ongoing" || kind == "completed" else { return pageResult }
         let items = kind == "completed" ? pageResult.items.filter(isCompletedSeries) : pageResult.items.filter { !isCompletedSeries($0) }

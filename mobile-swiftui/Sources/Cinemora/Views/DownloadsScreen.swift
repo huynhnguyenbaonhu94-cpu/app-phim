@@ -1,0 +1,359 @@
+import SwiftUI
+
+/// Danh sách phim đã tải về, kèm tiến trình theo thời gian thực và dung lượng.
+struct DownloadsScreen: View {
+    @Environment(DownloadManager.self) private var downloads
+    @State private var pendingRemoval: DownloadManager.Item?
+
+    var body: some View {
+        ZStack {
+            CinemaBackground()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionEyebrow(text: "XEM KHI KHÔNG CÓ WIFI")
+                        AuroraGradientText(text: "Đã tải xuống", font: .auroraDisplay(28))
+                        Text("Phim đã tải nằm trong bộ nhớ máy, phát được khi mất mạng. Chỉ nguồn không mã hoá mới tải được.")
+                            .font(.auroraBody(12))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 18)
+                    .auroraReveal(0)
+
+                    summaryCard
+                        .auroraReveal(1)
+
+                    if downloads.items.isEmpty {
+                        emptyState
+                            .auroraReveal(2)
+                    } else {
+                        ForEach(Array(downloads.items.enumerated()), id: \.element.id) { index, item in
+                            row(item)
+                                .auroraReveal(min(index + 2, 8))
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 120)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .alert("Xoá bản tải xuống?", isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })) {
+            Button("Xoá", role: .destructive) {
+                if let item = pendingRemoval { downloads.remove(item.id) }
+                pendingRemoval = nil
+            }
+            Button("Giữ lại", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text(pendingRemoval.map { "\($0.movieName) — \($0.episodeName) sẽ bị xoá khỏi máy." } ?? "")
+        }
+    }
+
+    private var summaryCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.auroraMint.opacity(0.16)).frame(width: 44, height: 44)
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Color.auroraMint)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(downloads.finishedCount) tập đã tải")
+                    .font(.auroraLabel(13, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(downloads.activeCount > 0
+                     ? "\(downloads.activeCount) tập đang tải · \(downloads.totalSizeText) trong máy"
+                     : "Dung lượng đã dùng: \(downloads.totalSizeText)")
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+            Spacer(minLength: 0)
+            NavigationLink {
+                DownloadFolderScreen()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").font(.system(size: 12, weight: .bold))
+                    Text("Thư mục").font(.auroraLabel(11, weight: .bold))
+                }
+                .foregroundStyle(Color.auroraSky)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(Color.auroraSky.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .auroraCard(cornerRadius: 20, tint: .auroraMint)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(Color.auroraTextSecondary)
+            Text("Chưa có phim nào được tải")
+                .font(.auroraLabel(13, weight: .bold))
+                .foregroundStyle(.white)
+            Text("Mở một phim rồi bấm nút tải xuống ở phần chọn nguồn để lưu tập về máy.")
+                .font(.auroraBody(11))
+                .foregroundStyle(Color.auroraTextSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .padding(.horizontal, 20)
+        .auroraCard(cornerRadius: 22, tint: .auroraSky)
+    }
+
+    private func row(_ item: DownloadManager.Item) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                PosterArt(url: URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL)
+                    .frame(width: 52, height: 74)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.movieName)
+                        .font(.auroraLabel(13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    Text("\(item.serverName) · \(item.episodeName)")
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        statusChip(item)
+                        Text(item.sizeText)
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            if item.phase == .downloading || item.phase == .paused || item.phase == .waiting {
+                ProgressBar(value: item.progress)
+                if item.totalSegments > 0 {
+                    Text("\(item.doneSegments)/\(item.totalSegments) phân đoạn")
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                }
+            }
+
+            if let message = item.message {
+                Text(message)
+                    .font(.auroraBody(11))
+                    .foregroundStyle(item.phase == .unsupported ? Color.auroraAmber : Color.auroraPink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                if item.phase == .downloading || item.phase == .waiting {
+                    actionButton("Tạm dừng", icon: "pause.fill") { downloads.pause(item.id) }
+                } else if item.phase == .paused || item.phase == .failed {
+                    actionButton("Tiếp tục", icon: "play.fill") { downloads.retry(item.id) }
+                }
+                if item.phase == .finished {
+                    actionButton("Đã xong", icon: "checkmark.circle.fill", tint: .auroraMint) { }
+                }
+                Spacer(minLength: 0)
+                actionButton("Xoá", icon: "trash", tint: .auroraPink) { pendingRemoval = item }
+            }
+        }
+        .padding(14)
+        .auroraCard(cornerRadius: 20, tint: item.phase == .finished ? .auroraMint : .auroraViolet)
+    }
+
+    private func statusChip(_ item: DownloadManager.Item) -> some View {
+        let tint: Color = switch item.phase {
+        case .finished: .auroraMint
+        case .failed: .auroraPink
+        case .unsupported: .auroraAmber
+        default: .auroraSky
+        }
+        return Text(item.phase.title)
+            .font(.auroraLabel(10, weight: .bold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.14), in: Capsule())
+    }
+
+    private func actionButton(_ title: String, icon: String, tint: Color = .auroraViolet, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11, weight: .bold))
+                Text(title).font(.auroraLabel(11, weight: .bold))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(tint.opacity(0.14), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Thanh tiến trình dùng chung cho màn tải xuống.
+struct ProgressBar: View {
+    let value: Double
+    var tint: Color = .auroraViolet
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.10))
+                Capsule()
+                    .fill(LinearGradient(colors: [tint, .auroraPink], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(0, min(1, value)) * proxy.size.width)
+                    .animation(Motion.gentle, value: value)
+            }
+        }
+        .frame(height: 6)
+    }
+}
+
+/// Bảng tải xuống của một phim: chọn nguồn, xem danh sách tập, tải từng tập.
+struct DownloadSheet: View {
+    let movie: Movie
+    let servers: [MovieServer]
+    @Environment(DownloadManager.self) private var downloads
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedServer: Int
+
+    init(movie: Movie, servers: [MovieServer], initialServer: Int = 0) {
+        self.movie = movie
+        self.servers = servers
+        _selectedServer = State(initialValue: min(max(initialServer, 0), max(servers.count - 1, 0)))
+    }
+
+    private var episodes: [MovieEpisode] {
+        servers.indices.contains(selectedServer) ? servers[selectedServer].episodes : []
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                CinemaBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Chọn nguồn rồi tải từng tập về máy. Nguồn mã hoá AES-128 sẽ báo không hỗ trợ.")
+                            .font(.auroraBody(12))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
+                                    Button {
+                                        withAnimation(Motion.gentle) { selectedServer = index }
+                                    } label: {
+                                        Text(server.name)
+                                            .font(.auroraLabel(11, weight: .bold))
+                                            .foregroundStyle(selectedServer == index ? Color.auroraVoid : Color.auroraTextSecondary)
+                                            .padding(.horizontal, 13)
+                                            .padding(.vertical, 8)
+                                            .background(selectedServer == index ? Color.auroraViolet : Color.white.opacity(0.07), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .scrollIndicators(.hidden)
+
+                        if let server = servers.indices.contains(selectedServer) ? servers[selectedServer] : nil {
+                            Button {
+                                downloads.enqueueAll(movie: movie, serverName: server.name, episodes: episodes)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 13, weight: .bold))
+                                    Text("Tải tất cả \(episodes.count) tập").font(.auroraLabel(12, weight: .bold))
+                                }
+                                .foregroundStyle(Color.auroraVoid)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(LinearGradient(colors: [.auroraViolet, .auroraPink], startPoint: .leading, endPoint: .trailing), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(episodes.isEmpty)
+                            .opacity(episodes.isEmpty ? 0.5 : 1)
+
+                            VStack(spacing: 8) {
+                                ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
+                                    episodeRow(server: server, episode: episode, index: index)
+                                }
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .padding(.bottom, 30)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .navigationTitle("Tải xuống")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Xong") { dismiss() }
+                        .font(.auroraLabel(12, weight: .bold))
+                        .foregroundStyle(Color.auroraViolet)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func episodeRow(server: MovieServer, episode: MovieEpisode, index: Int) -> some View {
+        let item = downloads.item(movieSlug: movie.slug, episodeSlug: episode.slug.isEmpty ? episode.name : episode.slug)
+        return HStack(spacing: 12) {
+            Text(String(format: "%02d", index + 1))
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(Color.auroraViolet)
+                .frame(width: 22, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(episode.name)
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                if let item {
+                    if item.phase == .downloading {
+                        ProgressBar(value: item.progress).frame(width: 140)
+                        Text(item.sizeText).font(.auroraBody(10)).foregroundStyle(Color.auroraTextSecondary)
+                    } else {
+                        Text(item.message ?? item.phase.title)
+                            .font(.auroraBody(10))
+                            .foregroundStyle(item.phase == .finished ? Color.auroraMint : Color.auroraTextSecondary)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if let item, item.phase == .finished {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.auroraMint)
+            } else if episode.playbackURL != nil {
+                Button {
+                    if let item, item.phase == .downloading || item.phase == .waiting {
+                        downloads.pause(item.id)
+                    } else {
+                        downloads.enqueue(movie: movie, serverName: server.name, episode: episode)
+                    }
+                } label: {
+                    Image(systemName: item?.phase == .downloading ? "pause.circle.fill" : "arrow.down.circle")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.auroraViolet)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("Không có nguồn")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+        }
+        .padding(12)
+        .auroraCard(cornerRadius: 16, tint: .auroraSky)
+    }
+}

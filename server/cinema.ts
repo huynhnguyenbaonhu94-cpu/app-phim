@@ -44,7 +44,33 @@ function resolveImage(value: unknown, pathImage?: string) {
     const raw = value.trim();
     const base = raw.startsWith("upload/") || raw.startsWith("/upload/") ? IMAGE_BASE : raw.startsWith("uploads/") || raw.startsWith("/uploads/") ? "https://phimapi.com/" : (pathImage || "https://phimapi.com/uploads/movies/");
     const url = new URL(raw, base);
-    if (url.protocol !== "https:" || !allowedImageHosts.has(url.hostname)) return null;
+    // Nhiều nguồn cũ trả ảnh http://. App iOS chặn http (ATS) nên đổi sang https
+    // trước khi kiểm tra, thay vì loại bỏ và để phim trắng poster.
+    if (url.protocol === "http:") url.protocol = "https:";
+    if (url.protocol !== "https:" || !isAllowedImageHost(url.hostname)) return null;
+    return url.toString();
+  } catch { return null; }
+}
+
+function isAllowedImageHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return Array.from(allowedImageHosts).some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+}
+
+/**
+ * Token ảnh chính là URL nguồn được mã hoá base64url. Nhờ vậy token không hết
+ * hạn: trước đây token sống 2 giờ nên danh sách phim tải về lúc sáng, tới chiều
+ * là hàng loạt poster trắng dù API vẫn trả đúng đường dẫn.
+ */
+function encodeImageToken(source: string) {
+  return Buffer.from(source, "utf8").toString("base64url");
+}
+
+function decodeImageToken(token: string) {
+  try {
+    const source = Buffer.from(token, "base64url").toString("utf8");
+    const url = new URL(source);
+    if (url.protocol !== "https:" || !isAllowedImageHost(url.hostname)) return null;
     return url.toString();
   } catch { return null; }
 }
@@ -67,17 +93,7 @@ function registerImageSource(source: string | null) {
       sourceImageTokens.delete(oldest);
     }
   }
-  const expires = Date.now() + 120 * 60_000;
-  const existing = sourceImageTokens.get(source);
-  if (existing && existing.expires > Date.now() && imageTokens.has(existing.token)) {
-    imageTokens.set(existing.token, { url: source, expires });
-    sourceImageTokens.set(source, { token: existing.token, expires });
-    return apiRoute(`/api/cinema/image/${existing.token}`);
-  }
-  const token = randomUUID().replaceAll("-", "");
-  imageTokens.set(token, { url: source, expires });
-  sourceImageTokens.set(source, { token, expires });
-  return apiRoute(`/api/cinema/image/${token}`);
+  return apiRoute(`/api/cinema/image/${encodeImageToken(source)}`);
 }
 
 function imageUrl(value: unknown, pathImage?: string) { return registerImageSource(resolveImage(value, pathImage)); }
@@ -94,6 +110,9 @@ function embedUrl(value: unknown) {
 }
 
 export function getImageSource(token: string) {
+  const stateless = decodeImageToken(token);
+  if (stateless) return stateless;
+  // Token cũ (ngẫu nhiên, có hạn) vẫn phải chạy để không phá link đang lưu.
   const entry = imageTokens.get(token);
   if (!entry || entry.expires < Date.now()) { imageTokens.delete(token); return null; }
   return entry.url;
@@ -330,7 +349,27 @@ function isCompletedSeries(movie: Movie) {
   }
   return false;
 }
-export async function getMovies(input: { kind: keyof typeof listEndpoints; page?: number; category?: string; country?: string; year?: number; refresh?: boolean }) {
+type MovieListResult = { items: Movie[]; pagination: ReturnType<typeof unwrapItems>["pagination"] };
+
+export async function getMovies(input: {
+  kind: keyof typeof listEndpoints;
+  page?: number;
+  category?: string;
+  country?: string;
+  year?: number;
+  refresh?: boolean;
+  /** Lọc nhiều lựa chọn cùng lúc: ví dụ Phim Bộ + Phim Lẻ, nhiều thể loại… */
+  kinds?: string[];
+  categories?: string[];
+  countries?: string[];
+  years?: number[];
+}): Promise<MovieListResult> {
+  const extraKinds = (input.kinds || []).filter((value) => value && value in listEndpoints);
+  const extraCategories = (input.categories || []).map((value) => value.trim()).filter(Boolean);
+  const extraCountries = (input.countries || []).map((value) => value.trim()).filter(Boolean);
+  const extraYears = (input.years || []).filter((value) => Number.isInteger(value));
+  const multi = extraKinds.length > 0 || extraCategories.length > 0 || extraCountries.length > 0 || extraYears.length > 0;
+  if (multi) return getMoviesMulti(input, extraKinds, extraCategories, extraCountries, extraYears);
   const category = input.category?.trim() || undefined;
   const country = input.country?.trim() || undefined;
   const year = input.year;
@@ -358,6 +397,50 @@ export async function getMovies(input: { kind: keyof typeof listEndpoints; page?
       : normalized;
   return { items: filtered, pagination };
 }
+/** Gộp kết quả của nhiều tổ hợp lọc, khử trùng theo slug rồi phân trang. */
+async function getMoviesMulti(
+  input: { kind: keyof typeof listEndpoints; page?: number; refresh?: boolean },
+  kinds: string[],
+  categories: string[],
+  countries: string[],
+  years: number[],
+): Promise<MovieListResult> {
+  const kindList = (kinds.length ? kinds : [input.kind]) as Array<keyof typeof listEndpoints>;
+  const categoryList: Array<string | undefined> = categories.length ? categories : [undefined];
+  const countryList: Array<string | undefined> = countries.length ? countries : [undefined];
+  const yearList: Array<number | undefined> = years.length ? years : [undefined];
+  const combos: Array<{ kind: keyof typeof listEndpoints; category?: string; country?: string; year?: number }> = [];
+  for (const kind of kindList) {
+    for (const category of categoryList) {
+      for (const country of countryList) {
+        for (const year of yearList) {
+          combos.push({ kind, category, country, year });
+        }
+      }
+    }
+  }
+  // Mỗi tổ hợp là một lượt gọi upstream; giới hạn để không dội API nguồn.
+  const limited = combos.slice(0, 6);
+  const pages = await Promise.all(limited.map((combo) => getMovies({
+    kind: combo.kind,
+    page: input.page,
+    category: combo.category,
+    country: combo.country,
+    year: combo.year,
+    refresh: input.refresh,
+  })));
+  const seen = new Set<string>();
+  const items: Movie[] = [];
+  for (const page of pages) {
+    for (const movie of page.items) {
+      if (seen.has(movie.slug)) continue;
+      seen.add(movie.slug);
+      items.push(movie);
+    }
+  }
+  return { items, pagination: pages[0]?.pagination ?? null };
+}
+
 export async function searchMovies(input: { keyword: string; page?: number }) {
   const keyword = input.keyword.trim().slice(0, 80);
   if (keyword.length < 2) return { items: [], pagination: null };
