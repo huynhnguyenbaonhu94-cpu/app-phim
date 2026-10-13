@@ -783,6 +783,13 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
+            .onChange(of: playback.isLoading) { _, isLoading in
+                // Đang tải nguồn thì không đếm giờ ẩn; vừa tải xong mới bắt đầu đếm.
+                if isLoading { hideTask?.cancel() } else { scheduleHide() }
+            }
+            .onChange(of: playback.errorMessage) { _, message in
+                if message != nil { hideTask?.cancel(); controlsVisible = true }
+            }
             .onChange(of: playback.currentTime) { _, time in
                 subtitles.update(time: time, bilingual: false)
                 handlePlaybackProgress()
@@ -2027,7 +2034,13 @@ struct CinemaPlayerScreen: View {
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
-            if playback.isPlaying && picker == nil { withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false } }
+            // Chỉ ẩn khi phim đã chạy thật: đang tải nguồn hoặc đang báo lỗi thì
+            // giữ công cụ (kèm nút Trở lại) cho người xem.
+            guard playback.isPlaying,
+                  !playback.isLoading,
+                  playback.errorMessage == nil,
+                  picker == nil else { return }
+            withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false }
         }
     }
 

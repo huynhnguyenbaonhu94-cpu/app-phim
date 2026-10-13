@@ -188,6 +188,8 @@ struct SubtitlePreferencesScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .onAppear { preferences = store.playbackDefaults.subtitlePreferences }
         .onChange(of: preferences) { _, value in
             // Đợi SwiftUI hoàn tất transaction của Toggle/Slider rồi mới

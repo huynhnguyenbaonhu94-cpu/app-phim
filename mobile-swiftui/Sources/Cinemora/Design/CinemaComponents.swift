@@ -564,6 +564,8 @@ struct AuroraBackButton: View {
                 .padding(.vertical, 11)
         }
         .buttonStyle(.auroraPress(scale: 0.94))
+        // Cả viên thuốc là vùng bấm, kể cả khi ngón tay đặt lệch khỏi chữ.
+        .contentShape(Capsule())
         // App surface, not the video chrome: on the near-black app background a
         // translucent black pill is invisible, while the raised surface plus a
         // hairline reads as a real control.

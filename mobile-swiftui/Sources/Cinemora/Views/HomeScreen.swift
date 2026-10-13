@@ -219,6 +219,8 @@ struct SectionListScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .task { await load(reset: true) }
     }
 

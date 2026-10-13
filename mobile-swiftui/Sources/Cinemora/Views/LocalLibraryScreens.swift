@@ -55,6 +55,8 @@ struct WatchHistoryScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .alert("Xóa toàn bộ lịch sử xem?", isPresented: $showClearAlert) {
             Button("Xóa tất cả", role: .destructive) { store.clearHistory() }
             Button("Hủy", role: .cancel) { }
@@ -191,6 +193,8 @@ struct FavoritesScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .alert("Xóa toàn bộ yêu thích?", isPresented: $showClearAlert) {
             Button("Xóa tất cả", role: .destructive) { store.clearFavorites() }
             Button("Hủy", role: .cancel) { }
@@ -417,6 +421,8 @@ struct PlaybackDefaultsScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .onChange(of: store.playbackDefaults) { _, _ in store.savePlaybackDefaults() }
         .onDisappear { store.savePlaybackDefaults() }
     }

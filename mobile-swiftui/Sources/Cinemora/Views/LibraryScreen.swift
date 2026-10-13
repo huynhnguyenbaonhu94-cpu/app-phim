@@ -196,35 +196,6 @@ struct LibraryScreen: View {
         }
         .padding(16)
         .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.7)
-        .onAppear { refreshCounts() }
-        .onChange(of: filterSignature) { _, _ in refreshCounts() }
-    }
-
-    /// Đếm số phim cho từng lựa chọn của cả ba nhóm lọc theo bộ lọc đang bật.
-    private func refreshCounts() {
-        guard let meta = store.catalogMeta else { return }
-        let kinds = Array(selectedKinds)
-        let selectedCategories = Array(categories)
-        let selectedCountries = Array(countries)
-        let selectedYears = Array(years)
-        store.loadFilterCounts(
-            dimension: "categories",
-            options: meta.categories.prefix(18).map(\.slug),
-            kind: primaryKind, kinds: kinds,
-            categories: selectedCategories, countries: selectedCountries, years: selectedYears
-        )
-        store.loadFilterCounts(
-            dimension: "countries",
-            options: meta.countries.prefix(18).map(\.slug),
-            kind: primaryKind, kinds: kinds,
-            categories: selectedCategories, countries: selectedCountries, years: selectedYears
-        )
-        store.loadFilterCounts(
-            dimension: "years",
-            options: meta.years.prefix(10).map(String.init),
-            kind: primaryKind, kinds: kinds,
-            categories: selectedCategories, countries: selectedCountries, years: selectedYears
-        )
     }
 
     // MARK: - Results
@@ -321,9 +292,6 @@ struct LibraryScreen: View {
                 Text(title)
                     .font(.auroraLabel(10, weight: .black))
                     .foregroundStyle(Color.auroraTextSecondary)
-                if store.filterCountsPending.contains(dimension) {
-                    ProgressView().tint(.auroraViolet).scaleEffect(0.55)
-                }
             }
             FlowChips(values: values, selected: selected, counts: counts, onSelect: onSelect)
         }
@@ -338,10 +306,9 @@ private struct FlowChips: View {
     let counts: [String: Int]
     let onSelect: (String) -> Void
 
-    /// Tên lựa chọn kèm số phim chính xác khi đã đếm xong.
+    /// Chỉ hiện tên lựa chọn, không kèm số phim cho gọn.
     private func title(for option: LibraryFilterOption) -> String {
-        guard let count = counts[option.value] else { return option.title }
-        return "\(option.title) · \(count.formatted(.number.grouping(.automatic)))"
+        option.title
     }
 
     var body: some View {

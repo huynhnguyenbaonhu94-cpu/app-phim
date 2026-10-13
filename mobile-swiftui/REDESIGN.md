@@ -1486,3 +1486,20 @@ Hai lỗi cộng lại làm phụ đề thêm tay không bao giờ hiện:
   Latin-1 nếu file không phải UTF-8 — vài CDN phim chặn client lạ.
 - **Thấy được tình trạng**: tab Phụ đề hiện “Đã nạp N câu phụ đề” hoặc “Không tải được
   phụ đề — kiểm tra lại link phụ đề”, thay vì im lặng như trước.
+
+## 44. Bốn sửa đổi trải nghiệm
+
+- **Danh sách tập khi tải (phim 1000+ tập) hết khựng**: danh sách tập trong sheet Tải
+  xuống dùng `LazyVStack` thay `VStack`, chỉ dựng những hàng đang nhìn thấy. Trước đây mở
+  sheet là tạo hết mọi hàng cùng lúc, nên phim nhiều tập bị lag, phim ít thì không.
+- **Bộ lọc bỏ số phim**: chip lọc chỉ còn tên (“Bí Ẩn” thay vì “Bí Ẩn · 3.446”), bỏ luôn
+  vòng xoay chờ đếm và **ngừng gọi máy chủ đếm số** — nhanh hơn và gọn hơn.
+- **Nút trở lại mượt hơn + vuốt cạnh**: nhịp bấm đổi sang spring `0.18` (nhanh, dứt khoát),
+  vùng bấm phủ cả viên thuốc (`contentShape`), và mọi màn chỉ có nút trở lại đều được thêm
+  **kéo từ mép trái sang phải để trở ra** (Lịch sử, Yêu thích, Cài đặt phát, Tài khoản &
+  thiết bị, Tải xuống, sheet tải tập, màn xem thêm ở Trang Chủ). Vuốt cạnh giờ nhận cả cú
+  hất nhẹ nhờ `predictedEndTranslation`.
+- **Trình phát không ẩn công cụ khi còn đang tải**: trước đây `isPlaying` bật ngay khi gọi
+  `play()` nên sau 4 giây công cụ bị ẩn dù nguồn chưa phát được. Giờ chỉ ẩn khi phim đã
+  chạy thật (`!isLoading` và không có lỗi); đang tải thì giữ nguyên công cụ, tải xong mới
+  đếm giờ ẩn, còn lỗi thì hiện thông báo lỗi kèm nút **Trở lại**.

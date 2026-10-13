@@ -10,7 +10,7 @@ import SwiftUI
 enum Motion {
     // Tuned short: every animation here either accompanies a tap or an entrance,
     // so long settle times read as input lag rather than polish.
-    static let tap = Animation.spring(response: 0.24, dampingFraction: 0.74)
+    static let tap = Animation.spring(response: 0.18, dampingFraction: 0.8)
     static let enter = Animation.spring(response: 0.40, dampingFraction: 0.88)
     static let sheet = Animation.spring(response: 0.34, dampingFraction: 0.86)
     static let gentle = Animation.easeInOut(duration: 0.26)
@@ -51,7 +51,7 @@ struct EdgeBackDrag: ViewModifier {
         content
             .offset(x: progress * 18)
             .simultaneousGesture(
-                DragGesture(minimumDistance: 18, coordinateSpace: .global)
+                DragGesture(minimumDistance: 12, coordinateSpace: .global)
                     .onChanged { value in
                         guard value.startLocation.x <= 36,
                               value.translation.width > 0,
@@ -60,11 +60,14 @@ struct EdgeBackDrag: ViewModifier {
                     }
                     .onEnded { value in
                         let horizontal = value.translation.width
+                        // Vuốt nhanh một đoạn ngắn cũng tính: dùng quán tính dự đoán
+                        // để thao tác "hất nhẹ" cũng trở ra được, không phải kéo đủ xa.
+                        let predicted = value.predictedEndTranslation.width
                         let vertical = abs(value.translation.height)
                         let shouldDismiss = value.startLocation.x <= 36
-                            && horizontal >= 90
-                            && horizontal > vertical * 1.25
-                        progress = 0
+                            && vertical < 90
+                            && (horizontal >= 80 || predicted >= 160)
+                        withAnimation(Motion.tap) { progress = 0 }
                         if shouldDismiss { onBack() }
                     }
             )

@@ -55,20 +55,8 @@ struct DownloadsScreen: View {
             .scrollIndicators(.hidden)
         }
         .toolbar(.hidden, for: .navigationBar)
-        // Vuốt từ mép trái sang phải để trở ra, dải mỏng để không cản việc cuộn.
-        .overlay(alignment: .leading) {
-            Color.clear
-                .frame(width: 16)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 12)
-                        .onEnded { value in
-                            if value.translation.width > 60, abs(value.translation.height) < 80 {
-                                dismiss()
-                            }
-                        }
-                )
-        }
+        // Vuốt từ mép trái sang phải để trở ra.
+        .modifier(EdgeBackDrag { dismiss() })
         .alert("Xoá bản tải xuống?", isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })) {
             Button("Xoá tải", role: .destructive) {
                 if let item = pendingRemoval { downloads.remove(item.id) }
@@ -419,7 +407,9 @@ struct DownloadSheet: View {
                             .disabled(episodes.isEmpty)
                             .opacity(episodes.isEmpty ? 0.5 : 1)
 
-                            VStack(spacing: 8) {
+                            // Phim 1000+ tập: dựng lười từng hàng, nếu không thì mở
+                            // sheet là khựng vì tạo hết mọi hàng cùng lúc.
+                            LazyVStack(spacing: 8) {
                                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
                                     episodeRow(server: server, episode: episode, index: index)
                                 }
@@ -442,6 +432,7 @@ struct DownloadSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+        .modifier(EdgeBackDrag { dismiss() })
     }
 
     private func episodeRow(server: MovieServer, episode: MovieEpisode, index: Int) -> some View {

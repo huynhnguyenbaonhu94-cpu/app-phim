@@ -50,6 +50,8 @@ struct AccountSettingsScreen: View {
                 .padding(.top, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
+        .modifier(EdgeBackDrag { dismiss() })
         .animation(Motion.sheet, value: store.accountUser != nil)
         .animation(Motion.sheet, value: isRegistering)
         .onAppear {
