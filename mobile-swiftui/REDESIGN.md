@@ -1515,3 +1515,16 @@ Cách sửa: tách các closure nặng ra hàm riêng, thân `body` chỉ còn l
 `handlePlayerDisappear()`, `handleSubtitlePreferencesChange(_:)`, `handleStopAtEpisodeToggle(_:)`,
 `handleLoadingChange(_:)`, `handlePlaybackErrorChange()`. Giữ nguyên 100% hành vi, chỉ đổi
 chỗ đặt mã, và tránh lặp lại lỗi này khi thêm hiệu ứng về sau.
+
+## 46. Truyền hình: vào ngang ngay, live chạy luôn
+
+- **Video đã đăng mở thẳng ở tư thế ngang**: trước đây `fullScreenCover` hiện ra ở tư
+  thế dọc rồi mới tự xoay ngang. Giờ cả kênh live lẫn video đã đăng đều đi qua
+  `presentPlayer()` → `OrientationSupport.rotateThenPresent`, tức xoay trước rồi mới mở,
+  giống màn chi tiết phim. Khi thoát, `TVVideoFullscreenPlayer` trả màn hình về dọc
+  (trước đây thiếu bước này nên app dễ kẹt ở tư thế ngang).
+- **Live chạy ngay, không phải bấm “Đồng bộ”**: `load()` trước đây gọi
+  `playImmediately` ngay sau khi gắn item, nên AVPlayer đứng ở đầu cửa sổ DVR và phải bấm
+  Đồng bộ mới xem được. Giờ `load()` và `syncToLiveEdge()` dùng chung `startLiveItems()`:
+  gắn item → đợi `readyToPlay` → chờ thêm nếu chưa có `seekableTimeRanges` → seek về mép
+  phát trực tiếp → chạy. Bấm Đồng bộ vẫn dùng đúng luồng đó.

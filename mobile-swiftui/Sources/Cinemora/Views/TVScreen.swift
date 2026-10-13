@@ -64,27 +64,50 @@ private final class TVPlaybackController: ObservableObject {
         isLoading = true
         currentTime = 0
         player.isMuted = hasSeparateAudio
+        // Live HLS chỉ chạy đúng khi đã đợi item sẵn sàng rồi seek về mép phát
+        // trực tiếp. Trước đây gọi play ngay nên player đứng ở đầu cửa sổ DVR và
+        // người xem phải bấm "Đồng bộ" mới xem được.
+        syncTask = Task { @MainActor [weak self] in
+            await self?.startLiveItems()
+        }
+    }
+
+    /// Dựng lại hai item HLS, đợi sẵn sàng, seek về mép phát trực tiếp rồi chạy.
+    ///
+    /// Dùng chung cho lần mở đầu tiên và cho nút "Đồng bộ", nên vào xem là chạy
+    /// luôn thay vì phải bấm đồng bộ một lần.
+    private func startLiveItems() async {
+        guard let url = currentURL else { return }
+        isLoading = true
+        player.pause()
+        separateAudioPlayer.pause()
         let item = AVPlayerItem(url: url)
         // Không đọc mediaSelectionGroup ngay lúc vừa bấm mở player;
         // một số HLS tải metadata đồng bộ và làm nghẽn main thread.
-        itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+        itemObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in
-                guard let self else { return }
-                if item.status == .readyToPlay {
-                    self.disableEmbeddedSubtitles(in: item)
-                    self.isLoading = false
-                }
-                if item.status == .failed { self.isLoading = false }
+                guard let self, item.status == .readyToPlay else { return }
+                self.disableEmbeddedSubtitles(in: item)
             }
         }
         player.replaceCurrentItem(with: item)
-        if let audioURL {
+        if let audioURL = currentAudioURL {
             separateAudioPlayer.replaceCurrentItem(with: AVPlayerItem(url: audioURL))
             separateAudioPlayer.volume = player.volume
             separateAudioPlayer.isMuted = player.isMuted
         } else {
             separateAudioPlayer.replaceCurrentItem(with: nil)
         }
+        await waitForItemsReady()
+        guard !Task.isCancelled else { return }
+        if player.currentItem?.seekableTimeRanges.last?.timeRangeValue == nil {
+            // Vài nguồn công bố khoảng seek được muộn hơn trạng thái ready.
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+        }
+        seekBothToLiveEdge()
+        isLoading = false
+        guard !userPaused else { isPlaying = false; return }
         player.playImmediately(atRate: 1)
         if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
         isPlaying = true
@@ -102,30 +125,10 @@ private final class TVPlaybackController: ObservableObject {
     /// more reliable than seeking the audio to the video's raw CMTime because
     /// two independent HLS playlists do not share the same media timeline.
     func syncToLiveEdge() {
-        guard let currentURL else { return }
-        let resume = !userPaused
+        guard currentURL != nil else { return }
         syncTask?.cancel()
         syncTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.isLoading = true
-            self.player.pause()
-            self.separateAudioPlayer.pause()
-            self.player.replaceCurrentItem(with: AVPlayerItem(url: currentURL))
-            if let audioURL = self.currentAudioURL {
-                self.separateAudioPlayer.replaceCurrentItem(with: AVPlayerItem(url: audioURL))
-            }
-            await self.waitForItemsReady()
-            guard !Task.isCancelled else { return }
-            self.seekBothToLiveEdge()
-            self.isLoading = false
-            if resume {
-                self.player.playImmediately(atRate: 1)
-                if self.hasSeparateAudio { self.separateAudioPlayer.playImmediately(atRate: 1) }
-                self.isPlaying = true
-            } else {
-                self.userPaused = true
-                self.isPlaying = false
-            }
+            await self?.startLiveItems()
         }
     }
 
@@ -326,6 +329,15 @@ struct TVScreen: View {
     /// place instead of maintaining a second, less capable video player.
     private var selectedVideoMovie: Movie? { selectedVideoMovieSnapshot }
 
+    /// Vào trình phát ở tư thế ngang ngay từ đầu.
+    ///
+    /// Xoay trước rồi mới mở, nếu không fullScreenCover hiện ra ở tư thế dọc rồi
+    /// mới tự xoay ngang — đúng cảm giác "hiện dọc xong mới xoay" trước đây.
+    private func presentPlayer() {
+        guard !isPlayerPresented else { return }
+        OrientationSupport.rotateThenPresent { isPlayerPresented = true }
+    }
+
     var body: some View {
         ZStack {
             CinemaBackground()
@@ -362,7 +374,7 @@ struct TVScreen: View {
                                     selectedVideoID = nil
                                     selectedVideoMovieSnapshot = nil
                                     relatedMovieRoute = nil
-                                    isPlayerPresented = true
+                                    presentPlayer()
                                 }
                                 .auroraReveal(index % 8)
                             }
@@ -393,7 +405,7 @@ struct TVScreen: View {
                                         }.value
                                         guard selectedVideoID == video.id else { return }
                                         selectedVideoMovieSnapshot = snapshot
-                                        isPlayerPresented = true
+                                        presentPlayer()
                                     }
                                 }
                                 .auroraReveal(index % 8)
@@ -1204,6 +1216,8 @@ private struct TVVideoFullscreenPlayer: View {
         .onDisappear {
             hideTask?.cancel(); stopTask?.cancel()
             playback.pauseForDismissal()
+            // Trả màn hình về dọc: trình phát này được mở ở tư thế ngang từ trước.
+            OrientationSupport.rotate(to: .portrait)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
                 playback.shutdown()
