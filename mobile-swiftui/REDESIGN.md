@@ -1503,3 +1503,15 @@ Hai lỗi cộng lại làm phụ đề thêm tay không bao giờ hiện:
   `play()` nên sau 4 giây công cụ bị ẩn dù nguồn chưa phát được. Giờ chỉ ẩn khi phim đã
   chạy thật (`!isLoading` và không có lỗi); đang tải thì giữ nguyên công cụ, tải xong mới
   đếm giờ ẩn, còn lỗi thì hiện thông báo lỗi kèm nút **Trở lại**.
+
+## 45. Sửa lỗi build: bộ kiểm tra kiểu quá tải ở trình phát
+
+Codemagic báo `CinemaPlayerScreen.swift:860: the compiler is unable to type-check this
+expression in reasonable time`. Đây không phải lỗi cú pháp mà là **bộ kiểm tra kiểu của
+Swift bỏ cuộc** trước thân `body` quá lớn của trình phát: hàng chục modifier, mỗi cái một
+closure, cộng thêm vài closure dài và biểu thức optional lồng nhau.
+
+Cách sửa: tách các closure nặng ra hàm riêng, thân `body` chỉ còn lời gọi một dòng —
+`handlePlayerDisappear()`, `handleSubtitlePreferencesChange(_:)`, `handleStopAtEpisodeToggle(_:)`,
+`handleLoadingChange(_:)`, `handlePlaybackErrorChange()`. Giữ nguyên 100% hành vi, chỉ đổi
+chỗ đặt mã, và tránh lặp lại lỗi này khi thêm hiệu ứng về sau.

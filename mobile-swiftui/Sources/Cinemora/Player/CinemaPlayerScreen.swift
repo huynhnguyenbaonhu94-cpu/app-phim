@@ -783,35 +783,15 @@ struct CinemaPlayerScreen: View {
                 else { loadCurrentEpisode() }
             }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
-            .onChange(of: playback.isLoading) { _, isLoading in
-                // Đang tải nguồn thì không đếm giờ ẩn; vừa tải xong mới bắt đầu đếm.
-                if isLoading { hideTask?.cancel() } else { scheduleHide() }
-            }
-            .onChange(of: playback.errorMessage) { _, message in
-                if message != nil { hideTask?.cancel(); controlsVisible = true }
-            }
+            .onChange(of: playback.isLoading) { _, isLoading in handleLoadingChange(isLoading) }
+            .onChange(of: playback.errorMessage) { _, _ in handlePlaybackErrorChange() }
             .onChange(of: playback.currentTime) { _, time in
                 subtitles.update(time: time, bilingual: false)
                 handlePlaybackProgress()
             }
-            .onChange(of: subtitlePreferences) { _, value in
-                guard subtitleCustomizationEnabled else { return }
-                // Read the environment while the view is still installed; inside
-                // the hop it may already be gone.
-                let store = self.store
-                DispatchQueue.main.async {
-                    store.playbackDefaults.subtitlePreferences = value
-                    store.savePlaybackDefaults()
-                }
-                subtitles.update(time: playback.currentTime, bilingual: false)
-            }
+            .onChange(of: subtitlePreferences) { _, value in handleSubtitlePreferencesChange(value) }
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
-            .onChange(of: stopAtEpisodeEnabled) { _, enabled in
-                if enabled, stopAtEpisodeID == nil {
-                    stopAtEpisodeID = episode.map { stopEpisodeKey($0) } ?? selectableStopEpisodes.first.map { stopEpisodeKey($0) }
-                }
-                scheduleStopTimer()
-            }
+            .onChange(of: stopAtEpisodeEnabled) { _, enabled in handleStopAtEpisodeToggle(enabled) }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { playback.recoverAfterForeground() }
@@ -824,49 +804,7 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
-            .onDisappear {
-                hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
-                if scenePhase == .active {
-                    // Stop the picture at once, then let the dismissal animation
-                    // finish before the expensive part: releasing the item,
-                    // deactivating the audio session, writing the resume point.
-                    // Doing all of that during the animation is what made leaving
-                    // the player feel sticky.
-                    playback.pauseForDismissal()
-                    // Everything the deferred work needs is read *now*. Touching
-                    // the view's environment after the view has been dismantled
-                    // traps ("No Observable object of type CinemaStore found"),
-                    // and that trap is what made the app vanish on the way back
-                    // from the player. Capturing the store and the values first
-                    // keeps the deferred work independent of the view's lifetime.
-                    let store = self.store
-                    let movie = self.movie
-                    let episode = self.episode
-                    let serverName = self.server?.name
-                    let playback = self.playback
-                    if !didScheduleTeardown {
-                        didScheduleTeardown = true
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(350))
-                            if let episode {
-                                store.recordLocalHistory(
-                                    movie: movie,
-                                    episode: episode,
-                                    serverName: serverName,
-                                    watchedSeconds: playback.currentTime,
-                                    durationSeconds: playback.duration
-                                )
-                            }
-                            playback.shutdown()
-                        }
-                    }
-                }
-                // A handoff keeps the landscape orientation for the incoming
-                // player; a normal exit goes back to portrait.
-                if !handingOffToRelated {
-                    forcePortrait()
-                }
-            }
+            .onDisappear { handlePlayerDisappear() }
             .statusBarHidden(true)
         }
         .persistentSystemOverlays(.hidden)
@@ -2026,6 +1964,83 @@ struct CinemaPlayerScreen: View {
             guard !Task.isCancelled, controlsLocked else { return }
             withAnimation(.easeIn(duration: 0.25)) { lockIndicatorVisible = false }
         }
+    }
+
+    /// Dọn trình phát khi thoát.
+    ///
+    /// Tách khỏi thân `body` có chủ đích: một closure dài nằm trong chuỗi modifier
+    /// làm bộ kiểm tra kiểu của Swift bỏ cuộc — đúng lỗi build
+    /// "unable to type-check this expression in reasonable time" ở dòng này.
+    private func handlePlayerDisappear() {
+        hideTask?.cancel(); lockHideTask?.cancel(); stopTimerTask?.cancel(); adjustmentHideTask?.cancel()
+        if scenePhase == .active {
+            // Stop the picture at once, then let the dismissal animation
+            // finish before the expensive part: releasing the item,
+            // deactivating the audio session, writing the resume point.
+            // Doing all of that during the animation is what made leaving
+            // the player feel sticky.
+            playback.pauseForDismissal()
+            // Everything the deferred work needs is read *now*. Touching
+            // the view's environment after the view has been dismantled
+            // traps ("No Observable object of type CinemaStore found"),
+            // and that trap is what made the app vanish on the way back
+            // from the player. Capturing the store and the values first
+            // keeps the deferred work independent of the view's lifetime.
+            let store = self.store
+            let movie = self.movie
+            let episode = self.episode
+            let serverName = self.server?.name
+            let playback = self.playback
+            if !didScheduleTeardown {
+                didScheduleTeardown = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(350))
+                    if let episode {
+                        store.recordLocalHistory(
+                            movie: movie,
+                            episode: episode,
+                            serverName: serverName,
+                            watchedSeconds: playback.currentTime,
+                            durationSeconds: playback.duration
+                        )
+                    }
+                    playback.shutdown()
+                }
+            }
+        }
+        // A handoff keeps the landscape orientation for the incoming
+        // player; a normal exit goes back to portrait.
+        if !handingOffToRelated { forcePortrait() }
+    }
+
+    /// Ghi lại tuỳ chọn phụ đề, đọc môi trường khi view còn đang hiện.
+    private func handleSubtitlePreferencesChange(_ value: SubtitlePreferences) {
+        guard subtitleCustomizationEnabled else { return }
+        let store = self.store
+        DispatchQueue.main.async {
+            store.playbackDefaults.subtitlePreferences = value
+            store.savePlaybackDefaults()
+        }
+        subtitles.update(time: playback.currentTime, bilingual: false)
+    }
+
+    private func handleStopAtEpisodeToggle(_ enabled: Bool) {
+        if enabled, stopAtEpisodeID == nil {
+            stopAtEpisodeID = episode.map { stopEpisodeKey($0) } ?? selectableStopEpisodes.first.map { stopEpisodeKey($0) }
+        }
+        scheduleStopTimer()
+    }
+
+    /// Đang tải nguồn thì không đếm giờ ẩn công cụ; vừa tải xong mới bắt đầu đếm.
+    private func handleLoadingChange(_ isLoading: Bool) {
+        if isLoading { hideTask?.cancel() } else { scheduleHide() }
+    }
+
+    /// Nguồn lỗi: giữ công cụ và thông báo lỗi (kèm nút Trở lại) trên màn hình.
+    private func handlePlaybackErrorChange() {
+        guard playback.errorMessage != nil else { return }
+        hideTask?.cancel()
+        controlsVisible = true
     }
 
     private func scheduleHide() {
