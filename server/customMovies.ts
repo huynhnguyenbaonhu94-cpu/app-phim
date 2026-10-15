@@ -158,7 +158,9 @@ export function toApiMovie(row: CustomMovieRow): Movie {
     tmdbId: row.tmdbId ?? null,
     imdbId: row.imdbId ?? null,
     createdAt: row.createdDate ?? iso(row.createdAt),
-    updatedAt: row.updatedDate ?? iso(row.updatedAt),
+    // Ngày cập nhật luôn là mốc thật của bản ghi (tự đổi mỗi lần admin lưu),
+    // không dùng cột updatedDate do admin nhập tay trước đây nữa.
+    updatedAt: iso(row.updatedAt) ?? row.updatedDate,
   };
 }
 
@@ -348,23 +350,51 @@ export async function customMoviesForFilter(filter: CustomMovieFilter): Promise<
     .map(toApiMovie);
 }
 
-/** Tìm phim thủ công theo tên, tên tiếng Anh và tên khác. */
+/**
+ * Bỏ dấu tiếng Việt và hạ chữ thường để so khớp tên phim.
+ *
+ * Nhờ vậy "thuc tinh" tìm được "Thức Tỉnh" và "vision quest" tìm được
+ * "VisionQuest" — người dùng không phải gõ đúng dấu hay đúng hoa thường.
+ */
+function foldText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Tìm phim thủ công theo tên tiếng Việt, tên tiếng Anh và tên khác. */
 export async function searchCustomMovies(keyword: string): Promise<Movie[]> {
-  const needle = keyword.trim().toLocaleLowerCase("vi-VN");
+  const needle = foldText(keyword);
   if (needle.length < 2) return [];
   const rows = (await listCustomMovies()).filter((row) => row.isPublished);
   return rows
     .filter((row) => {
-      const haystack = [
+      const haystack = foldText([
         row.name,
         row.originName ?? "",
         ...parseJson<string[]>(row.alternativeNames, []),
-      ]
-        .join(" ")
-        .toLocaleLowerCase("vi-VN");
+      ].join(" "));
       return haystack.includes(needle);
     })
     .map(toApiMovie);
+}
+
+/** Ghi ảnh đã kiểm tra xuống thư mục uploads và trả về URL công khai. */
+async function storeImageBuffer(buffer: Buffer): Promise<{ url: string; mimeType: string }> {
+  if (buffer.byteLength === 0) throw new Error("Ảnh rỗng");
+  if (buffer.byteLength > MAX_IMAGE_BYTES) throw new Error("Ảnh vượt quá 8MB");
+  const kind = detectImageKind(buffer);
+  if (!kind) throw new Error("Chỉ nhận ảnh JPEG, PNG hoặc WebP");
+  const target = path.resolve(process.cwd(), IMAGE_DIR);
+  await fs.mkdir(target, { recursive: true });
+  const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${kind}`;
+  await fs.writeFile(path.join(target, name), buffer);
+  return { url: `/${IMAGE_DIR}/${name}`, mimeType: kind === "jpg" ? "image/jpeg" : `image/${kind}` };
 }
 
 /** Lưu ảnh poster/thumbnail/diễn viên admin tải lên, trả về URL công khai. */
@@ -374,16 +404,78 @@ export async function saveMovieImage(input: {
   mimeType?: string;
 }): Promise<{ url: string }> {
   const raw = input.base64.includes(",") ? input.base64.slice(input.base64.indexOf(",") + 1) : input.base64;
-  const buffer = Buffer.from(raw, "base64");
-  if (buffer.byteLength === 0) throw new Error("Ảnh rỗng");
-  if (buffer.byteLength > MAX_IMAGE_BYTES) throw new Error("Ảnh vượt quá 8MB");
-  const kind = detectImageKind(buffer);
-  if (!kind) throw new Error("Chỉ nhận ảnh JPEG, PNG hoặc WebP");
-  const target = path.resolve(process.cwd(), IMAGE_DIR);
-  await fs.mkdir(target, { recursive: true });
-  const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${kind}`;
-  await fs.writeFile(path.join(target, name), buffer);
-  return { url: `/${IMAGE_DIR}/${name}` };
+  const { url } = await storeImageBuffer(Buffer.from(raw, "base64"));
+  return { url };
+}
+
+/** Chặn địa chỉ nội bộ để link do admin nhập không quét được mạng nội bộ của máy chủ. */
+function assertPublicHost(hostname: string) {
+  const host = hostname.trim().toLocaleLowerCase();
+  if (!host) throw new Error("Link ảnh không hợp lệ");
+  const blockedNames = ["localhost", "localhost.localdomain", "ip6-localhost", "metadata.google.internal"];
+  if (blockedNames.includes(host) || host.endsWith(".local") || host.endsWith(".internal")) {
+    throw new Error("Không hỗ trợ địa chỉ nội bộ");
+  }
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    const isPrivate =
+      a === 0 || a === 10 || a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168);
+    if (isPrivate) throw new Error("Không hỗ trợ địa chỉ nội bộ");
+  }
+  if (host.startsWith("[") || host.includes(":")) {
+    if (host === "[::1]" || host.startsWith("[fe80") || host.startsWith("[fc") || host.startsWith("[fd")) {
+      throw new Error("Không hỗ trợ địa chỉ nội bộ");
+    }
+  }
+}
+
+/**
+ * Tải ảnh từ link ngoài về máy chủ.
+ *
+ * Nhờ vậy ảnh xem trước và **cắt ảnh** luôn hoạt động (không phụ thuộc CORS của nơi
+ * lưu ảnh) và ảnh vẫn còn khi link gốc hỏng. Ảnh được kiểm tra bằng magic bytes.
+ */
+export async function importMovieImageFromUrl(input: { url: string }): Promise<{ url: string; mimeType: string }> {
+  const raw = String(input.url || "").trim();
+  if (!raw) throw new Error("Chưa có link ảnh");
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("Link ảnh không hợp lệ");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Chỉ nhận link http hoặc https");
+  }
+  assertPublicHost(parsed.hostname);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(parsed.toString(), {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; CinemoraBot/1.0)",
+        accept: "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+      },
+    });
+    if (!response.ok) throw new Error(`Không tải được ảnh (mã ${response.status})`);
+    if (response.url) assertPublicHost(new URL(response.url).hostname);
+    const declared = Number(response.headers.get("content-length") || 0);
+    if (declared > MAX_IMAGE_BYTES) throw new Error("Ảnh vượt quá 8MB");
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return await storeImageBuffer(buffer);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("Hết thời gian tải ảnh");
+    throw error instanceof Error ? error : new Error("Không tải được ảnh từ link này");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Nhận dạng ảnh bằng magic bytes, không tin phần mở rộng tên tệp. */

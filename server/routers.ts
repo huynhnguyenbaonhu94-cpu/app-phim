@@ -26,9 +26,11 @@ import {
   getCustomMovieById,
   listCustomMovies,
   removeCustomMovie,
+  importMovieImageFromUrl,
   saveMovieImage,
   updateCustomMovie,
 } from "./customMovies";
+import { actorSearchStatus, searchActors } from "./actorSearch";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
@@ -454,6 +456,23 @@ export const appRouter = router({
         mimeType: z.string().max(60).optional(),
       }))
       .mutation(({ input }) => saveMovieImage(input)),
+    // Dán link ảnh: tải về máy chủ để xem trước và cắt ảnh luôn hoạt động.
+    importImage: adminProcedure
+      .input(z.object({ url: z.string().min(4).max(2000) }))
+      .mutation(({ input }) => importMovieImageFromUrl({ url: input.url })),
+    // Tìm diễn viên từ TMDB (hoặc Wikidata) để thêm nhanh kèm ảnh.
+    searchActors: adminProcedure
+      .input(z.object({
+        query: z.string().trim().min(2).max(80),
+        limit: z.number().int().min(1).max(20).optional(),
+      }))
+      .mutation(({ input }) => searchActors(input)),
+    // Kiểm tra khoá TMDB và kết nối ra ngoài của máy chủ (admin).
+    actorSearchStatus: adminProcedure.mutation(() => actorSearchStatus()),
+    // Khoá TMDB cho trang quản trị (chỉ admin): dùng khi máy chủ hosting không gọi được TMDB.
+    actorSearchCredentials: adminProcedure.mutation(() => ({
+      tmdbKey: (process.env.TMDB_API_KEY || process.env.TMDB_ACCESS_TOKEN || "").trim(),
+    })),
   }),
 
   // Nguồn và tập do admin thêm cho phim API (chỉ admin).

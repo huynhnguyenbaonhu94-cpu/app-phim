@@ -2920,3 +2920,401 @@ body {
 .admin-tv-success { padding: 9px 11px; border: 1px solid rgba(169,220,126,.25); border-radius: 8px; color: #bde68c; background: rgba(169,220,126,.08); font-size: 10px; }
 @media (max-width: 950px) { .custom-movie-layout { grid-template-columns: 1fr; }.custom-list-panel { position: static; }.custom-movie-sidebar { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }.custom-sources-panel { margin-top: 0; } }
 @media (max-width: 700px) { .custom-form-grid.two, .custom-form-grid.three, .custom-form-grid.four, .custom-image-grid, .custom-movie-sidebar, .custom-quality-subtitle-tools { grid-template-columns: 1fr; }.custom-section-heading, .custom-quality-heading { align-items: stretch; flex-direction: column; }.image-picker-row { grid-template-columns: 70px minmax(0,1fr); }.image-picker-preview { width: 70px; height: 82px; }.image-picker-link-row { grid-template-columns: 1fr; }.crop-dialog { padding: 13px; }.crop-stage { min-height: 230px; }.crop-zoom { margin-left: 0; width: 100%; }.custom-save-bar .button { width: 100%; }.custom-source-toolbar { justify-content: space-between; } }
+
+/* ==================================================================
+   Trang "Thêm phim thủ công" — giao diện tinh chỉnh
+   (ô chọn tuỳ biến, bộ chọn nhiều mục, chip, diễn viên, thanh lưu)
+   ================================================================== */
+
+.custom-label { display: block; margin-bottom: 6px; color: rgba(255,255,255,.65); font-size: 10px; font-weight: 700; }
+.custom-hint { color: rgba(255,255,255,.42); font-size: 10px; line-height: 1.5; }
+
+/* --- Ô chọn dạng danh sách ------------------------------------- */
+.custom-select { position: relative; min-width: 0; }
+.custom-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 39px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; color: #f5f6f8; background: rgba(0,0,0,.21); font: inherit; text-align: left; transition: border-color .16s ease, background .16s ease; }
+.custom-select-trigger:hover { border-color: rgba(255,255,255,.24); background: rgba(0,0,0,.28); }
+.custom-select-trigger.is-open { border-color: rgba(210,243,107,.62); box-shadow: 0 0 0 3px rgba(210,243,107,.06); }
+.custom-select-value { display: grid; gap: 2px; min-width: 0; }
+.custom-select-value strong { color: #fff; font-size: 12px; font-weight: 600; }
+.custom-select-value small { color: rgba(255,255,255,.42); font-size: 9px; }
+.custom-select-caret { flex: none; color: rgba(255,255,255,.45); transition: transform .18s ease; }
+.custom-select-trigger.is-open .custom-select-caret { color: var(--accent); transform: rotate(180deg); }
+.custom-select-menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; display: grid; gap: 2px; max-height: 230px; overflow-y: auto; padding: 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: #14160f; box-shadow: 0 18px 38px rgba(0,0,0,.55); }
+.custom-select-menu button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 9px; border: 0; border-radius: 7px; color: rgba(255,255,255,.78); background: transparent; font: inherit; text-align: left; transition: background .14s ease, color .14s ease; }
+.custom-select-menu button:hover { color: #fff; background: rgba(255,255,255,.07); }
+.custom-select-menu button.is-selected { color: #11140a; background: var(--accent); }
+.custom-select-menu button > span { display: grid; gap: 2px; min-width: 0; }
+.custom-select-menu button strong { font-size: 12px; font-weight: 600; }
+.custom-select-menu button small { font-size: 9px; opacity: .7; }
+
+/* --- Nhập chip (tên khác, đạo diễn) ---------------------------- */
+.custom-chip-field { display: grid; gap: 6px; margin-bottom: 13px; }
+.custom-chip-field .custom-chip-input { padding: 9px; transition: border-color .16s ease; }
+.custom-chip-input .custom-chips:empty { display: none; }
+
+/* --- Bộ chọn thể loại / quốc gia ------------------------------- */
+.custom-tag-grid-two { align-items: start; }
+.custom-tag-picker { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 11px; background: rgba(255,255,255,.018); }
+.custom-tag-picker .custom-field-heading { margin-bottom: 0; }
+.custom-field-heading span.is-active { color: var(--accent); font-weight: 700; }
+.custom-tag-selected { display: flex; flex-wrap: wrap; gap: 5px; }
+.custom-tag-selected button { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 7px; border: 1px solid rgba(210,243,107,.32); border-radius: 999px; color: #dff8a4; background: rgba(210,243,107,.12); font: inherit; font-size: 10px; transition: background .14s ease; }
+.custom-tag-selected button:hover { color: #ffd7d2; border-color: rgba(255,143,133,.45); background: rgba(255,143,133,.14); }
+.custom-tag-toolbar { display: grid; gap: 7px; }
+.custom-tag-toolbar .custom-search { margin-bottom: 0; }
+.custom-search button { display: inline-flex; align-items: center; padding: 0; border: 0; color: rgba(255,255,255,.45); background: transparent; }
+.custom-search button:hover { color: #fff; }
+.custom-tag-actions { display: flex; gap: 12px; }
+.custom-tag-actions button { padding: 0; border: 0; color: rgba(210,243,107,.85); background: transparent; font: inherit; font-size: 10px; font-weight: 700; }
+.custom-tag-actions button:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.custom-tag-actions button:disabled { color: rgba(255,255,255,.25); }
+.custom-tag-picker .custom-tag-grid { max-height: 206px; padding: 2px 4px 2px 2px; }
+.custom-tag-grid button { min-height: 31px; padding: 0 9px; font-size: 11px; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.custom-tag-grid::-webkit-scrollbar, .custom-select-menu::-webkit-scrollbar, .custom-form-section textarea::-webkit-scrollbar { width: 7px; }
+.custom-tag-grid::-webkit-scrollbar-track, .custom-select-menu::-webkit-scrollbar-track, .custom-form-section textarea::-webkit-scrollbar-track { background: transparent; }
+.custom-tag-grid::-webkit-scrollbar-thumb, .custom-select-menu::-webkit-scrollbar-thumb, .custom-form-section textarea::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255,255,255,.16); }
+.custom-tag-grid::-webkit-scrollbar-thumb:hover, .custom-select-menu::-webkit-scrollbar-thumb:hover { background: rgba(210,243,107,.5); }
+.custom-tag-grid, .custom-select-menu { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+
+/* --- Lượt xem (nút chọn kiểu phân đoạn) ------------------------ */
+.custom-field-block { display: grid; gap: 8px; margin: 14px 0; }
+.custom-segmented { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(0,0,0,.24); }
+.custom-segmented button { padding: 8px 14px; border: 0; border-radius: 7px; color: rgba(255,255,255,.62); background: transparent; font: inherit; font-size: 11px; font-weight: 600; transition: background .16s ease, color .16s ease; }
+.custom-segmented button:hover { color: #fff; }
+.custom-segmented button.is-active { color: #11140a; background: var(--accent); }
+.custom-inline-field { display: grid; gap: 6px; max-width: 240px; color: rgba(255,255,255,.65); font-size: 10px; font-weight: 700; }
+.custom-inline-field input { width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; outline: none; color: #f5f6f8; background: rgba(0,0,0,.21); font: inherit; font-size: 12px; }
+
+/* --- Thẻ diễn viên -------------------------------------------- */
+.custom-actor-list { display: grid; gap: 11px; margin-top: 13px; }
+.custom-actor-card { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px; border: 1px solid rgba(255,255,255,.1); border-radius: 11px; background: rgba(255,255,255,.018); }
+.custom-actor-avatar { display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 50%; color: rgba(255,255,255,.4); background: rgba(0,0,0,.28); font-size: 13px; font-weight: 700; }
+.custom-actor-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.custom-actor-body { display: grid; gap: 10px; min-width: 0; }
+.custom-actor-card .custom-actor-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* --- Nút biểu tượng gọn --------------------------------------- */
+.custom-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 38px; padding: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; color: rgba(255,255,255,.7); background: rgba(0,0,0,.24); }
+.custom-icon-button:hover:not(:disabled) { color: var(--accent); border-color: rgba(210,243,107,.45); }
+.custom-icon-button:disabled { opacity: .5; }
+
+/* --- Thanh lưu bám đáy ---------------------------------------- */
+.custom-save-bar { position: sticky; bottom: 12px; z-index: 12; display: flex; align-items: center; flex-wrap: wrap; gap: 13px; margin: 4px 0 20px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(12,14,9,.92); box-shadow: 0 14px 34px rgba(0,0,0,.45); backdrop-filter: blur(8px); }
+
+@media (max-width: 950px) {
+  .custom-tag-grid-two { grid-template-columns: 1fr; }
+  .custom-save-bar { position: static; }
+}
+@media (max-width: 620px) {
+  .custom-actor-card { grid-template-columns: 1fr; }
+  .custom-actor-avatar { width: 46px; height: 46px; }
+}
+
+/* Ảnh diễn viên nằm trong thẻ diễn viên: bỏ khung lồng nhau cho gọn */
+.custom-actor-card .image-picker { padding: 0; border: 0; background: transparent; }
+.custom-actor-card .image-picker-label { margin-bottom: 7px; }
+
+/* Ô nhập bên trong khối chip không được có khung riêng (tránh "ô vuông lồng").
+   Dùng selector đủ mạnh để thắng các quy tắc ô nhập chung. */
+.custom-movie-form .custom-chip-input input,
+.custom-episode-editor .custom-chip-input input,
+.custom-chip-field .custom-chip-input input { width: 100%; min-height: 30px; padding: 3px 4px; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; color: #fff; }
+.custom-movie-form .custom-chip-input input:focus,
+.custom-episode-editor .custom-chip-input input:focus,
+.custom-chip-field .custom-chip-input input:focus { border: 0; box-shadow: none; }
+
+/* --- Dán link ảnh: trạng thái đang tải, tải xong, ghi chú ------------- */
+.image-picker-preview { position: relative; }
+.image-picker-preview.is-loading img { opacity: .35; }
+.image-picker-preview-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--accent); background: rgba(0,0,0,.42); }
+.image-picker-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: 10px; font-weight: 700; }
+.image-picker-note { margin: 8px 0 0; color: rgba(210,243,107,.86); font-size: 10px; line-height: 1.45; }
+.image-picker-link-row input { font-size: 11px; }
+
+/* --- Tìm diễn viên từ TMDB / Wikidata -------------------------------- */
+.actor-search { display: grid; gap: 8px; margin-bottom: 14px; }
+.actor-search-field { display: grid; gap: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.actor-search-input { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(255,255,255,.03); color: var(--accent); }
+.actor-search-input input { flex: 1; border: 0; background: transparent; color: inherit; font-size: 12px; outline: none; }
+.actor-search-input input::placeholder { color: rgba(255,255,255,.32); }
+.actor-search-notice { font-size: 10px; line-height: 1.5; margin: 0; }
+.actor-suggestions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.actor-suggestions li button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.02); color: var(--text); cursor: pointer; text-align: left; transition: border-color .15s ease, background .15s ease; }
+.actor-suggestions li button:hover { border-color: rgba(210,243,107,.45); background: rgba(210,243,107,.06); }
+.actor-suggestion-avatar { width: 38px; height: 38px; flex: none; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); color: var(--muted); }
+.actor-suggestion-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.actor-suggestion-body { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.actor-suggestion-body strong { font-size: 12px; }
+.actor-suggestion-body small { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Gợi ý diễn viên chỉ hiện tên và ảnh. */
+.actor-suggestions li button { padding: 7px 10px; }
+.actor-suggestion-body strong { font-size: 12.5px; font-weight: 700; }
+.actor-suggestion-avatar { width: 40px; height: 40px; }
+
+/* --- Ô nhập trong khung tìm kiếm: bỏ khung/viền thừa khi focus ------ */
+.actor-search-input input:focus,
+.actor-search-input input:focus-visible,
+.custom-search input:focus,
+.custom-search input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+}
+.actor-search-input { border-radius: 12px; }
+.actor-search-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(210,243,107,.3);
+  border-radius: 999px;
+  color: #dff8a4;
+  background: rgba(210,243,107,.08);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.actor-search-check:hover:not(:disabled) { border-color: rgba(210,243,107,.6); background: rgba(210,243,107,.16); }
+.actor-search-check:disabled { opacity: .6; cursor: default; }
+.actor-search-status {
+  list-style: none;
+  margin: 0;
+  padding: 9px 11px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  background: rgba(255,255,255,.02);
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+/* --- Bộ chọn thể loại / quốc gia: gọn, dạng viên thuốc ------------- */
+.custom-tag-picker {
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+}
+.custom-tag-picker .custom-field-heading { display: flex; align-items: center; justify-content: space-between; }
+.custom-tag-picker .custom-field-heading strong { font-size: 12px; }
+.custom-tag-picker .custom-field-heading span { font-size: 10px; color: var(--muted); }
+.custom-tag-selected { display: flex; flex-wrap: wrap; gap: 6px; }
+.custom-tag-selected button { min-height: 26px; padding: 0 9px; border-radius: 999px; font-size: 10.5px; }
+.custom-tag-picker .custom-tag-grid,
+.custom-tag-grid {
+  max-height: none;
+  overflow: visible;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+}
+.custom-tag-grid button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,.03);
+  color: rgba(255,255,255,.78);
+  font: inherit;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.custom-tag-grid button:hover { border-color: rgba(210,243,107,.45); color: #fff; background: rgba(210,243,107,.07); }
+.custom-tag-grid button.is-selected { border-color: transparent; background: var(--accent); color: #10140b; font-weight: 700; }
+.custom-tag-more {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px dashed rgba(255,255,255,.22);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.custom-tag-more:hover { border-color: rgba(210,243,107,.5); color: var(--accent); }
+
+/* --- Cân bằng 2 khung Thể loại / Quốc gia -------------------------- */
+.custom-form-grid.two.custom-tag-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+.custom-tag-grid-two > .custom-tag-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+}
+.custom-tag-grid-two > .custom-tag-picker > .custom-tag-grid {
+  flex: 1 1 auto;
+  align-content: flex-start;
+}
+.custom-tag-picker .custom-search {
+  min-height: 42px;
+  padding: 0 12px;
+  gap: 9px;
+  align-items: center;
+  border-radius: 12px;
+}
+.custom-tag-picker .custom-search > svg {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.custom-tag-picker .custom-search input {
+  min-height: 40px;
+  font-size: 12px;
+}
+.custom-tag-picker .custom-tag-toolbar {
+  display: grid;
+  gap: 8px;
+}
+.custom-tag-picker .custom-tag-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+@media (max-width: 950px) {
+  .custom-form-grid.two.custom-tag-grid-two {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Khung Nguồn & tập: to, rõ, dễ bấm hơn -------------------------- */
+@media (min-width: 951px) {
+  .custom-movie-layout {
+    grid-template-columns: minmax(0, 1fr) 432px;
+    gap: 20px;
+  }
+}
+.custom-sources-panel { font-size: 13px; }
+.custom-sources-panel.admin-source-panel { padding: 22px; border-radius: 17px; }
+.custom-sources-panel .admin-source-panel-heading { margin-bottom: 16px; }
+.custom-sources-panel .admin-source-panel-heading strong { font-size: 17px; }
+.custom-sources-panel .admin-source-panel-heading span { font-size: 12.5px; line-height: 1.6; }
+.custom-sources-panel .custom-source-toolbar { gap: 10px; margin-bottom: 14px; }
+.custom-sources-panel .custom-source-toolbar .button,
+.custom-sources-panel .custom-source-toolbar .custom-icon-button { min-height: 44px; font-size: 13px; }
+.custom-sources-panel .admin-manual-source-card { padding: 18px; border-radius: 15px; }
+.custom-sources-panel .admin-manual-source-heading { gap: 12px; }
+.custom-sources-panel .admin-manual-source-name input,
+.custom-sources-panel .admin-add-source-form input { min-height: 44px; font-size: 13.5px; }
+.custom-sources-panel .admin-manual-source-name strong { font-size: 15px; }
+.custom-sources-panel .admin-manual-episode { padding: 14px; border-radius: 12px; }
+.custom-sources-panel .admin-manual-episode-copy > strong { font-size: 13.5px; }
+.custom-sources-panel .admin-manual-episode-copy a { font-size: 11.5px; }
+.custom-sources-panel .admin-source-empty { min-height: 180px; }
+.custom-sources-panel .admin-source-empty strong { font-size: 14px; }
+.custom-sources-panel .admin-source-empty span { font-size: 12.5px; }
+.custom-sources-panel .button { min-height: 40px; font-size: 13px; }
+.custom-sources-panel .custom-icon-button { width: 44px; min-height: 44px; }
+.custom-sources-panel input,
+.custom-sources-panel select { font-size: 13px; }
+
+/* --- Ô nhập Thể loại / Quốc gia: hàng tìm kiếm cố định, icon canh giữa --- */
+.custom-tag-picker .custom-search {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 12px !important;
+  gap: 9px !important;
+  overflow: hidden !important;
+}
+.custom-tag-picker .custom-search > svg {
+  flex: 0 0 auto !important;
+  width: 15px !important;
+  height: 15px !important;
+  align-self: center !important;
+  position: static !important;
+}
+.custom-tag-picker .custom-search input {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 42px !important;
+  min-height: 0 !important;
+  align-self: center !important;
+  font-size: 12.5px !important;
+}
+.custom-tag-picker .custom-search button {
+  flex: 0 0 auto !important;
+  align-self: center !important;
+}
+
+/* --- Nhắc khôi phục nháp ------------------------------------------- */
+.custom-draft-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid rgba(210, 243, 107, 0.28);
+  border-radius: 12px;
+  background: rgba(210, 243, 107, 0.07);
+  color: rgba(233, 255, 200, 0.92);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.custom-draft-note button {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* --- Ô ngày dd/mm/yyyy trong form phim thủ công --------------------- */
+.custom-date-field { display: flex; align-items: center; gap: 8px; }
+.custom-date-field > input { flex: 1 1 auto; min-width: 0; }
+.custom-date-field .custom-date-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 11px;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+}
+.custom-date-field .custom-date-pick:hover { border-color: rgba(210, 243, 107, 0.4); }
+.custom-date-field .custom-date-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.custom-date-readonly { color: rgba(255, 255, 255, 0.72); }
+.custom-date-hint { display: block; margin-top: 5px; color: rgba(255, 255, 255, 0.42); font-size: 11px; line-height: 1.5; }

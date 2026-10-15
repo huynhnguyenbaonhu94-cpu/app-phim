@@ -197,6 +197,11 @@ struct CinemoraTabShell: View {
     }
 }
 
+extension Notification.Name {
+    /// Bắn khi người dùng đổi tab để tab đang mở tự làm mới dữ liệu.
+    static let cinemoraTabDidChange = Notification.Name("cinemora.tab.didChange")
+}
+
 // MARK: - Tab container
 
 /// Hosts the five tab roots in a container we own instead of SwiftUI's `TabView`.
@@ -231,6 +236,9 @@ final class AuroraTabHostController: UIViewController {
     /// Shows the tab at `index`, building its host the first time it is needed.
     func select(_ index: Int) {
         guard index != selectedIndex || hosts[index] == nil else { return }
+        // Tab đang mở cần biết mình vừa được chọn để làm mới dữ liệu: view của
+        // tab chỉ ẩn/hiện nên `onAppear` không chạy lại.
+        NotificationCenter.default.post(name: .cinemoraTabDidChange, object: nil, userInfo: ["index": index])
         let previous = hosts[selectedIndex]
         selectedIndex = index
         guard let host = host(at: index) else { return }

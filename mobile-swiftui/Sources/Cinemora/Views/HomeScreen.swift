@@ -48,6 +48,14 @@ struct HomeScreen: View {
         .animation(Motion.enter, value: store.hasNewHomeContent)
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadHome() }
+        .onReceive(NotificationCenter.default.publisher(for: .cinemoraTabDidChange)) { note in
+            // Quay lại tab Trang chủ: nạp lại để phim mới (API hoặc thêm thủ công)
+            // hiện ngay đầu trang.
+            guard let index = note.userInfo?["index"] as? Int,
+                  CinemoraTab.allCases.indices.contains(index),
+                  CinemoraTab.allCases[index] == .home else { return }
+            Task { await store.autoRefreshHome() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !store.homeSections.isEmpty {
                 Task { await store.autoRefreshHome() }

@@ -98,6 +98,21 @@ struct CinemaAPI {
         return components?.url
     }
 
+    /// Master playlist bọc link M3U8 kèm phụ đề rời.
+    ///
+    /// AVFoundation chỉ đưa phụ đề vào PiP khi phụ đề nằm trong media của
+    /// AVPlayerItem, mà phụ đề rời (.vtt) thì không. Bọc bằng EXT-X-MEDIA để
+    /// trình phát có nhóm phụ đề hợp lệ.
+    static func subtitledPlaylistURL(video: URL, subtitle: URL) -> URL? {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/api/cinema/subtitled.m3u8"
+        components?.queryItems = [
+            URLQueryItem(name: "video", value: video.absoluteString),
+            URLQueryItem(name: "sub", value: subtitle.absoluteString),
+        ]
+        return components?.url
+    }
+
     func home(page: Int = 1) async throws -> MoviePage {
         try await query("cinema.home", input: ["page": page])
     }

@@ -1554,3 +1554,156 @@ chỗ đặt mã, và tránh lặp lại lỗi này khi thêm hiệu ứng về 
 **App**
 - `MovieEpisode.qualities` + `withQuality(_:)`: trình phát có mục **Chất lượng** (tab Hiển thị),
   đổi chất lượng nạp lại đúng vị trí đang xem kèm phụ đề của chất lượng đó.
+
+
+## 48. Tinh chỉnh giao diện trang "Thêm phim thủ công"
+
+- **Loại phim**: thay `<select>` mặc định của trình duyệt bằng ô chọn tuỳ biến (nút mở, mũi tên xoay,
+  danh sách nổi có dấu tích, đóng khi bấm ra ngoài hoặc nhấn Esc).
+- **Thể loại / Quốc gia**: mỗi bộ chọn thành một thẻ riêng có: hàng chip "đã chọn" bấm để bỏ nhanh,
+  ô tìm kiếm có nút xoá, hai lệnh nhanh "Chọn tất cả" / "Bỏ chọn hết", lưới chip cao hơn với thanh
+  cuộn mảnh màu accent thay cho thanh cuộn mặc định thô.
+- **Đạo diễn**: dùng chung ô nhập chip như "Tên khác", có tiêu đề và gợi ý rõ ràng, đặt ngay trên
+  danh sách diễn viên.
+- **Diễn viên**: bỏ mục "Vai diễn"; mỗi thẻ chỉ còn tên và ảnh (không bắt buộc) kèm ảnh tròn xem trước,
+  ảnh diễn viên dùng khung phẳng gọn bên trong thẻ.
+- **Lượt xem**: đổi hai nút radio thành thanh chọn phân đoạn; phần "Số ảo cộng thêm" chỉ hiện khi chọn
+  "Thật + ảo".
+- **Thanh lưu**: bám đáy khung (sticky) để luôn bấm được khi cuộn dài; khi tạo phim mới hiện gợi ý
+  "Lưu phim trước, sau đó thêm nguồn và tập ở khung bên phải".
+- Khung bên phải khi chưa lưu phim hiện thẻ "Nguồn & tập — Lưu phim trước" thay vì để trống.
+
+
+## 49. Dán link ảnh: tự tải về và hiện xem trước
+
+- Ô dán link ảnh (Poster, Thumbnail, ảnh diễn viên) giờ **tự động tải ảnh** sau khi bạn dán/gõ
+  link (chờ 0,7 giây, hoặc tải ngay khi rời ô nhập), hiện ảnh xem trước kèm vòng xoay "Đang tải
+  ảnh từ link…", rồi báo "Sẵn sàng" cùng ghi chú *Đã tải ảnh về máy chủ — bấm "Chỉnh sửa" nếu
+  cần cắt lại*.
+- Máy chủ có thêm `customMovies.importImage`: tải ảnh từ link, kiểm tra bằng magic bytes
+  (JPEG/PNG/WebP, tối đa 8MB, hết thời gian 20 giây) rồi lưu vào `uploads/movie-images`.
+  Nhờ vậy **cắt ảnh luôn hoạt động** (không phụ thuộc CORS của nơi lưu ảnh) và ảnh vẫn còn khi
+  link gốc hỏng.
+- Chặn địa chỉ nội bộ (localhost, 10.x, 127.x, 172.16–31.x, 192.168.x, 169.254.x, IPv6 nội bộ)
+  để link do admin nhập không dùng được để quét mạng nội bộ của máy chủ.
+- Nếu không tải được về máy chủ, ảnh vẫn dùng link gốc và có ghi chú cảnh báo có thể không cắt được.
+
+
+## 50. Sửa lỗi poster sau khi dán link + tìm diễn viên tự động
+
+**Sửa lỗi "Poster phải là URL hợp lệ"** khi tạo phim sau khi dán link ảnh: ảnh đã được tải về
+máy chủ nên ô nhập giữ đường dẫn `/uploads/movie-images/…`, nhưng hàm kiểm tra cũ chỉ chấp nhận
+URL đầy đủ. Nay đường dẫn nội bộ (`/uploads/…`, `/api/…`) được coi là hợp lệ.
+
+**Tìm diễn viên tự động (mục 04 — Diễn viên & đạo diễn):** gõ tên diễn viên, hệ thống tự tìm
+sau 0,45 giây và hiện danh sách gợi ý kèm ảnh, mô tả và mã IMDb; bấm một gợi ý là thêm ngay
+diễn viên (kèm ảnh) vào phim, trùng tên thì bỏ qua.
+
+- Nguồn: **TMDB** nếu có biến môi trường `TMDB_API_KEY` (hoặc `TMDB_ACCESS_TOKEN`); nếu chưa có
+  thì dùng **Wikidata** miễn phí (tên, mô tả, ảnh Wikimedia Commons, mã IMDb P345) — không cần
+  khoá vẫn chạy được.
+- Kết quả nhớ tạm 10 phút; loại bỏ gợi ý không phù hợp; TMDB lỗi thì tự chuyển sang Wikidata.
+- Thêm `TMDB_API_KEY=…` vào môi trường trên hosting là có ngay kết quả TMDB đầy đủ hơn.
+
+
+## 51. Tinh chỉnh tìm diễn viên
+
+- Danh sách gợi ý chỉ hiện **ảnh + tên diễn viên**; bấm là thêm ngay.
+- Khi dùng TMDB: chỉ lấy người thuộc nhóm **Acting**, ưu tiên bí danh Latinh khớp từ khoá
+  (송혜교 → *Song Hye-kyo*), lấy thêm mã IMDb, ảnh lấy từ hồ sơ chi tiết nếu kết quả tìm kiếm thiếu.
+- Thêm `TMDB_API_KEY` (v3) hoặc `TMDB_ACCESS_TOKEN` (v4) vào môi trường hosting để dùng TMDB;
+  đã ghi hướng dẫn trong `DEPLOY-CPANEL-VI.md` và `.env.example`.
+
+
+## 52. Tìm diễn viên trên hosting, ô nhập và bộ chọn thể loại/quốc gia
+
+**Tìm diễn viên không ra kết quả:** nguyên nhân thường gặp là hosting chưa nạp biến môi trường
+(chưa Restart), chặn kết nối ra ngoài, hoặc Node cũ. Nay:
+
+- Lớp gọi mạng dùng `node:https` thay cho `fetch` toàn cục → chạy được cả trên Node 16/17 của cPanel.
+- Thông báo lỗi nêu rõ nguyên nhân thật (mã 401 khi khoá sai, mã khác, hết thời gian, không kết nối được…).
+- Thêm nút **Kiểm tra kết nối** cạnh ô tìm diễn viên: hiện phiên bản Node, khoá TMDB đã nạp hay chưa
+  (che bớt ký tự), trạng thái TMDB và Wikidata.
+
+**Ô nhập không còn khung vuông lồng:** quy tắc focus của form (`.custom-form-section input:focus`)
+áp cả vào ô nhập bên trong khung tìm kiếm. Nay ô nhập trong `.actor-search-input` và `.custom-search`
+được bỏ viền/đổ bóng khi focus.
+
+**Thể loại & Quốc gia:** bỏ thanh cuộn lồng, chip dạng viên thuốc, chip đã chọn nền xanh nổi bật,
+hiện 16 mục kèm nút **Xem thêm N mục / Thu gọn**, tiêu đề hiện số lượng đã chọn.
+
+
+## 53. Sửa "Không kết nối được nguồn" trên hosting
+
+Hosting báo Node v22 nhưng cả TMDB lẫn Wikidata đều không kết nối được, thông báo trống tên lỗi.
+Nguyên nhân thường gặp: máy chủ có bản ghi IPv6 nhưng không đi ra ngoài được, hoặc tường lửa chặn.
+
+- Lớp gọi mạng nay **tự thử lại một lần chỉ dùng IPv4** khi lần đầu thất bại.
+- Thông báo lỗi kèm **mã lỗi thật** (`ENETUNREACH`, `EAI_AGAIN`, `ECONNREFUSED`, `ETIMEDOUT`…),
+  kèm địa chỉ và lỗi gốc để biết chính xác vì sao.
+- Nút **Kiểm tra kết nối** thêm dòng *Kết nối ra ngoài* (thử `https://example.com`) để phân biệt
+  “máy chủ không ra được Internet” với “chỉ nguồn này bị chặn”.
+
+
+## 54. Tìm diễn viên trực tiếp từ trình duyệt
+
+Hosting cho thấy *Kết nối ra ngoài: hoạt động* nhưng TMDB và Wikidata đều `ETIMEDOUT` — tức máy chủ
+bị chặn riêng hai tên miền nước ngoài này (thường gặp ở hosting Việt chỉ mở outbound cho một số đích).
+
+- Trang quản trị nay **tự tìm diễn viên từ trình duyệt của admin** khi máy chủ thất bại:
+  gọi TMDB (TMDB mở CORS), không có kết quả thì sang Wikidata (`origin=*`).
+- Có ghi chú cho biết kết quả lấy từ trình duyệt; nút *Kiểm tra kết nối* thêm dòng **Từ trình duyệt**.
+- Khoá TMDB cấp cho trang quản trị qua procedure chỉ dành cho admin (`actorSearchCredentials`).
+
+
+## 55. Tìm diễn viên nhanh hơn
+
+- Máy chủ hosting bị chặn nguồn: sau lần thất bại đầu tiên, hệ thống **ghi nhớ** (localStorage, hết hạn 24 giờ)
+  và các lần tìm sau **đi thẳng từ trình duyệt**, không chờ máy chủ nữa.
+- Kết quả theo từng từ khoá được **nhớ tạm** trong phiên nên gõ lại là hiện ngay.
+- Nút *Kiểm tra kết nối* tự đặt/xoá cờ này theo kết quả, và bỏ thử lại IPv4 khi lỗi là hết thời gian
+  (timeout mặc định của lớp gọi mạng giảm từ 12s xuống 6s) để phản hồi nhanh.
+
+
+## 56. Dọn giao diện Thêm phim thủ công
+
+- Bỏ nút **Kiểm tra kết nối** và bảng trạng thái (không còn cần thiết vì điền tên diễn viên là ra kết quả).
+- Bộ chọn **Thể loại / Quốc gia** hiện **đầy đủ danh sách từ API**, bỏ nút *Xem thêm*.
+- Hai khung được cân lại: cột chia đều, ô tìm kiếm cao bằng nhau, biểu tượng canh giữa,
+  hàng *Chọn tất cả / Bỏ chọn hết* thẳng hàng, hai khung cao bằng nhau.
+
+## 57. Nháp khi tạo phim, khung Nguồn & tập, icon tìm kiếm và phim thủ công trên app
+
+- **Nháp tự động**: sau khi tạo phim thành công, 4 phần (Thông tin phim, Hình ảnh, Nội dung,
+  Diễn viên & đạo diễn) được lưu lại; mở *Phim mới* lần sau sẽ tự điền sẵn, kèm dòng nhắc và nút
+  **bắt đầu mới** để xoá nháp.
+- **Khung Nguồn & tập** to hơn: cột phải rộng 432px, chữ và ô nhập lớn hơn, nút cao 44px, thẻ nguồn/tập thoáng hơn.
+- **Ô nhập Thể loại / Quốc gia**: hàng tìm kiếm cố định 44px, kính lúp luôn canh giữa cùng hàng với chữ
+  (không còn bị đẩy xuống dòng).
+- **Phim thủ công hiện trên app**: endpoint dailyUpdates (kệ *Phim Mới* khi app làm mới) nay cũng ghép
+  phim admin thêm thủ công; trước đây chỉ home, list, search và detail mới ghép nên app làm mới là mất phim.
+
+## 58. Phim mới lên đầu trang chủ, chi tiết theo tab, phụ đề trong PiP, tìm không dấu
+
+- **Phim mới hiện ngay đầu trang chủ**: kệ *Phim Mới* luôn lấy danh sách sắp theo thời gian cập nhật
+  (trước đây chỉ khi kéo làm mới mới dùng), cache máy chủ giảm từ 5 phút xuống 45 giây, và khi quay lại
+  tab Trang chủ app tự nạp lại (ngưỡng chống nạp liên tục 60 giây → 15 giây). Phim admin thêm thủ công
+  luôn nằm đầu vì được ghép trước kết quả API.
+- **Chi tiết phim theo từng tab**: chi tiết phim được lưu theo slug thay vì một biến dùng chung, nên
+  đang xem chi tiết phim A ở tab Tìm kiếm, sang tab Trang chủ mở phim B rồi quay lại vẫn đúng chi tiết
+  phim A. Yêu cầu tải chi tiết cũng tách theo slug nên tab này không huỷ yêu cầu của tab kia.
+- **Phụ đề trong PiP**: thêm endpoint `/api/cinema/subtitled.m3u8` sinh master playlist HLS version 4 có
+  `EXT-X-MEDIA TYPE=SUBTITLES` trỏ tới file .vtt rời. Trình phát dùng playlist này khi tập có phụ đề rời,
+  nên AVPlayerItem có nhóm phụ đề hợp lệ và PiP hiện được phụ đề; khi xem bình thường app vẫn vẽ phụ đề
+  theo thiết lập của người dùng, chỉ chuyển sang phụ đề gốc lúc PiP bật. Nếu master playlist lỗi, trình
+  phát tự quay về link M3U8 gốc ngay chứ không báo lỗi.
+- **Tìm phim thủ công không dấu**: so khớp tên phim đã bỏ dấu tiếng Việt và hạ chữ thường, nên gõ
+  "thuc tinh" tìm được "Thức Tỉnh", gõ "vision quest" tìm được "VisionQuest". Tìm kiếm theo API giữ nguyên.
+
+## 59. Ngày tạo / ngày cập nhật trong Thêm phim thủ công
+
+- **Ngày tạo** hiển thị theo `dd/mm/yyyy`: gõ số là tự chèn dấu "/", có nút lịch mở bộ chọn ngày của hệ
+  điều hành. Giá trị lưu vẫn là `yyyy-mm-dd` nên phần gửi lên máy chủ không đổi.
+- **Ngày cập nhật** bỏ phần giờ, chỉ còn `dd/mm/yyyy`, không cho sửa tay. Máy chủ tự dùng mốc cập nhật
+  thật của bản ghi (`updatedAt`, tự đổi mỗi lần lưu) nên admin sửa phim xong là ngày đổi ngay: form nạp
+  lại bản ghi vừa lưu, và app/web đều đọc mốc này thay cho cột `updatedDate` nhập tay trước đây.

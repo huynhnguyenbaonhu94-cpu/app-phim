@@ -30,6 +30,12 @@ final class CinemaStore {
     private(set) var detailMovie: Movie?
     private(set) var detailLoading = false
     private(set) var detailError: String?
+    /// Chi tiết phim theo slug. Mỗi tab giữ ngăn xếp điều hướng riêng, nên chi
+    /// tiết cũng phải theo slug: nếu chỉ có một biến dùng chung thì mở phim B ở
+    /// tab khác sẽ làm trang chi tiết của phim A đổi nội dung.
+    private(set) var detailBySlug: [String: Movie] = [:]
+    private(set) var detailLoadingSlugs: Set<String> = []
+    private(set) var detailErrorBySlug: [String: String] = [:]
     private(set) var catalogMovies: [Movie] = []
     private(set) var catalogLoading = false
     private(set) var catalogError: String?
@@ -48,7 +54,7 @@ final class CinemaStore {
     private let localDefaults = UserDefaults.standard
     private let playbackDefaultsKey = "cinemora.playback.defaults.v1"
     @ObservationIgnored private var homePage = 1
-    @ObservationIgnored private var detailTask: Task<Void, Never>?
+    @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var catalogTask: Task<Void, Never>?
     @ObservationIgnored private var detailRequestID = 0
     @ObservationIgnored private var catalogRequestID = 0
@@ -396,7 +402,7 @@ final class CinemaStore {
     }
 
     func autoRefreshHome() async {
-        if let lastHomeRefreshAt, Date().timeIntervalSince(lastHomeRefreshAt) < 60 { return }
+        if let lastHomeRefreshAt, Date().timeIntervalSince(lastHomeRefreshAt) < 15 { return }
         await refreshHome()
     }
 
@@ -416,7 +422,9 @@ final class CinemaStore {
                     group.addTask {
                         do {
                             let page: MoviePage
-                            if refresh && section.kind == "latest" {
+                            // Kệ "Phim Mới" luôn lấy danh sách sắp theo thời gian
+                            // cập nhật, để phim mới/được cập nhật nằm đầu trang chủ.
+                            if section.kind == "latest" {
                                 do {
                                     page = try await self.api.dailyUpdates()
                                 } catch {
@@ -510,22 +518,37 @@ final class CinemaStore {
     }
 
     func loadDetail(slug: String) {
-        detailTask?.cancel()
-        detailRequestID += 1
-        let requestID = detailRequestID
+        let key = slug.trim()
+        guard !key.isEmpty else { return }
+        // Huỷ đúng yêu cầu của slug này, không đụng tới chi tiết của tab khác.
+        detailTasks[key]?.cancel()
+        detailLoadingSlugs.insert(key)
+        detailErrorBySlug[key] = nil
         detailMovie = nil; detailLoading = true; detailError = nil
-        detailTask = Task {
-            defer { if requestID == detailRequestID { detailLoading = false } }
+        detailTasks[key] = Task { @MainActor in
+            defer {
+                detailLoadingSlugs.remove(key)
+                if detailLoadingSlugs.isEmpty { detailLoading = false }
+            }
             do {
-                let value = try await api.detail(slug: slug)
-                guard !Task.isCancelled, requestID == detailRequestID else { return }
+                let value = try await api.detail(slug: key)
+                guard !Task.isCancelled else { return }
+                detailBySlug[key] = value
                 detailMovie = value
             } catch {
-                guard !Task.isCancelled, requestID == detailRequestID else { return }
+                guard !Task.isCancelled else { return }
+                detailErrorBySlug[key] = error.localizedDescription
                 detailError = error.localizedDescription
             }
         }
     }
+
+    /// Chi tiết của đúng slug này — dùng cho trang chi tiết của từng tab.
+    func detail(for slug: String) -> Movie? { detailBySlug[slug.trim()] }
+
+    func isDetailLoading(_ slug: String) -> Bool { detailLoadingSlugs.contains(slug.trim()) }
+
+    func detailError(for slug: String) -> String? { detailErrorBySlug[slug.trim()] }
 
     /// Đếm số phim cho từng lựa chọn trong một nhóm lọc.
     ///

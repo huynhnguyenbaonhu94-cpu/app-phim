@@ -110,7 +110,7 @@ final class PlaybackController: ObservableObject {
         player.play()
         isPlaying = true
     }
-    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, allowSubtitledPlaylist: Bool = true) {
         configureAudioSession()
         loadTask?.cancel()
         activeRequestID = UUID()
@@ -122,7 +122,15 @@ final class PlaybackController: ObservableObject {
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
         itemObservation = nil
-        guard let url = localURL ?? episode.playbackURL else {
+        // Phụ đề rời: phát qua master playlist để PiP cũng hiện phụ đề.
+        let subtitledURL = (localURL == nil && allowSubtitledPlaylist) ? episode.subtitledPlaylistURL : nil
+        fallbackPlaybackURL = subtitledURL == nil ? nil : episode.playbackURL
+        usedSubtitledPlaylist = subtitledURL != nil
+        hasSidecarSubtitle = episode.subtitleURL != nil
+        legibleGroup = nil
+        legibleOption = nil
+        nativeSubtitleActive = false
+        guard let url = localURL ?? subtitledURL ?? episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
             errorMessage = "Tập này hiện chưa có đường dẫn phát."
@@ -140,8 +148,15 @@ final class PlaybackController: ObservableObject {
                     guard self.activeRequestID == requestID else { return }
                     switch item.status {
                     case .readyToPlay:
-                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible), let option = group.options.first {
-                            item.select(option, in: group)
+                        // Phụ đề rời: giữ nhóm phụ đề cho PiP, còn khi xem bình
+                        // thường app vẽ phụ đề theo thiết lập của người dùng.
+                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
+                           let option = group.options.first {
+                            self.legibleGroup = group
+                            self.legibleOption = option
+                            if !self.hasSidecarSubtitle {
+                                item.select(option, in: group)
+                            }
                         }
                         self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                         if let startAt, startAt > 0, startAt.isFinite {
@@ -150,7 +165,16 @@ final class PlaybackController: ObservableObject {
                             self.seek(to: safeStart)
                         }
                     case .failed:
-                        self.loadTask?.cancel(); self.isLoading = false; self.activeURL = nil
+                        self.loadTask?.cancel()
+                        // Master playlist phụ đề hỏng: quay về link M3U8 gốc ngay,
+                        // người xem không phải bấm thử lại.
+                        if self.usedSubtitledPlaylist, let fallback = self.fallbackPlaybackURL {
+                            self.usedSubtitledPlaylist = false
+                            self.fallbackPlaybackURL = nil
+                            self.load(episode, startAt: startAt, localURL: nil, allowSubtitledPlaylist: false)
+                            return
+                        }
+                        self.isLoading = false; self.activeURL = nil
                         self.errorMessage = item.error?.localizedDescription ?? "Nguồn HLS không phát được trên thiết bị này."
                     default: break
                     }
@@ -165,6 +189,29 @@ final class PlaybackController: ObservableObject {
             guard !Task.isCancelled, self.activeRequestID == requestID, self.isLoading else { return }
             self.isLoading = false
             self.errorMessage = "Nguồn phát phản hồi quá lâu. Hãy thử tập hoặc nguồn khác."
+        }
+    }
+
+    /// Nhóm phụ đề gốc của item (có khi link phát được bọc kèm phụ đề rời).
+    private var legibleGroup: AVMediaSelectionGroup?
+    private var legibleOption: AVMediaSelectionOption?
+    /// Tập này có phụ đề rời do máy chủ/admin cung cấp hay không.
+    private var hasSidecarSubtitle = false
+    /// Đang phát qua master playlist phụ đề (để biết đường quay về link gốc).
+    private var usedSubtitledPlaylist = false
+    private var fallbackPlaybackURL: URL?
+
+    /// PiP chỉ hiện phụ đề khi phụ đề thuộc media của AVPlayerItem, nên khi bật
+    /// PiP thì chọn nhóm phụ đề gốc và tạm ẩn lớp phụ đề app tự vẽ; khi tắt PiP
+    /// thì trả lại lớp phụ đề theo thiết lập của người dùng.
+    func setNativeSubtitles(_ enabled: Bool) {
+        guard hasSidecarSubtitle, let group = legibleGroup, let option = legibleOption else { return }
+        if enabled {
+            player.currentItem?.select(option, in: group)
+            nativeSubtitleActive = true
+        } else {
+            player.currentItem?.select(nil, in: group)
+            nativeSubtitleActive = false
         }
     }
 
@@ -446,7 +493,14 @@ final class SubtitleController: ObservableObject {
 
 final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
     @Published private(set) var isSupported = false
-    @Published private(set) var isActive = false
+    @Published private(set) var isActive = false {
+        didSet {
+            guard isActive != oldValue else { return }
+            onActiveChanged?(isActive)
+        }
+    }
+    /// Gọi khi PiP bật/tắt để trình phát đổi cách hiện phụ đề.
+    var onActiveChanged: ((Bool) -> Void)?
     private var controller: AVPictureInPictureController?
     /// Watches `isPictureInPicturePossible`. Pressing the PiP button almost
     /// always happens before the layer has rendered a frame, and the flag stays
@@ -676,7 +730,7 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    if hasCurrentSubtitle, subtitlePreferences.enabled, let subtitle = subtitles.currentText {
+                    if hasCurrentSubtitle, subtitlePreferences.enabled, !playback.nativeSubtitleActive, let subtitle = subtitles.currentText {
                         VStack { Spacer(); subtitleText(subtitle).padding(.bottom, proxy.safeAreaInsets.bottom + subtitlePreferences.bottomSpacing) }
                             .allowsHitTesting(false)
                     }
@@ -1918,6 +1972,11 @@ struct CinemaPlayerScreen: View {
     }
 
     private func applyPlaybackDefaults() {
+        // Bật PiP thì chuyển sang phụ đề gốc (PiP mới hiện được), tắt PiP thì
+        // quay lại lớp phụ đề theo thiết lập của người dùng.
+        pipCoordinator.onActiveChanged = { [weak playback] active in
+            playback?.setNativeSubtitles(active)
+        }
         guard !hasAppliedPlaybackDefaults else { return }
         hasAppliedPlaybackDefaults = true
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes

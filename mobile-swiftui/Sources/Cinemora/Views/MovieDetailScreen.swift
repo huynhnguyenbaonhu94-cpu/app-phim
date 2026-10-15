@@ -21,7 +21,7 @@ struct MovieDetailScreen: View {
         self.onExitRelated = onExitRelated
     }
 
-    private var movie: Movie? { store.detailMovie }
+    private var movie: Movie? { store.detail(for: slug) }
     private var servers: [MovieServer] { movie?.availableServers ?? [] }
     private var episodes: [MovieEpisode] { servers.indices.contains(selectedServer) ? servers[selectedServer].episodes : [] }
     private var episode: MovieEpisode? { episodes.indices.contains(selectedEpisode) ? episodes[selectedEpisode] : nil }
@@ -39,12 +39,12 @@ struct MovieDetailScreen: View {
                             // Bình luận của phim này, ngay dưới phần nội dung.
                             CommentsSection(movie: movie)
                                 .padding(.top, 4)
-                        } else if store.detailLoading {
+                        } else if store.isDetailLoading(slug) {
                             loadingState
                                 .frame(width: contentWidth)
                                 .padding(.top, 150)
                         } else {
-                            StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError, actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
+                            StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError(for: slug), actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
                                 .frame(width: contentWidth)
                                 .padding(.top, 80)
                         }
@@ -76,12 +76,12 @@ struct MovieDetailScreen: View {
                 .preferredColorScheme(.dark)
         }
         .task(id: slug) { store.loadDetail(slug: slug) }
-        .onChange(of: store.detailMovie?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
-        .onChange(of: store.detailMovie?.slug) { _, loadedSlug in
+        .onChange(of: store.detail(for: slug)?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
+        .onChange(of: store.detail(for: slug)?.slug) { _, loadedSlug in
             guard autoPlayOnLoad,
                   !didAutoStartPlayback,
                   loadedSlug == slug,
-                  let loadedMovie = store.detailMovie else { return }
+                  let loadedMovie = store.detail(for: slug) else { return }
             didAutoStartPlayback = true
             guard let playableServerIndex = loadedMovie.availableServers.firstIndex(where: { !$0.episodes.isEmpty }) else { return }
             selectedServer = playableServerIndex

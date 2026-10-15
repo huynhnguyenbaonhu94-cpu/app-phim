@@ -141,3 +141,19 @@ Sau khi cập nhật mã lên hosting, bảng `custom_movies` và cột `qualiti
 - Ảnh lưu ở `uploads/movie-images/`, phụ đề ở `uploads/movie-subs/` — nhớ để hai thư mục này
   ghi được (quyền 755) và không xoá khi cập nhật.
 - Nếu ảnh không hiện sau khi tải lên, kiểm tra máy chủ có phục vụ được `/uploads/...` không.
+
+## Tìm diễn viên: khoá TMDB (không bắt buộc)
+
+Trang **Quản lý phim → Thêm phim thủ công**, mục *Diễn viên & đạo diễn* có ô tìm diễn viên.
+
+- **Không cần cấu hình gì** vẫn chạy: hệ thống dùng Wikidata miễn phí (tên, ảnh Wikimedia, mã IMDb).
+- Muốn dùng TMDB (ảnh và dữ liệu đầy đủ hơn): lấy **API Key (v3)** hoặc **API Read Access Token (v4)**
+  tại `themoviedb.org → Settings → API`, rồi khai báo trên hosting:
+
+```
+TMDB_API_KEY=<API Key v3 hoặc Access Token v4>
+```
+
+- **cPanel:** *Setup Node.js App* → **Environment Variables** → thêm biến `TMDB_API_KEY` → **Restart**.
+- Hoặc tạo tệp `.env` trong thư mục ứng dụng với dòng trên rồi Restart.
+- Khoá sai hoặc hết hạn mức thì hệ thống tự quay về Wikidata, không bị trắng kết quả.

@@ -15,9 +15,9 @@ struct ResumeMovieScreen: View {
         ZStack {
             CinemaBackground()
             Group {
-                if store.detailLoading {
+                if store.isDetailLoading(record.movie.slug) {
                     ResumeLoader(title: "Đang tải lại nguồn phát…", subtitle: record.movie.name)
-                } else if let error = resumeError ?? store.detailError {
+                } else if let error = resumeError ?? store.detailError(for: record.movie.slug) {
                     StateMessage(icon: "wifi.exclamationmark", title: "Không thể tải nguồn phát", detail: error, actionTitle: "Thử lại") {
                         resumeError = nil
                         resumeStarted = false
@@ -33,7 +33,7 @@ struct ResumeMovieScreen: View {
         .task(id: record.movie.slug) {
             store.loadDetail(slug: record.movie.slug)
         }
-        .onChange(of: store.detailMovie?.slug) { _, _ in startResumeIfReady() }
+        .onChange(of: store.detail(for: record.movie.slug)?.slug) { _, _ in startResumeIfReady() }
         .onAppear { startResumeIfReady() }
         .fullScreenCover(isPresented: $showPlayer, onDismiss: { dismiss() }) {
             if let loadedMovie, !loadedMovie.availableServers.isEmpty {
@@ -46,7 +46,7 @@ struct ResumeMovieScreen: View {
     }
 
     private func startResumeIfReady() {
-        guard !resumeStarted, let movie = store.detailMovie, movie.slug == record.movie.slug else { return }
+        guard !resumeStarted, let movie = store.detail(for: record.movie.slug), movie.slug == record.movie.slug else { return }
         let servers = movie.availableServers
         guard !servers.isEmpty else {
             resumeError = "Phim chưa có nguồn phát khả dụng. Hãy mở lại trang chi tiết để thử nguồn khác."

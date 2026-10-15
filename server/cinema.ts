@@ -14,7 +14,7 @@ const IMAGE_BASE = "https://phimimg.com/";
 export const MAX_CINEMA_PAGE = 2_000;
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 function apiRoute(path: string) { return PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}${path}` : path; }
-const CACHE_TTL = 300_000; // 5 min — reduces token churn
+const CACHE_TTL = 45_000; // 45 giây: phim mới/cập nhật hiện nhanh trên app
 const cache = new Map<string, { expires: number; value: unknown }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
 const allowedImageHosts = new Set(["phimimg.com", "www.phimimg.com", "phimapi.com", "www.phimapi.com", "image.tmdb.org"]);
@@ -616,16 +616,26 @@ export async function getDailyUpdates(page = 1) {
   const url = `${API_BASE}${path}?${params.toString()}`;
 
   // Dùng cache riêng TTL 2 phút
-  const DAILY_TTL = 120_000;
+  const DAILY_TTL = 45_000;
+  // Phim admin thêm thủ công cũng phải nằm trong "phim mới cập nhật" của app.
+  const withCustom = async (rows: any[], pagination: unknown, pathImage: string | undefined) => {
+    const items = rows.map((item: any) => normalizeMovie(item, pathImage)) as Movie[];
+    if (safePage(page) !== 1) return { items, pagination };
+    const custom = await customMoviesForFilter({});
+    if (custom.length === 0) return { items, pagination };
+    const seen = new Set(custom.map((movie) => movie.slug));
+    return { items: [...custom, ...items.filter((movie) => !seen.has(movie.slug))], pagination };
+  };
+
   const cached = cache.get(`daily:${url}`);
   if (cached && cached.expires > Date.now()) {
     const { items, pagination, pathImage } = unwrapItems(cached.value);
-    return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
+    return withCustom(items, pagination, pathImage);
   }
   const payload = await upstream(path, { ...query });
   cache.set(`daily:${url}`, { expires: Date.now() + DAILY_TTL, value: payload });
   const { items, pagination, pathImage } = unwrapItems(payload);
-  return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
+  return withCustom(items, pagination, pathImage);
 }
 
 export async function getCatalogMeta() {

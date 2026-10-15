@@ -259,6 +259,42 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
   return lastResponse;
 }
 
+  /**
+   * Master playlist bọc link M3U8 kèm phụ đề rời.
+   *
+   * AVFoundation chỉ hiện phụ đề trong PiP khi phụ đề thuộc media của
+   * AVPlayerItem; phụ đề rời (.vtt) thì không. Bọc bằng EXT-X-MEDIA để trình
+   * phát có nhóm phụ đề hợp lệ — nhờ đó PiP hiện phụ đề đúng tiến trình phim.
+   * Máy chủ chỉ sinh playlist nhỏ; video và phụ đề vẫn do thiết bị tải trực tiếp.
+   */
+  app.get("/api/cinema/subtitled.m3u8", async (req, res) => {
+    const read = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const absolute = (raw: string) => {
+      if (/^https?:\/\//i.test(raw)) return raw;
+      if (raw.startsWith("/")) return `${origin}${raw}`;
+      return "";
+    };
+    const videoURL = absolute(read(req.query.video));
+    const subtitleURL = absolute(read(req.query.sub));
+    if (!videoURL || !subtitleURL || !/\.m3u8/i.test(videoURL)) {
+      return res.status(400).send("Thiếu link M3U8 hoặc link phụ đề");
+    }
+    const playlist = [
+      "#EXTM3U",
+      // Phụ đề rời (EXT-X-MEDIA TYPE=SUBTITLES) yêu cầu HLS version 4.
+      "#EXT-X-VERSION:4",
+      `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Phụ đề",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,LANGUAGE="vi",URI="${subtitleURL}"`,
+      '#EXT-X-STREAM-INF:BANDWIDTH=6000000,SUBTITLES="subs"',
+      videoURL,
+      "",
+    ].join("\n");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    return res.status(200).send(playlist);
+  });
+
   app.get("/api/cinema/stream/:token", async (req, res) => {
     const source = getStreamSource(req.params.token);
     if (!source) return res.status(404).send("Stream not found");
