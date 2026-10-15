@@ -130,3 +130,14 @@ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users';
 ```
 
 Cột `badge` và `avatar` phải hiện `utf8mb4`. Nếu còn `latin1` thì chạy khối SQL ở trên.
+
+## Phim thủ công (tính năng mới)
+
+Sau khi cập nhật mã lên hosting, bảng `custom_movies` và cột `qualities` của
+`movie_source_episodes` **tự được tạo khi máy chủ khởi động** — không cần chạy SQL.
+
+- Thêm phim: `/admin/movies` → nút **“+ Thêm phim thủ công”**.
+- Tạo phim: `/admin/movies/custom/new`; sửa phim và thêm nguồn/tập/chất lượng: `/admin/movies/custom/<id>`.
+- Ảnh lưu ở `uploads/movie-images/`, phụ đề ở `uploads/movie-subs/` — nhớ để hai thư mục này
+  ghi được (quyền 755) và không xoá khi cập nhật.
+- Nếu ảnh không hiện sau khi tải lên, kiểm tra máy chủ có phục vụ được `/uploads/...` không.

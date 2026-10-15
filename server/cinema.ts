@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { mergeCustomSources } from "./movieSources";
+import {
+  customMoviesForFilter,
+  getCustomMovieBySlug,
+  getCustomMovieDetail,
+  registerCustomMovieView,
+  searchCustomMovies,
+} from "./customMovies";
 
 const API_BASE = "https://phimapi.com";
 const IMAGE_BASE = "https://phimimg.com/";
@@ -28,7 +35,8 @@ export type Movie = {
   isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null;
   createdAt: string | null; updatedAt: string | null;
 };
-export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
+export type MovieEpisodeQuality = { label: string; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl: string | null };
+export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null; qualities?: MovieEpisodeQuality[] }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
 
 function cleanText(value: unknown, fallback = "") {
   if (typeof value !== "string") return fallback;
@@ -324,7 +332,12 @@ async function getMoviePeople(slug: string) {
 export async function getHome(page = 1) {
   const payload = await upstream("/v1/api/home", { page: safePage(page) });
   const { items, pagination, pathImage } = unwrapItems(payload);
-  return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
+  const apiItems = items.map((item: any) => normalizeMovie(item, pathImage));
+  // Phim thủ công xuất hiện trên trang chủ của app như phim bình thường.
+  const custom = safePage(page) === 1 ? await customMoviesForFilter({}) : [];
+  if (custom.length === 0) return { items: apiItems, pagination };
+  const seen = new Set(custom.map((movie) => movie.slug));
+  return { items: [...custom, ...apiItems.filter((movie: Movie) => !seen.has(movie.slug))], pagination };
 }
 const listEndpoints: Record<string, string> = {
   latest: "/v1/api/danh-sach/phim-moi",
@@ -458,6 +471,20 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
       merged.push(movie);
     }
   }
+  // Phim admin thêm thủ công được trộn vào danh sách, ưu tiên theo thời gian cập nhật.
+  if (page === 1) {
+    const custom = await customMoviesForFilter({
+      kinds: uniqueStrings((input.kinds || []).filter((value) => value && value in listEndpoints)),
+      categories: uniqueStrings(input.categories?.length ? input.categories : input.category ? [input.category] : []),
+      countries: uniqueStrings(input.countries?.length ? input.countries : input.country ? [input.country] : []),
+      years: Array.from(new Set((input.years?.length ? input.years : input.year ? [input.year] : []).filter((value) => Number.isInteger(value)))),
+    });
+    for (const movie of custom) {
+      if (!movie.slug || seen.has(movie.slug)) continue;
+      seen.add(movie.slug);
+      merged.push(movie);
+    }
+  }
   merged.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")));
 
   const kindKey = combos[0]?.kind ?? "latest";
@@ -545,10 +572,26 @@ export async function searchMovies(input: { keyword: string; page?: number }) {
   if (keyword.length < 2) return { items: [], pagination: null };
   const payload = await upstream("/v1/api/tim-kiem", { keyword, page: safePage(input.page), limit: 24 });
   const { items, pagination, pathImage } = unwrapItems(payload);
-  return { items: items.map((item: any) => normalizeMovie(item, pathImage)), pagination };
+  const apiItems = items.map((item: any) => normalizeMovie(item, pathImage));
+  // Phim admin thêm thủ công cũng phải tìm thấy được, và đứng trước kết quả API.
+  const custom = safePage(input.page) === 1 ? await searchCustomMovies(keyword) : [];
+  const seen = new Set(custom.map((movie) => movie.slug));
+  return {
+    items: [...custom, ...apiItems.filter((movie: Movie) => !seen.has(movie.slug))],
+    pagination,
+  };
 }
 export async function getMovieDetail(rawSlug: string): Promise<MovieDetail> {
   const slug = safeSlug(rawSlug);
+  // Phim thủ công có slug riêng: trả về ngay, kèm nguồn/tập admin đã thêm.
+  const custom = await getCustomMovieBySlug(rawSlug.trim() || slug);
+  if (custom && custom.isPublished) {
+    const detail = await getCustomMovieDetail(custom.slug);
+    if (detail) {
+      void registerCustomMovieView(custom.slug);
+      return detail;
+    }
+  }
   const payload = await getMoviePayload(slug);
   const item = payload?.data?.item ?? payload?.movie ?? null;
   if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Không tìm thấy bộ phim này." });

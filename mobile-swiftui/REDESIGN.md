@@ -1528,3 +1528,29 @@ chỗ đặt mã, và tránh lặp lại lỗi này khi thêm hiệu ứng về 
   Đồng bộ mới xem được. Giờ `load()` và `syncToLiveEdge()` dùng chung `startLiveItems()`:
   gắn item → đợi `readyToPlay` → chờ thêm nếu chưa có `seekableTimeRanges` → seek về mép
   phát trực tiếp → chạy. Bấm Đồng bộ vẫn dùng đúng luồng đó.
+
+## 47. Thêm phim thủ công bằng link (web admin + app)
+
+**Backend**
+- Bảng mới `custom_movies` (tên, tên tiếng Anh, tên khác, tập hiện tại, ngày tạo, TMDB, IMDB,
+  thể loại, quốc gia, đánh giá, lượt xem thật/ảo, poster, thumbnail, nội dung, diễn viên có ảnh,
+  đạo diễn, loại phim, trạng thái) + cột `qualities` cho `movie_source_episodes`.
+- `ensureCustomMoviesCompatibility` tự tạo bảng/cột khi máy chủ khởi động — không cần SQL tay.
+- `server/customMovies.ts`: CRUD, lưu ảnh (kiểm tra magic bytes, ≤ 8MB), sinh slug không dấu,
+  trộn vào danh sách/tìm kiếm/trang chủ, trang chi tiết riêng, đếm lượt xem thật.
+- Phim thủ công trả về **cùng hình dạng `Movie`/`MovieDetail`** với phim API nên app không phải
+  xử lý riêng: hiện đủ tên tiếng Anh, tên khác, thể loại, quốc gia, đánh giá, lượt xem, diễn viên
+  kèm ảnh, ngày tạo/cập nhật, TMDB/IMDB.
+- Mỗi tập có **nhiều chất lượng**, mỗi chất lượng có link M3U8 và phụ đề riêng; link phụ đề ngoài
+  được đổi sang WebVTT và lưu thành tệp để phát đúng tiến trình khi tua.
+
+**Web admin**
+- Trang `/admin/movies/custom/new` và `/admin/movies/custom/:id` (nút “+ Thêm phim thủ công”
+  trong Quản lý phim): biểu mẫu đầy đủ, chọn nhiều thể loại/quốc gia, chip tên khác/đạo diễn bằng
+  Enter, lượt xem thật/ảo, diễn viên có ảnh, quản lý nguồn – tập – chất lượng.
+- `ImagePicker`: tải ảnh hoặc dán link, có trình cắt ảnh (Poster 2:3, Thumbnail 16:9, Diễn viên 1:1,
+  tự do) rồi tải lên máy chủ.
+
+**App**
+- `MovieEpisode.qualities` + `withQuality(_:)`: trình phát có mục **Chất lượng** (tab Hiển thị),
+  đổi chất lượng nạp lại đúng vị trí đang xem kèm phụ đề của chất lượng đó.

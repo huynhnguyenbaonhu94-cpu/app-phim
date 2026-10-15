@@ -14,6 +14,13 @@ import { getDb } from "./db";
 import { movieSourceEpisodes, movieSources } from "../drizzle/schema";
 import { registerStreamSource } from "./cinema";
 
+/** Một chất lượng của tập: mỗi chất lượng có link M3U8 và phụ đề riêng. */
+export type MovieSourceQuality = {
+  label: string;
+  streamUrl: string;
+  subtitleUrl: string | null;
+};
+
 export type MovieSourceEpisode = {
   id: number;
   sourceId: number;
@@ -22,6 +29,8 @@ export type MovieSourceEpisode = {
   subtitleUrl: string | null;
   hasUploadedSubtitle: boolean;
   sortOrder: number;
+  /** Chất lượng của tập (1080p, 2K, 4K…). Rỗng nghĩa là dùng link của tập. */
+  qualities: MovieSourceQuality[];
 };
 
 export type MovieSource = {
@@ -34,6 +43,61 @@ export type MovieSource = {
 
 const SUBTITLE_DIR = "uploads/movie-subs";
 
+/** Đọc JSON chất lượng đã lưu; dữ liệu hỏng thì coi như không có chất lượng. */
+function parseQualities(value: unknown): MovieSourceQuality[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item: any) => item && typeof item.streamUrl === "string" && item.streamUrl.trim().length > 0)
+      .map((item: any) => ({
+        label: String(item.label ?? "Mặc định").trim().slice(0, 40) || "Mặc định",
+        streamUrl: String(item.streamUrl).trim().slice(0, 2000),
+        subtitleUrl: typeof item.subtitleUrl === "string" && item.subtitleUrl.trim() ? item.subtitleUrl.trim().slice(0, 2000) : null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Chuẩn hoá phụ đề của một chất lượng thành URL dùng được cho app.
+ *
+ * Tệp admin tải lên được lưu thành file VTT; link ngoài được máy chủ tải về, đổi
+ * sang WebVTT rồi cũng lưu thành file — nhờ vậy lúc phát không phụ thuộc máy chủ
+ * nguồn và AVPlayer luôn đọc được (AVPlayer chỉ đọc WebVTT).
+ */
+async function resolveSubtitleUrl(input: { subtitleUrl?: string | null; subtitleVtt?: string | null }): Promise<string | null> {
+  const uploaded = input.subtitleVtt?.trim();
+  if (uploaded) {
+    const saved = await saveMovieSubtitle({ base64: Buffer.from(uploaded, "utf8").toString("base64"), filename: "quality.vtt" });
+    return saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+  }
+  const link = input.subtitleUrl?.trim();
+  if (!link) return null;
+  const converted = await fetchSubtitleAsVtt(link);
+  if (!converted) return link;
+  const saved = await saveMovieSubtitle({ base64: Buffer.from(converted, "utf8").toString("base64"), filename: "quality.vtt" });
+  return saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+}
+
+/** Lưu danh sách chất lượng của tập, kèm phụ đề riêng từng chất lượng. */
+async function resolveQualities(input: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> | undefined): Promise<string | null> {
+  if (!input || input.length === 0) return null;
+  const resolved: MovieSourceQuality[] = [];
+  for (const item of input) {
+    const streamUrl = item.streamUrl?.trim();
+    if (!streamUrl) continue;
+    resolved.push({
+      label: String(item.label ?? "").trim().slice(0, 40) || "Mặc định",
+      streamUrl: streamUrl.slice(0, 2000),
+      subtitleUrl: await resolveSubtitleUrl({ subtitleUrl: item.subtitleUrl, subtitleVtt: item.subtitleVtt }),
+    });
+  }
+  return resolved.length ? JSON.stringify(resolved) : null;
+}
+
 function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpisode {
   return {
     id: row.id,
@@ -45,6 +109,7 @@ function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpi
     subtitleUrl: row.subtitleVtt || row.subtitleUrl ? `/api/movies/subtitle/${row.id}.vtt` : null,
     hasUploadedSubtitle: Boolean(row.subtitleVtt && row.subtitleVtt.length > 0),
     sortOrder: row.sortOrder,
+    qualities: parseQualities(row.qualities),
   };
 }
 
@@ -107,6 +172,7 @@ export async function addMovieEpisode(input: {
   streamUrl: string;
   subtitleUrl?: string | null;
   subtitleVtt?: string | null;
+  qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
 }): Promise<MovieSourceEpisode> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
@@ -121,6 +187,7 @@ export async function addMovieEpisode(input: {
   // không phụ thuộc việc máy chủ nguồn có cho tải lại hay không.
   const subtitleVtt =
     input.subtitleVtt ?? (subtitleLink ? await fetchSubtitleAsVtt(subtitleLink) : null);
+  const qualities = await resolveQualities(input.qualities);
   const [inserted] = await db
     .insert(movieSourceEpisodes)
     .values({
@@ -129,6 +196,7 @@ export async function addMovieEpisode(input: {
       streamUrl: input.streamUrl,
       subtitleUrl: subtitleLink,
       subtitleVtt: subtitleVtt,
+      qualities,
       sortOrder: episodes.length,
     })
     .$returningId();
@@ -142,7 +210,13 @@ export async function addMovieEpisode(input: {
 /** Sửa thông tin một tập. */
 export async function updateMovieEpisode(
   id: number,
-  input: { name?: string; streamUrl?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }
+  input: {
+    name?: string;
+    streamUrl?: string;
+    subtitleUrl?: string | null;
+    subtitleVtt?: string | null;
+    qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
+  }
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
@@ -158,6 +232,7 @@ export async function updateMovieEpisode(
     }
   }
   if (input.subtitleVtt !== undefined) patch.subtitleVtt = input.subtitleVtt;
+  if (input.qualities !== undefined) patch.qualities = await resolveQualities(input.qualities);
   if (Object.keys(patch).length === 0) return;
   await db.update(movieSourceEpisodes).set(patch).where(eq(movieSourceEpisodes.id, id));
 }
@@ -285,9 +360,18 @@ export async function mergeCustomSources(
         slug: `custom-${episode.id}`,
         filename: episode.name,
         embedUrl: null,
-        streamUrl: registerStreamSource(episode.streamUrl),
-        directStreamUrl: episode.streamUrl,
-        subtitleUrl: episode.subtitleUrl,
+        streamUrl: registerStreamSource(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
+        directStreamUrl: episode.qualities[0]?.streamUrl ?? episode.streamUrl,
+        subtitleUrl: episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
+        // Danh sách chất lượng để app cho người xem chọn 1080p / 2K / 4K…
+        qualities: episode.qualities.length
+          ? episode.qualities.map((quality) => ({
+              label: quality.label,
+              streamUrl: registerStreamSource(quality.streamUrl),
+              directStreamUrl: quality.streamUrl,
+              subtitleUrl: quality.subtitleUrl,
+            }))
+          : undefined,
       })),
     });
   }

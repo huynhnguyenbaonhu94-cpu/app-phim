@@ -566,6 +566,10 @@ struct CinemaPlayerScreen: View {
     @State private var lockIndicatorVisible = true
     @State private var settingsOpen = false
     @State private var settingsTab: SettingsTab = .subtitle
+    /// Chất lượng đang chọn cho tập hiện tại (phim thủ công có thể có 1080p / 2K / 4K).
+    @State private var qualityIndex = 0
+    /// Vị trí cần nạp lại sau khi đổi chất lượng.
+    @State private var pendingResumeTime: Double?
     @State private var stopTimer: StopTimer = .off
     @State private var stopAtEpisodeEnabled = false
     @State private var stopAtEpisodeID: String?
@@ -1228,6 +1232,7 @@ struct CinemaPlayerScreen: View {
             }
         case .display:
             VStack(alignment: .leading, spacing: 10) {
+                qualityPickerRow
                 settingsRow(icon: "rectangle.on.rectangle", title: "Tỷ lệ khung hình", detail: videoFit.rawValue) {
                     Picker("Tỷ lệ khung hình", selection: $videoFit) {
                         ForEach(VideoFit.allCases, id: \.self) { fit in Text(fit.rawValue).tag(fit) }
@@ -1853,16 +1858,63 @@ struct CinemaPlayerScreen: View {
     private func loadCurrentEpisode() {
         guard let episode else { return }
         didHandleEpisodeEnd = false
-        let startAt = hasAppliedResumeTime ? nil : resumeTime
-        subtitles.load(url: episode.subtitleURL, bilingualURL: episode.bilingualSubtitleURL)
+        // Tập đang chọn có thể có nhiều chất lượng; lấy đúng chất lượng đang chọn.
+        let qualities = episode.qualities ?? []
+        if qualityIndex >= qualities.count { qualityIndex = 0 }
+        let source = episode.withQuality(qualityIndex)
+        let startAt = pendingResumeTime ?? (hasAppliedResumeTime ? nil : resumeTime)
+        subtitles.load(url: source.subtitleURL, bilingualURL: source.bilingualSubtitleURL)
         // Ưu tiên bản đã tải về máy để xem được khi mất mạng.
         let offlineURL = downloads.localURL(
             movieSlug: movie.slug,
-            episodeSlug: episode.slug.isEmpty ? episode.name : episode.slug
+            episodeSlug: source.slug.isEmpty ? source.name : source.slug
         )
-        playback.load(episode, startAt: startAt, localURL: offlineURL)
+        playback.load(source, startAt: startAt, localURL: offlineURL)
         if startAt != nil { hasAppliedResumeTime = true }
+        pendingResumeTime = nil
         saveLocalWatchProgress()
+    }
+
+    /// Đổi chất lượng: nạp lại đúng vị trí đang xem bằng link của chất lượng mới.
+    private func selectQuality(_ index: Int) {
+        guard index != qualityIndex else { return }
+        let position = playback.currentTime
+        if position > 1 { pendingResumeTime = position }
+        qualityIndex = index
+        loadCurrentEpisode()
+        scheduleHide()
+    }
+
+    /// Chọn chất lượng của tập đang xem, chỉ hiện khi tập có nhiều hơn một chất lượng.
+    @ViewBuilder
+    private var qualityPickerRow: some View {
+        if let episode, let qualities = episode.qualities, qualities.count > 1 {
+            settingsRow(
+                icon: "4k.tv",
+                title: "Chất lượng",
+                detail: qualities.indices.contains(qualityIndex) ? qualities[qualityIndex].label : qualities[0].label
+            ) {
+                HStack(spacing: 6) {
+                    ForEach(Array(qualities.enumerated()), id: \.offset) { index, quality in
+                        qualityChip(label: quality.label, isSelected: index == qualityIndex) { selectQuality(index) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func qualityChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.black : Color.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.auroraViolet : Color.white.opacity(0.12), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .accessibilityLabel("Chất lượng \(label)")
     }
 
     private func applyPlaybackDefaults() {

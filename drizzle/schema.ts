@@ -197,6 +197,8 @@ export const movieSourceEpisodes = mysqlTable("movie_source_episodes", {
   streamUrl: text("streamUrl").notNull(),
   subtitleUrl: text("subtitleUrl"),
   subtitleVtt: mediumtext("subtitleVtt"),
+  /** JSON [{ label, streamUrl, subtitleUrl }] — mỗi tập có thể có nhiều chất lượng, mỗi chất lượng phụ đề riêng. */
+  qualities: text("qualities"),
   sortOrder: int("sortOrder").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ sourceIndex: index("movie_source_episodes_source_idx").on(table.sourceId) }));
@@ -208,3 +210,48 @@ export type InsertMovieSourceEpisode = typeof movieSourceEpisodes.$inferInsert;
 
 export type MovieComment = typeof movieComments.$inferSelect;
 export type InsertMovieComment = typeof movieComments.$inferInsert;
+
+/** Phim do admin thêm thủ công bằng link M3U8, không lấy từ API nguồn. */
+export const customMovies = mysqlTable("custom_movies", {
+  id: int("id").autoincrement().primaryKey(),
+  slug: varchar("slug", { length: 200 }).notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  /** Tên tiếng Anh, hiển thị ngay dưới tên phim trong trang chi tiết. */
+  originName: varchar("originName", { length: 200 }),
+  /** JSON mảng tên khác của phim. */
+  alternativeNames: text("alternativeNames"),
+  episodeCurrent: varchar("episodeCurrent", { length: 80 }),
+  episodeTotal: int("episodeTotal"),
+  createdDate: varchar("createdDate", { length: 40 }),
+  updatedDate: varchar("updatedDate", { length: 40 }),
+  tmdbId: varchar("tmdbId", { length: 40 }),
+  imdbId: varchar("imdbId", { length: 40 }),
+  /** JSON [{ name, slug }] */
+  categories: text("categories"),
+  countries: text("countries"),
+  rating: varchar("rating", { length: 20 }),
+  /** real: chỉ lượt xem thật; mixed: lượt xem thật + số ảo bên dưới. */
+  viewsMode: varchar("viewsMode", { length: 12 }).default("real").notNull(),
+  viewsBase: int("viewsBase").default(0).notNull(),
+  viewCount: int("viewCount").default(0).notNull(),
+  posterUrl: text("posterUrl"),
+  thumbUrl: text("thumbUrl"),
+  description: text("description"),
+  quality: varchar("quality", { length: 40 }),
+  year: int("year"),
+  lang: varchar("lang", { length: 60 }),
+  time: varchar("time", { length: 40 }),
+  status: varchar("status", { length: 60 }),
+  /** series | single */
+  movieType: varchar("movieType", { length: 20 }).default("series").notNull(),
+  /** JSON [{ name, role, image }] */
+  actors: text("actors"),
+  /** JSON mảng tên đạo diễn. */
+  directors: text("directors"),
+  isPublished: boolean("isPublished").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({ slugIndex: uniqueIndex("custom_movies_slug_idx").on(table.slug) }));
+
+export type CustomMovie = typeof customMovies.$inferSelect;
+export type InsertCustomMovie = typeof customMovies.$inferInsert;

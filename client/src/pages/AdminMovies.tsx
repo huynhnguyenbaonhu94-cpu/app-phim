@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Check, Database, ExternalLink, MessageCircle, Pin, RefreshCw, Search, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { Check, Database, ExternalLink, MessageCircle, Pin, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -157,7 +157,7 @@ export default function AdminMovies() {
 
   return <PageShell><main className="content-wrap inner-page admin-movies-page">
     <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/accounts" className="text-link">Quản lý tài khoản</Link> · Quản trị viên</span></div>
-    <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý phim & bình luận" />
+    <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý phim & bình luận" action={<Link href="/admin/movies/custom/new" className="button button-primary"><Plus size={14} /> Thêm phim thủ công</Link>} />
     <div className="admin-movies-layout">
       <section className="admin-movies-panel admin-movies-picker">
         <div className="admin-movies-panel-heading"><div><strong>Chọn phim</strong><span>Tìm phim để xem và điều hành bình luận.</span></div><MessageCircle size={19} /></div>

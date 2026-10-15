@@ -20,6 +20,15 @@ import {
   saveMovieSubtitle,
   updateMovieEpisode,
 } from "./movieSources";
+import {
+  createCustomMovie,
+  customMovieSources,
+  getCustomMovieById,
+  listCustomMovies,
+  removeCustomMovie,
+  saveMovieImage,
+  updateCustomMovie,
+} from "./customMovies";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
@@ -67,6 +76,59 @@ const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((
 function setSessionCookie(ctx: { req: Parameters<typeof getSessionCookieOptions>[0]; res: { cookie: (name: string, value: string, options: Record<string, unknown>) => void } }, token: string) {
   ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: ONE_YEAR_MS });
 }
+
+const movieTagInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  slug: z.string().trim().max(120).optional(),
+});
+
+const movieEpisodeQualityInput = z.object({
+  label: z.string().trim().max(40).optional(),
+  streamUrl: z.string().trim().url().max(2000),
+  subtitleUrl: z.string().trim().max(2000).nullable().optional(),
+  subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+});
+
+const movieEpisodeQualities = z.array(movieEpisodeQualityInput).max(20).optional();
+
+/**
+ * Trường của phim thêm thủ công.
+ *
+ * Dùng chung cho tạo mới và sửa nên trang quản trị chỉ cần một biểu mẫu.
+ */
+const customMovieForm = z.object({
+  name: z.string().trim().min(1).max(200),
+  slug: z.string().trim().max(200).nullable().optional(),
+  originName: z.string().trim().max(200).nullable().optional(),
+  alternativeNames: z.array(z.string().trim().max(200)).max(30).optional(),
+  episodeCurrent: z.string().trim().max(80).nullable().optional(),
+  episodeTotal: z.number().int().min(0).max(20_000).nullable().optional(),
+  createdDate: z.string().trim().max(40).nullable().optional(),
+  updatedDate: z.string().trim().max(40).nullable().optional(),
+  tmdbId: z.string().trim().max(40).nullable().optional(),
+  imdbId: z.string().trim().max(40).nullable().optional(),
+  categories: z.array(movieTagInput).max(30).optional(),
+  countries: z.array(movieTagInput).max(30).optional(),
+  rating: z.string().trim().max(20).nullable().optional(),
+  viewsMode: z.enum(["real", "mixed"]).optional(),
+  viewsBase: z.number().int().min(0).max(1_000_000_000).optional(),
+  posterUrl: z.string().trim().max(2000).nullable().optional(),
+  thumbUrl: z.string().trim().max(2000).nullable().optional(),
+  description: z.string().max(20_000).nullable().optional(),
+  quality: z.string().trim().max(40).nullable().optional(),
+  year: z.number().int().min(1900).max(2100).nullable().optional(),
+  lang: z.string().trim().max(60).nullable().optional(),
+  time: z.string().trim().max(40).nullable().optional(),
+  status: z.string().trim().max(60).nullable().optional(),
+  movieType: z.enum(["series", "single"]).optional(),
+  actors: z.array(z.object({
+    name: z.string().trim().min(1).max(160),
+    role: z.string().trim().max(160).nullable().optional(),
+    image: z.string().trim().max(2000).nullable().optional(),
+  })).max(60).optional(),
+  directors: z.array(z.string().trim().max(120)).max(20).optional(),
+  isPublished: z.boolean().optional(),
+});
 
 export const appRouter = router({
   system: systemRouter,
@@ -364,6 +426,36 @@ export const appRouter = router({
       return clearWatchHistory(ctx.user.id);
     }),
   }),
+  // Phim admin thêm thủ công bằng link (chỉ admin).
+  customMovies: router({
+    list: adminProcedure.query(() => listCustomMovies()),
+    get: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const row = await getCustomMovieById(input.id);
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Không tìm thấy phim này." });
+        return { ...row, sources: await customMovieSources(row.slug) };
+      }),
+    create: adminProcedure.input(customMovieForm).mutation(({ input }) => createCustomMovie(input)),
+    update: adminProcedure
+      .input(customMovieForm.extend({ id: z.number().int().positive() }))
+      .mutation(({ input }) => {
+        const { id, ...rest } = input;
+        return updateCustomMovie(id, rest);
+      }),
+    remove: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ input }) => removeCustomMovie(input.id)),
+    // Ảnh poster / thumbnail / diễn viên: nhận base64 đã cắt sẵn từ trình sửa ảnh.
+    uploadImage: adminProcedure
+      .input(z.object({
+        base64: z.string().min(1).max(12_000_000),
+        filename: z.string().max(180).optional(),
+        mimeType: z.string().max(60).optional(),
+      }))
+      .mutation(({ input }) => saveMovieImage(input)),
+  }),
+
   // Nguồn và tập do admin thêm cho phim API (chỉ admin).
   movieSources: router({
     list: adminProcedure
@@ -385,6 +477,7 @@ export const appRouter = router({
         streamUrl: z.string().trim().url().max(2000),
         subtitleUrl: z.string().trim().max(2000).nullable().optional(),
         subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+        qualities: movieEpisodeQualities,
       }))
       .mutation(({ input }) => addMovieEpisode(input)),
     updateEpisode: adminProcedure
@@ -394,6 +487,7 @@ export const appRouter = router({
         streamUrl: z.string().trim().url().max(2000).optional(),
         subtitleUrl: z.string().trim().max(2000).nullable().optional(),
         subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+        qualities: movieEpisodeQualities,
       }))
       .mutation(({ input }) => {
         const { id, ...rest } = input;
