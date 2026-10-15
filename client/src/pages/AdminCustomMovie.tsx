@@ -1248,6 +1248,7 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   const [form, setForm] = useState<FormState>(emptyForm);
   const [draftRestored, setDraftRestored] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [savedMovieId, setSavedMovieId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [actorQuery, setActorQuery] = useState("");
   const [actorResults, setActorResults] = useState<Array<{ name: string; image: string; description: string; imdbId: string; tmdbId: number | null }>>([]);
@@ -1289,6 +1290,16 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   const createMovie = trpc.customMovies.create.useMutation();
   const updateMovie = trpc.customMovies.update.useMutation();
   const removeMovie = trpc.customMovies.remove.useMutation();
+
+  // Thông báo tự ẩn sau ít giây nên mở lại phim để sửa sẽ không thấy thông báo cũ.
+  useEffect(() => {
+    if (!status) return;
+    const timer = window.setTimeout(() => {
+      setStatus(null);
+      setSavedMovieId(null);
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
 
   useEffect(() => {
     if (movieQuery.data && initializedId !== movieQuery.data.id) {
@@ -1480,26 +1491,20 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
         editing && movieId
           ? await updateMovie.mutateAsync({ id: movieId, ...payload })
           : await createMovie.mutateAsync(payload);
+      // Lưu 4 phần vừa điền cho lần tạo phim sau, rồi làm mới toàn bộ form —
+      // giống hệt khi bấm “+ Phim mới” nên không còn nằm lại ở phim vừa lưu.
+      writeCustomMovieDraft(form);
+      setDraftRestored(true);
+      await listQuery.refetch();
+      setSavedMovieId(saved.id);
+      setInitializedId(null);
+      setForm({ ...emptyForm(), ...(readCustomMovieDraft() || {}) });
       setStatus(
         editing
-          ? "Đã lưu thông tin phim."
-          : "Đã tạo phim. Giờ hãy thêm nguồn và tập phim ở khung bên phải.",
+          ? "Đã lưu thay đổi và làm mới form. Vào danh sách phim để sửa tiếp nếu cần."
+          : "Đã tạo phim và làm mới form. Thêm nguồn, tập phim cho phim vừa tạo khi cần.",
       );
-      await listQuery.refetch();
-      if (editing) {
-        // Nạp lại bản ghi vừa lưu để ngày cập nhật hiện đúng ngay trên form.
-        const refreshed = await movieQuery.refetch();
-        const row = refreshed.data as unknown as CustomMovieRow | undefined;
-        if (row) {
-          setForm(formFromMovie(row));
-          setInitializedId(row.id);
-        }
-      } else {
-        // Lưu lại 4 phần vừa điền để lần tạo phim sau dùng tiếp.
-        writeCustomMovieDraft(form);
-        setDraftRestored(true);
-        navigate(`/admin/movies/custom/${saved.id}`);
-      }
+      navigate("/admin/movies/custom/new");
     } catch (saveError) {
       setFormError(saveError instanceof Error ? saveError.message : "Không thể lưu phim.");
     }
@@ -1597,7 +1602,28 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
             {formError || `Không thể tải dữ liệu: ${movieQuery.error?.message || metaQuery.error?.message}`}
           </p>
         )}
-        {status && !formError && <p className="admin-tv-success">{status}</p>}
+        {status && (
+          <div className="admin-toast" role="status">
+            <Check size={15} />
+            <span className="admin-toast-text">{status}</span>
+            {savedMovieId && (
+              <RouterLink href={`/admin/movies/custom/${savedMovieId}`} className="admin-toast-link">
+                Thêm nguồn &amp; tập
+              </RouterLink>
+            )}
+            <button
+              type="button"
+              className="admin-toast-close"
+              onClick={() => {
+                setStatus(null);
+                setSavedMovieId(null);
+              }}
+              aria-label="Đóng thông báo"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {!editing && draftRestored && (
           <p className="custom-draft-note">

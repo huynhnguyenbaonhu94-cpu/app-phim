@@ -1721,3 +1721,18 @@ Năm lỗi biên dịch của vòng trước và cách xử lý:
 - Trình biên dịch quá thời gian suy luận biểu thức thân trình phát: tách `onChange(scenePhase)` thành
   `handleScenePhaseChange(_:)` và tách lớp phụ đề thành `subtitleOverlay(bottomInset:)`.
 - Bỏ `detailRequestID` không còn dùng sau khi chi tiết phim chuyển sang quản lý theo slug.
+
+## 61. Ngày tạo trên app, luồng lưu ở admin và trình cắt ảnh
+
+- **App**: `formattedDate` chỉ đọc mốc ISO 8601 nên chuỗi `yyyy-MM-dd` của phim thêm thủ công bị hiện
+  nguyên dạng `2026-10-14`. Nay phân tích thêm `yyyy-MM-dd`, `yyyy-MM-dd'T'HH:mm[:ss]` và `yyyy/MM/dd`
+  nên mọi nơi trong trang chi tiết đều là `dd/MM/yyyy`.
+- **Thông báo khi lưu**: chuyển từ dòng chữ nằm trong khung "Thông tin phim" thành **thông báo nổi** ở góc
+  trên bên phải, tách hẳn khỏi form, tự ẩn sau 6 giây và tự xoá khi mở lại phim nên không còn hiện lại
+  thông báo cũ. Thông báo có sẵn liên kết "Thêm nguồn & tập" tới phim vừa lưu và nút đóng.
+- **Lưu xong là thoát form**: sau khi tạo hoặc lưu thay đổi, form tự làm mới đúng như khi bấm "+ Phim mới"
+  (giữ 4 phần thông tin cho lần tạo sau), danh sách phim được nạp lại.
+- **Trình cắt ảnh** viết lại: kéo ảnh để chọn vùng, 8 tay nắm đổi kích thước (khoá tỉ lệ theo khung đang
+  chọn), phóng to 1–3x có dựng lại vùng chọn theo đúng tỉ lệ, thêm nút **Toàn bộ ảnh** (lấy trọn ảnh gốc,
+  không cắt) và **Đặt lại**. Phép tính vùng cắt nay dựa trên vùng ảnh hiển thị thật nên ảnh cắt ra khớp
+  đúng những gì đang thấy.

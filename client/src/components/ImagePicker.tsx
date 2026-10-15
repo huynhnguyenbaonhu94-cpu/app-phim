@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Crop, Image as ImageIcon, LoaderCircle, Upload, X, ZoomIn } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, Crop, Image as ImageIcon, LoaderCircle, Maximize, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 type CropAspect = "poster" | "thumbnail" | "actor" | "free";
 
 type Point = { x: number; y: number };
+/** Hình chữ nhật trong hệ toạ độ của khung cắt. */
 type Rect = { x: number; y: number; width: number; height: number };
+/** Vùng ảnh đang hiển thị trong khung cắt. */
+type Box = Rect & { scale: number };
+type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 export type ImagePickerProps = {
   value: string;
@@ -23,6 +27,10 @@ const aspectLabels: Array<{ key: CropAspect; label: string }> = [
   { key: "actor", label: "Diễn viên 1:1" },
   { key: "free", label: "Tự do" },
 ];
+/** Tay nắm quanh vùng chọn: 4 góc và 4 cạnh. */
+const handles: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+/** Vùng chọn nhỏ nhất (điểm ảnh trên màn hình). */
+const MIN_SIZE = 44;
 
 /** Thời gian chờ sau khi dán link trước khi tải ảnh về máy chủ. */
 const LINK_IMPORT_DELAY = 700;
@@ -44,13 +52,120 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function initialCrop(width: number, height: number, ratio: number | null): Rect {
-  const sourceRatio = width / height;
-  let cropWidth = width * 0.82;
-  let cropHeight = height * 0.82;
-  if (ratio && sourceRatio > ratio) cropWidth = cropHeight * ratio;
-  if (ratio && sourceRatio < ratio) cropHeight = cropWidth / ratio;
-  return { x: (width - cropWidth) / 2, y: (height - cropHeight) / 2, width: cropWidth, height: cropHeight };
+function ratioOf(aspect: CropAspect) {
+  return aspect === "free" ? null : aspectValues[aspect];
+}
+
+/** Vùng chọn mặc định: gần kín ảnh, đúng tỉ lệ đang chọn. */
+function initialCrop(box: Box, ratio: number | null): Rect {
+  let width = box.width * 0.88;
+  let height = box.height * 0.88;
+  if (ratio) {
+    if (width / height > ratio) width = height * ratio;
+    else height = width / ratio;
+  }
+  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+}
+
+/** Giữ nguyên vùng đang chọn nhưng thu lại vừa khung ảnh (khi đổi mức phóng to). */
+function fitInto(rect: Rect, box: Box): Rect {
+  const factor = Math.min(1, box.width / rect.width, box.height / rect.height);
+  const width = rect.width * factor;
+  const height = rect.height * factor;
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  return {
+    x: clamp(centerX - width / 2, box.x, box.x + box.width - width),
+    y: clamp(centerY - height / 2, box.y, box.y + box.height - height),
+    width,
+    height,
+  };
+}
+
+/** Đổi sang tỉ lệ khác nhưng vẫn giữ vùng đang xem ở giữa. */
+function applyRatio(rect: Rect, ratio: number | null, box: Box): Rect {
+  if (!ratio) return fitInto(rect, box);
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  let width = rect.width;
+  let height = width / ratio;
+  if (height > rect.height) {
+    height = rect.height;
+    width = height * ratio;
+  }
+  const factor = Math.min(1, box.width / width, box.height / height);
+  width *= factor;
+  height *= factor;
+  return {
+    x: clamp(centerX - width / 2, box.x, box.x + box.width - width),
+    y: clamp(centerY - height / 2, box.y, box.y + box.height - height),
+    width,
+    height,
+  };
+}
+
+/** Khi tỉ lệ bị khoá: suy chiều còn lại rồi neo vào cạnh/góc đối diện. */
+function lockRatio(rect: Rect, handle: Handle, ratio: number, box: Box): Rect {
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+  let { x, y, width, height } = rect;
+
+  if (handle === "n" || handle === "s") {
+    width = height * ratio;
+    x = rect.x + (rect.width - width) / 2;
+  } else if (handle === "e" || handle === "w") {
+    height = width / ratio;
+    y = rect.y + (rect.height - height) / 2;
+  } else {
+    // Kéo góc: lấy chiều biến động mạnh hơn làm chuẩn.
+    const byWidth = { width, height: width / ratio };
+    const byHeight = { width: height * ratio, height };
+    const deltaWidth = Math.abs(byWidth.width - rect.width) + Math.abs(byWidth.height - rect.height);
+    const deltaHeight = Math.abs(byHeight.width - rect.width) + Math.abs(byHeight.height - rect.height);
+    const picked = deltaWidth >= deltaHeight ? byWidth : byHeight;
+    width = picked.width;
+    height = picked.height;
+  }
+
+  if (handle.includes("w")) x = right - width;
+  if (handle.includes("n")) y = bottom - height;
+
+  const factor = Math.min(1, box.width / width, box.height / height);
+  width *= factor;
+  height *= factor;
+  x = clamp(x, box.x, box.x + box.width - width);
+  y = clamp(y, box.y, box.y + box.height - height);
+  return { x, y, width, height };
+}
+
+/** Áp thao tác kéo vào vùng chọn. */
+function applyDrag(
+  origin: Rect,
+  handle: Handle | "move",
+  dx: number,
+  dy: number,
+  ratio: number | null,
+  box: Box,
+): Rect {
+  if (handle === "move") {
+    return {
+      ...origin,
+      x: clamp(origin.x + dx, box.x, box.x + box.width - origin.width),
+      y: clamp(origin.y + dy, box.y, box.y + box.height - origin.height),
+    };
+  }
+
+  let left = origin.x;
+  let top = origin.y;
+  let right = origin.x + origin.width;
+  let bottom = origin.y + origin.height;
+  if (handle.includes("w")) left = clamp(origin.x + dx, box.x, right - MIN_SIZE);
+  if (handle.includes("e")) right = clamp(origin.x + origin.width + dx, left + MIN_SIZE, box.x + box.width);
+  if (handle.includes("n")) top = clamp(origin.y + dy, box.y, bottom - MIN_SIZE);
+  if (handle.includes("s")) bottom = clamp(origin.y + origin.height + dy, top + MIN_SIZE, box.y + box.height);
+
+  const rect: Rect = { x: left, y: top, width: right - left, height: bottom - top };
+  return ratio ? lockRatio(rect, handle, ratio, box) : rect;
 }
 
 export default function ImagePicker({
@@ -76,11 +191,11 @@ export default function ImagePicker({
 
   const [cropOpen, setCropOpen] = useState(false);
   const [cropAspect, setCropAspect] = useState<CropAspect>(aspect);
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
-  const [imageRect, setImageRect] = useState<DOMRect | null>(null);
+  const [natural, setNatural] = useState({ width: 0, height: 0 });
+  const [stage, setStage] = useState({ width: 0, height: 0 });
   const [crop, setCrop] = useState<Rect | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [drag, setDrag] = useState<{ start: Point; origin: Rect } | null>(null);
+  const [drag, setDrag] = useState<{ handle: Handle | "move"; start: Point; origin: Rect } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -96,9 +211,36 @@ export default function ImagePicker({
     [],
   );
 
+  // Đo khung cắt để tính vùng ảnh hiển thị (đổi kích thước cửa sổ vẫn đúng).
+  useEffect(() => {
+    const element = stageRef.current;
+    if (!cropOpen || !element) return;
+    const measure = () => setStage({ width: element.clientWidth, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [cropOpen]);
+
+  const imageBox = useMemo<Box | null>(() => {
+    if (!natural.width || !natural.height || !stage.width || !stage.height) return null;
+    const fit = Math.min(stage.width / natural.width, stage.height / natural.height);
+    const scale = fit * zoom;
+    const width = natural.width * scale;
+    const height = natural.height * scale;
+    return { x: (stage.width - width) / 2, y: (stage.height - height) / 2, width, height, scale };
+  }, [natural, stage, zoom]);
+
+  // Vùng chọn luôn nằm trong khung ảnh: khởi tạo khi mở, thu lại khi phóng to.
+  useEffect(() => {
+    if (!cropOpen || !imageBox) return;
+    setCrop(current => (current ? fitInto(current, imageBox) : initialCrop(imageBox, ratioOf(cropAspect))));
+    // cropAspect cố ý không nằm trong danh sách phụ thuộc: đổi tỉ lệ xử lý ở chooseAspect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropOpen, imageBox]);
+
   const sourceIsLocal = source.startsWith("data:");
   const busy = uploadImage.isPending || linkState === "loading" || linkState === "importing";
-  const currentRatio = cropAspect === "free" ? null : aspectValues[cropAspect];
   const linkFieldValue = sourceIsLocal ? "" : linkDraft || value;
 
   /** Tải ảnh từ link về máy chủ để xem trước và cắt ảnh luôn hoạt động. */
@@ -166,72 +308,69 @@ export default function ImagePicker({
     setError(null);
     setCropAspect(aspect);
     setZoom(1);
+    setCrop(null);
     setCropOpen(true);
   }
 
   function chooseAspect(next: CropAspect) {
     setCropAspect(next);
-    if (imageRect) setCrop(initialCrop(imageRect.width, imageRect.height, next === "free" ? null : aspectValues[next]));
+    if (imageBox) setCrop(current => (current ? applyRatio(current, ratioOf(next), imageBox) : initialCrop(imageBox, ratioOf(next))));
   }
 
-  function handleImageLoad(event: React.SyntheticEvent<HTMLImageElement>) {
-    const image = event.currentTarget;
-    setPreviewFailed(false);
-    setImageSize({ width: image.naturalWidth, height: image.naturalHeight });
-    requestAnimationFrame(() => {
-      const rect = image.getBoundingClientRect();
-      setImageRect(rect);
-      setCrop(initialCrop(rect.width, rect.height, currentRatio));
-    });
+  function selectWholeImage() {
+    if (!imageBox) return;
+    setCropAspect("free");
+    setZoom(1);
+    setCrop({ x: imageBox.x, y: imageBox.y, width: imageBox.width, height: imageBox.height });
   }
 
-  function pointInImage(event: React.PointerEvent) {
-    const stage = stageRef.current;
-    if (!stage || !imageRect) return null;
-    const stageRect = stage.getBoundingClientRect();
-    return {
-      x: clamp(event.clientX - stageRect.left, imageRect.left - stageRect.left, imageRect.right - stageRect.left),
-      y: clamp(event.clientY - stageRect.top, imageRect.top - stageRect.top, imageRect.bottom - stageRect.top),
-    };
+  function resetCrop() {
+    if (!imageBox) return;
+    setZoom(1);
+    setCrop(initialCrop(imageBox, ratioOf(cropAspect)));
   }
 
-  function beginDrag(event: React.PointerEvent) {
-    if (!crop || !imageRect) return;
-    const point = pointInImage(event);
-    if (!point) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({ start: point, origin: crop });
+  function stagePoint(event: React.PointerEvent): Point {
+    const element = stageRef.current;
+    if (!element) return { x: 0, y: 0 };
+    const rect = element.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function startDrag(handle: Handle | "move", event: React.PointerEvent) {
+    if (!crop) return;
+    event.preventDefault();
+    event.stopPropagation();
+    stageRef.current?.setPointerCapture(event.pointerId);
+    setDrag({ handle, start: stagePoint(event), origin: crop });
   }
 
   function moveDrag(event: React.PointerEvent) {
-    if (!drag || !imageRect || !stageRef.current) return;
-    const point = pointInImage(event);
-    if (!point) return;
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const offsetX = imageRect.left - stageRect.left;
-    const offsetY = imageRect.top - stageRect.top;
-    const maxWidth = imageRect.width;
-    const maxHeight = imageRect.height;
-    const deltaX = point.x - drag.start.x;
-    const deltaY = point.y - drag.start.y;
-    setCrop({
-      ...drag.origin,
-      x: clamp(drag.origin.x + deltaX, offsetX, offsetX + maxWidth - drag.origin.width),
-      y: clamp(drag.origin.y + deltaY, offsetY, offsetY + maxHeight - drag.origin.height),
-    });
+    if (!drag || !imageBox) return;
+    const current = stagePoint(event);
+    const next = applyDrag(
+      drag.origin,
+      drag.handle,
+      current.x - drag.start.x,
+      current.y - drag.start.y,
+      ratioOf(cropAspect),
+      imageBox,
+    );
+    setCrop(next);
+  }
+
+  function endDrag() {
+    setDrag(null);
   }
 
   function cropImage() {
-    if (!crop || !imageRect || !imageSize.width || !stageRef.current) return;
-    const image = stageRef.current.querySelector("img");
-    if (!image) return;
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const scaleX = imageSize.width / imageRect.width;
-    const scaleY = imageSize.height / imageRect.height;
-    const sx = Math.max(0, ((crop.x - (imageRect.left - stageRect.left)) * scaleX) / zoom);
-    const sy = Math.max(0, ((crop.y - (imageRect.top - stageRect.top)) * scaleY) / zoom);
-    const sw = Math.min(imageSize.width - sx, (crop.width * scaleX) / zoom);
-    const sh = Math.min(imageSize.height - sy, (crop.height * scaleY) / zoom);
+    if (!crop || !imageBox || !natural.width || !stageRef.current) return;
+    const element = stageRef.current.querySelector("img");
+    if (!element) return;
+    const sx = clamp((crop.x - imageBox.x) / imageBox.scale, 0, natural.width);
+    const sy = clamp((crop.y - imageBox.y) / imageBox.scale, 0, natural.height);
+    const sw = clamp(crop.width / imageBox.scale, 1, natural.width - sx);
+    const sh = clamp(crop.height / imageBox.scale, 1, natural.height - sy);
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(sw));
     canvas.height = Math.max(1, Math.round(sh));
@@ -241,7 +380,7 @@ export default function ImagePicker({
       return;
     }
     try {
-      context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      context.drawImage(element, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
       const mimeType =
         /png/i.test(sourceName) || /^data:image\/png/i.test(source) || /\.png($|\?)/i.test(source)
           ? "image/png"
@@ -286,13 +425,16 @@ export default function ImagePicker({
       setSource(dataUrl);
       setError(null);
       setNote(null);
+      setCrop(null);
+      setNatural({ width: 0, height: 0 });
+      setZoom(1);
+      setCropAspect(aspect);
       setCropOpen(true);
     } catch (fileError) {
       setError(fileError instanceof Error ? fileError.message : "Không thể đọc ảnh.");
     }
   }
 
-  const displayedCrop = crop && imageRect && stageRef.current ? { ...crop } : null;
   const showPreview = Boolean(source) && !previewFailed;
 
   return (
@@ -304,7 +446,12 @@ export default function ImagePicker({
       <div className="image-picker-row">
         <div className={busy ? "image-picker-preview is-loading" : "image-picker-preview"}>
           {showPreview ? (
-            <img src={source} alt="Xem trước" key={source} onLoad={handleImageLoad} onError={() => setPreviewFailed(true)} />
+            <img
+              src={source}
+              alt="Xem trước"
+              key={source}
+              onError={() => setPreviewFailed(true)}
+            />
           ) : (
             <ImageIcon size={23} />
           )}
@@ -378,7 +525,7 @@ export default function ImagePicker({
             <div className="crop-dialog-heading">
               <div>
                 <strong>Chỉnh sửa {label.toLocaleLowerCase("vi-VN")}</strong>
-                <span>Kéo vùng chọn để cắt ảnh</span>
+                <span>Kéo ảnh để chọn vùng, kéo tay nắm để thay đổi kích thước</span>
               </div>
               <button
                 type="button"
@@ -401,29 +548,64 @@ export default function ImagePicker({
                   {item.label}
                 </button>
               ))}
+              <button type="button" onClick={selectWholeImage} title="Lấy toàn bộ ảnh, không cắt">
+                <Maximize size={13} /> Toàn bộ ảnh
+              </button>
+              <button type="button" onClick={resetCrop} title="Đặt lại vùng chọn">
+                <RotateCcw size={13} /> Đặt lại
+              </button>
               <label className="crop-zoom">
                 <ZoomIn size={14} />
-                <input type="range" min="1" max="2.5" step=".1" value={zoom} onChange={event => setZoom(Number(event.target.value))} />
-                {zoom.toFixed(1)}x
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step=".05"
+                  value={zoom}
+                  onChange={event => setZoom(Number(event.target.value))}
+                />
+                {zoom.toFixed(2)}x
               </label>
             </div>
             <div
               ref={stageRef}
-              className="crop-stage"
-              onPointerDown={beginDrag}
+              className={drag ? "crop-stage is-dragging" : "crop-stage"}
               onPointerMove={moveDrag}
-              onPointerUp={() => setDrag(null)}
-              onPointerCancel={() => setDrag(null)}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
             >
-              {source && <img src={source} alt="Ảnh đang cắt" onLoad={handleImageLoad} style={{ transform: `scale(${zoom})` }} />}
-              {displayedCrop && (
+              {source && (
+                <img
+                  src={source}
+                  alt="Ảnh đang cắt"
+                  draggable={false}
+                  onLoad={event =>
+                    setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+                  }
+                  onPointerDown={event => startDrag("move", event)}
+                  style={
+                    imageBox
+                      ? { left: imageBox.x, top: imageBox.y, width: imageBox.width, height: imageBox.height }
+                      : undefined
+                  }
+                />
+              )}
+              {crop && (
                 <div
                   className="crop-selection"
-                  style={{ left: displayedCrop.x, top: displayedCrop.y, width: displayedCrop.width, height: displayedCrop.height }}
+                  style={{ left: crop.x, top: crop.y, width: crop.width, height: crop.height }}
+                  onPointerDown={event => startDrag("move", event)}
                 >
-                  <span />
+                  {handles.map(handle => (
+                    <span
+                      key={handle}
+                      className={`crop-handle crop-handle-${handle}`}
+                      onPointerDown={event => startDrag(handle, event)}
+                    />
+                  ))}
                 </div>
               )}
+              {!natural.width && <span className="crop-stage-loading">Đang mở ảnh…</span>}
             </div>
             <div className="crop-dialog-actions">
               <button type="button" className="button button-ghost" onClick={() => setCropOpen(false)} disabled={uploadImage.isPending}>

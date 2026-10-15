@@ -511,15 +511,33 @@ struct MovieDetailScreen: View {
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 
+    /// Đổi mọi dạng ngày của máy chủ sang dd/MM/yyyy.
+    ///
+    /// Phim lấy từ API trả mốc ISO 8601 đầy đủ, còn phim thêm thủ công trả chuỗi
+    /// admin nhập (yyyy-MM-dd hoặc kèm giờ). Trước đây chuỗi dạng ngày bị bỏ qua
+    /// nên hiện nguyên "2026-10-14"; nay phân tích cả hai kiểu.
     private func formattedDate(_ value: String) -> String {
-        let input = ISO8601DateFormatter()
-        input.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = input.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-        guard let date else { return value }
+        let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return raw }
+
         let output = DateFormatter()
         output.locale = Locale(identifier: "vi_VN")
         output.dateFormat = "dd/MM/yyyy"
-        return output.string(from: date)
+
+        let internet = ISO8601DateFormatter()
+        internet.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = internet.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) {
+            return output.string(from: date)
+        }
+
+        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd", "yyyy/MM/dd"] {
+            let parser = DateFormatter()
+            parser.locale = Locale(identifier: "en_US_POSIX")
+            parser.timeZone = TimeZone.current
+            parser.dateFormat = format
+            if let date = parser.date(from: raw) { return output.string(from: date) }
+        }
+        return raw
     }
 
     private func metadataRow(_ label: String, _ value: String?) -> some View {
