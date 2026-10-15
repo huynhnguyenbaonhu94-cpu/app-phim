@@ -51,16 +51,6 @@ struct TvVideoEpisode: Decodable, Identifiable, Hashable {
     let qualities: [TvVideoQuality]
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
-
-    /// Link phát kèm phụ đề rời — chỉ áp dụng cho HLS (m3u8).
-    ///
-    /// Dùng link này thì trình phát có nhóm phụ đề hợp lệ, nhờ đó PiP hiện được
-    /// phụ đề; nếu master playlist lỗi, trình phát tự quay về link gốc.
-    var subtitledPlaylistURL: URL? {
-        guard let subtitleURL, let video = directStreamURL ?? streamURL else { return nil }
-        guard video.absoluteString.contains(".m3u8") else { return nil }
-        return CinemaAPI.subtitledPlaylistURL(video: video, subtitle: subtitleURL)
-    }
 }
 
 struct TvVideoSubtitle: Decodable, Identifiable, Hashable {
@@ -242,6 +232,16 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
+
+    /// Link phát kèm phụ đề rời — chỉ áp dụng cho HLS (m3u8).
+    ///
+    /// Dùng link này thì trình phát có nhóm phụ đề hợp lệ, nhờ đó PiP hiện được
+    /// phụ đề; nếu master playlist lỗi, trình phát tự quay về link gốc.
+    var subtitledPlaylistURL: URL? {
+        guard let subtitleURL, let video = directStreamURL ?? streamURL else { return nil }
+        guard video.absoluteString.contains(".m3u8") else { return nil }
+        return CinemaAPI.subtitledPlaylistURL(video: video, subtitle: subtitleURL)
+    }
 
     /// Bản sao của tập ứng với chất lượng đang chọn.
     ///

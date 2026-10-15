@@ -56,7 +56,6 @@ final class CinemaStore {
     @ObservationIgnored private var homePage = 1
     @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var catalogTask: Task<Void, Never>?
-    @ObservationIgnored private var detailRequestID = 0
     @ObservationIgnored private var catalogRequestID = 0
     @ObservationIgnored private var searchRequestID = 0
     @ObservationIgnored private var nextAuthAttemptAt = Date.distantPast
@@ -518,7 +517,7 @@ final class CinemaStore {
     }
 
     func loadDetail(slug: String) {
-        let key = slug.trim()
+        let key = slug.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
         // Huỷ đúng yêu cầu của slug này, không đụng tới chi tiết của tab khác.
         detailTasks[key]?.cancel()
@@ -544,11 +543,15 @@ final class CinemaStore {
     }
 
     /// Chi tiết của đúng slug này — dùng cho trang chi tiết của từng tab.
-    func detail(for slug: String) -> Movie? { detailBySlug[slug.trim()] }
+    func detail(for slug: String) -> Movie? { detailBySlug[slug.trimmingCharacters(in: .whitespacesAndNewlines)] }
 
-    func isDetailLoading(_ slug: String) -> Bool { detailLoadingSlugs.contains(slug.trim()) }
+    func isDetailLoading(_ slug: String) -> Bool {
+        detailLoadingSlugs.contains(slug.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
 
-    func detailError(for slug: String) -> String? { detailErrorBySlug[slug.trim()] }
+    func detailError(for slug: String) -> String? {
+        detailErrorBySlug[slug.trimmingCharacters(in: .whitespacesAndNewlines)]
+    }
 
     /// Đếm số phim cho từng lựa chọn trong một nhóm lọc.
     ///

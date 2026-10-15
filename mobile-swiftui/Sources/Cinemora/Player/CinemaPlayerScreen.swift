@@ -192,6 +192,8 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    /// Đang dùng phụ đề gốc của item (bật khi vào PiP) — lúc đó app ẩn lớp phụ đề tự vẽ.
+    @Published private(set) var nativeSubtitleActive = false
     /// Nhóm phụ đề gốc của item (có khi link phát được bọc kèm phụ đề rời).
     private var legibleGroup: AVMediaSelectionGroup?
     private var legibleOption: AVMediaSelectionOption?
@@ -730,10 +732,7 @@ struct CinemaPlayerScreen: View {
                 Color.black.ignoresSafeArea()
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
-                    if hasCurrentSubtitle, subtitlePreferences.enabled, !playback.nativeSubtitleActive, let subtitle = subtitles.currentText {
-                        VStack { Spacer(); subtitleText(subtitle).padding(.bottom, proxy.safeAreaInsets.bottom + subtitlePreferences.bottomSpacing) }
-                            .allowsHitTesting(false)
-                    }
+                    subtitleOverlay(bottomInset: proxy.safeAreaInsets.bottom)
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
@@ -851,10 +850,7 @@ struct CinemaPlayerScreen: View {
             .onChange(of: stopTimer) { _, _ in scheduleStopTimer() }
             .onChange(of: stopAtEpisodeEnabled) { _, enabled in handleStopAtEpisodeToggle(enabled) }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { playback.recoverAfterForeground() }
-                else { playback.prepareForSystemOverlay() }
-            }
+            .onChange(of: scenePhase) { _, phase in handleScenePhaseChange(phase) }
             .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
             .task {
                 await store.loadHome()
@@ -1969,6 +1965,26 @@ struct CinemaPlayerScreen: View {
         .buttonStyle(.plain)
         .contentShape(Capsule())
         .accessibilityLabel("Chất lượng \(label)")
+    }
+
+    /// Lớp phụ đề app tự vẽ; tạm ẩn khi phụ đề gốc đang chạy trong PiP.
+    @ViewBuilder
+    private func subtitleOverlay(bottomInset: CGFloat) -> some View {
+        if hasCurrentSubtitle, subtitlePreferences.enabled, !playback.nativeSubtitleActive,
+           let subtitle = subtitles.currentText {
+            VStack {
+                Spacer()
+                subtitleText(subtitle).padding(.bottom, bottomInset + subtitlePreferences.bottomSpacing)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Tách khỏi body: để nguyên trong chuỗi modifier thì trình biên dịch phải
+    /// suy luận cả biểu thức khổng lồ và bị quá thời gian.
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        if phase == .active { playback.recoverAfterForeground() }
+        else { playback.prepareForSystemOverlay() }
     }
 
     private func applyPlaybackDefaults() {

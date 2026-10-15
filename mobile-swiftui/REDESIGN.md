@@ -1707,3 +1707,17 @@ bị chặn riêng hai tên miền nước ngoài này (thường gặp ở host
 - **Ngày cập nhật** bỏ phần giờ, chỉ còn `dd/mm/yyyy`, không cho sửa tay. Máy chủ tự dùng mốc cập nhật
   thật của bản ghi (`updatedAt`, tự đổi mỗi lần lưu) nên admin sửa phim xong là ngày đổi ngay: form nạp
   lại bản ghi vừa lưu, và app/web đều đọc mốc này thay cho cột `updatedDate` nhập tay trước đây.
+
+## 60. Sửa lỗi build IPA
+
+Năm lỗi biên dịch của vòng trước và cách xử lý:
+
+- `subtitledPlaylistURL` bị chèn nhầm vào `TvVideo` (struct này không có `streamURL`/`directStreamURL`)
+  do mẫu dò khớp vào struct đứng trước; đã chuyển về đúng `MovieEpisode`.
+- `nativeSubtitleActive` được dùng nhưng chưa khai báo; đã thêm
+  `@Published private(set) var nativeSubtitleActive = false` trong `PlaybackController`.
+- `String.trim()` không tồn tại trong Swift; thay bằng
+  `trimmingCharacters(in: .whitespacesAndNewlines)` (4 chỗ trong `CinemaStore`).
+- Trình biên dịch quá thời gian suy luận biểu thức thân trình phát: tách `onChange(scenePhase)` thành
+  `handleScenePhaseChange(_:)` và tách lớp phụ đề thành `subtitleOverlay(bottomInset:)`.
+- Bỏ `detailRequestID` không còn dùng sau khi chi tiết phim chuyển sang quản lý theo slug.
