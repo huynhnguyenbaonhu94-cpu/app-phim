@@ -74,30 +74,13 @@ type FormState = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Nháp: giữ lại 4 phần vừa điền để lần sau tạo phim mới đỡ nhập lại  */
+/* Bản nháp cũ                                                         */
 /* ------------------------------------------------------------------ */
 
+/* Tạo phim xong là form trở về trạng thái trắng, không giữ lại thông tin
+   của phim vừa lưu. Hàm dưới chỉ để dọn bản nháp mà bản cũ đã ghi trong
+   localStorage của trình duyệt. */
 const CUSTOM_MOVIE_DRAFT_KEY = "cinemora.custom-movie-draft.v1";
-
-function readCustomMovieDraft(): Partial<FormState> | null {
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_MOVIE_DRAFT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { form?: Partial<FormState> };
-    if (!parsed || typeof parsed.form !== "object" || parsed.form === null) return null;
-    return parsed.form;
-  } catch {
-    return null;
-  }
-}
-
-function writeCustomMovieDraft(state: FormState) {
-  try {
-    window.localStorage.setItem(CUSTOM_MOVIE_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), form: state }));
-  } catch {
-    /* bỏ qua nếu trình duyệt chặn localStorage */
-  }
-}
 
 function clearCustomMovieDraft() {
   try {
@@ -647,6 +630,29 @@ function TagPicker({
     if (additions.length) onChange([...selected, ...additions]);
   }
 
+  /**
+   * Thêm mục ngoài danh sách: admin gõ tên rồi ấn Enter.
+   *
+   * Nếu tên trùng một lựa chọn có sẵn thì chọn luôn lựa chọn đó, còn không thì
+   * tạo mục riêng với slug sinh từ tên.
+   */
+  function addCustom(raw: string) {
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name) return;
+    const key = name.toLocaleLowerCase("vi-VN");
+    const existed = options.find(option => option.name.toLocaleLowerCase("vi-VN") === key);
+    const entry = existed
+      ? { name: existed.name, slug: existed.slug || slugify(existed.name) }
+      : { name, slug: slugify(name) };
+    const entryKey = entry.slug || entry.name;
+    if (!selectedKeys.has(entryKey)) onChange([...selected, entry]);
+    setSearch("");
+  }
+
+  // Có chữ trong ô tìm kiếm mà chưa trùng lựa chọn nào thì gợi ý thêm mới.
+  const canAddCustom =
+    keyword.length > 0 && !options.some(option => option.name.toLocaleLowerCase("vi-VN") === keyword);
+
   return (
     <div className="custom-tag-picker">
       <div className="custom-field-heading">
@@ -678,7 +684,12 @@ function TagPicker({
           <input
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder={`Tìm ${label.toLocaleLowerCase("vi-VN")}…`}
+            onKeyDown={event => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              addCustom(search);
+            }}
+            placeholder={`Tìm hoặc gõ mới rồi ấn Enter…`}
           />
           {search && (
             <button type="button" onClick={() => setSearch("")} aria-label="Xoá tìm kiếm">
@@ -687,6 +698,11 @@ function TagPicker({
           )}
         </label>
         <div className="custom-tag-actions">
+          {canAddCustom && (
+            <button type="button" className="is-add" onClick={() => addCustom(search)}>
+              <Plus size={12} /> Thêm “{search.trim()}”
+            </button>
+          )}
           <button type="button" onClick={selectAllFiltered} disabled={filtered.length === 0}>
             Chọn tất cả
           </button>
@@ -711,8 +727,19 @@ function TagPicker({
             </button>
           );
         })}
-        {filtered.length === 0 && <span className="custom-muted">Không tìm thấy lựa chọn phù hợp.</span>}
+        {filtered.length === 0 && (
+          <span className="custom-muted">
+            {canAddCustom
+              ? `Chưa có trong danh sách — ấn Enter để thêm “${search.trim()}”.`
+              : "Không tìm thấy lựa chọn phù hợp."}
+          </span>
+        )}
       </div>
+
+      <p className="custom-tag-hint">
+        Gõ tên rồi ấn Enter để thêm mục riêng ngoài danh sách. Mục tự thêm cũng nằm trong danh sách đã chọn ở
+        trên và bỏ chọn được như bình thường.
+      </p>
     </div>
   );
 }
@@ -1246,7 +1273,6 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   const editing = Number.isInteger(movieId) && (movieId || 0) > 0;
 
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [draftRestored, setDraftRestored] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [savedMovieId, setSavedMovieId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -1310,11 +1336,11 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
 
   useEffect(() => {
     if (!editing) {
-      // Tạo phim mới: khôi phục 4 phần của phim vừa tạo (nếu có) để đỡ nhập lại.
-      const draft = readCustomMovieDraft();
-      setForm(draft ? { ...emptyForm(), ...draft } : emptyForm());
+      // Tạo phim mới: luôn là form trắng, kể cả sau khi F5 hay bấm “Phim mới”,
+      // và dọn luôn bản nháp mà bản cũ còn để lại trong trình duyệt.
+      clearCustomMovieDraft();
+      setForm(emptyForm());
       setInitializedId(null);
-      setDraftRestored(Boolean(draft));
     }
   }, [editing]);
 
@@ -1491,14 +1517,12 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
         editing && movieId
           ? await updateMovie.mutateAsync({ id: movieId, ...payload })
           : await createMovie.mutateAsync(payload);
-      // Lưu 4 phần vừa điền cho lần tạo phim sau, rồi làm mới toàn bộ form —
-      // giống hệt khi bấm “+ Phim mới” nên không còn nằm lại ở phim vừa lưu.
-      writeCustomMovieDraft(form);
-      setDraftRestored(true);
+      // Xong là dọn sạch form: không giữ lại thông tin phim vừa lưu.
+      clearCustomMovieDraft();
       await listQuery.refetch();
       setSavedMovieId(saved.id);
       setInitializedId(null);
-      setForm({ ...emptyForm(), ...(readCustomMovieDraft() || {}) });
+      setForm(emptyForm());
       setStatus(
         editing
           ? "Đã lưu thay đổi và làm mới form. Vào danh sách phim để sửa tiếp nếu cần."
@@ -1623,23 +1647,6 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
               <X size={14} />
             </button>
           </div>
-        )}
-
-        {!editing && draftRestored && (
-          <p className="custom-draft-note">
-            Đã khôi phục 4 phần thông tin từ phim vừa tạo — sửa lại rồi bấm “Tạo phim”, hoặc{" "}
-            <button
-              type="button"
-              onClick={() => {
-                clearCustomMovieDraft();
-                setForm(emptyForm());
-                setDraftRestored(false);
-              }}
-            >
-              bắt đầu mới
-            </button>
-            .
-          </p>
         )}
 
         <div className="custom-movie-layout">

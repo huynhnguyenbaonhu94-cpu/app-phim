@@ -3628,3 +3628,26 @@ body {
   }
   .cinema-subtitle-text { max-width: 96%; }
 }
+
+/* Thêm mục riêng cho Thể loại / Quốc gia */
+.custom-tag-actions button.is-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cinema-accent, #d8f24a);
+  border-color: color-mix(in srgb, var(--cinema-accent, #d8f24a) 45%, transparent);
+  background: color-mix(in srgb, var(--cinema-accent, #d8f24a) 12%, transparent);
+  font-weight: 600;
+}
+
+.custom-tag-actions button.is-add:hover {
+  background: color-mix(in srgb, var(--cinema-accent, #d8f24a) 20%, transparent);
+}
+
+.custom-tag-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--cinema-muted, #8b8f98);
+}
+

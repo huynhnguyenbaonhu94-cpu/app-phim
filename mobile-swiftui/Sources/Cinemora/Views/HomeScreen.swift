@@ -90,6 +90,15 @@ struct HomeScreen: View {
         .buttonStyle(.auroraPress(scale: 0.97))
         .transition(.move(edge: .top).combined(with: .opacity))
         .accessibilityLabel("Có phim mới, chạm để xem")
+        // Thẻ "Đề xuất hôm nay" được đẩy lên theo hiệu ứng parallax nên nếu không
+        // nâng thông báo lên lớp trên, nó sẽ bị thẻ đề xuất che mất.
+        .zIndex(1)
+        .task(id: store.hasNewHomeContent) {
+            // Tự ẩn sau ít giây để thông báo không nằm lại chắn nội dung khi lướt.
+            guard store.hasNewHomeContent else { return }
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled { store.clearNewHomeContent() }
+        }
     }
 
     // MARK: - Body content

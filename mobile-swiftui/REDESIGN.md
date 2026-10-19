@@ -1821,3 +1821,22 @@ Nay nút CC (và cả bảng tùy chỉnh) **chỉ xuất hiện khi tập đang
 thì thanh điều khiển gọn như cũ, không còn nút thừa.
 
 Kèm theo: khi đổi tập, bảng chỉnh phụ đề tự đóng để không bật lại ngoài ý muốn ở tập kế tiếp.
+
+## 66. Ba sửa lỗi: thông báo trên app, thêm thể loại/quốc gia riêng, form còn sót dữ liệu
+
+**1. App — thẻ "Đề xuất hôm nay" che thông báo "Có phim mới"**
+Thẻ đề xuất ở đầu trang chủ được đẩy lên theo hiệu ứng parallax (`offset(y: -pull * 0.30)`), nên nó vẽ đè
+lên thông báo nằm ngay trên nó. Thông báo nay được nâng lên lớp trên bằng `.zIndex(1)` nên luôn đọc được,
+và tự ẩn sau 8 giây để không nằm lại chắn nội dung khi lướt xuống.
+
+**2. Web — thêm thể loại và quốc gia ngoài danh sách API**
+Ô Thể loại và Quốc gia trong trang thêm/sửa phim thủ công nay cho phép admin gõ tên rồi **ấn Enter** để
+thêm mục riêng (ví dụ "Phim Nhạc"). Khi chữ đã gõ chưa trùng lựa chọn nào, một nút `+ Thêm "…"` hiện ngay
+trong thanh công cụ và dòng gợi ý đổi thành "Chưa có trong danh sách — ấn Enter để thêm". Mục tự thêm nằm
+chung trong danh sách đã chọn ở trên, bỏ chọn được như mục có sẵn. Nếu tên gõ trùng một mục có sẵn thì hệ
+thống chọn luôn mục đó thay vì tạo bản trùng.
+
+**3. Web — tạo phim xong mà form vẫn còn dữ liệu phim cũ**
+Bản trước lưu 4 phần thông tin vào `localStorage` rồi nạp lại sau khi tạo phim, nên F5 hay bấm "Phim mới"
+vẫn thấy nguyên dữ liệu phim vừa lưu (ví dụ Klute). Nay bỏ hẳn việc đọc/ghi nháp: vào trang là form trắng,
+lưu xong cũng trắng, và bản nháp cũ còn sót trong trình duyệt được dọn tự động.
