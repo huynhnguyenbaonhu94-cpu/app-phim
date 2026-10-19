@@ -171,6 +171,51 @@ export function registerStreamSourceFromPlaylist(value: string) {
   } catch { return null; }
 }
 
+/** Host nội bộ hoặc không công khai: proxy tuyệt đối không gọi tới. */
+function isPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) return true;
+  if (/^(127|10)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^0\./.test(host)) return true;
+  const match = host.match(/^172\.(\d{1,3})\./);
+  if (match) {
+    const second = Number(match[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return host === "::1" || host.startsWith("fe80:") || host.startsWith("fc00:") || host.startsWith("fd");
+}
+
+/**
+ * Link M3U8 do admin nhập tay (nguồn riêng của phim).
+ *
+ * Khác nguồn lấy từ API, host ở đây do admin chủ động chọn nên không giới hạn
+ * theo danh sách CDN — chỉ yêu cầu https và không trỏ vào mạng nội bộ. Nhờ vậy
+ * web xem được nguồn riêng dù CDN không gửi header CORS, vì luồng đi qua proxy.
+ */
+export function registerCustomStreamSource(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || isPrivateHost(url.hostname)) return null;
+    const token = randomUUID().replaceAll("-", "");
+    streamTokens.set(token, { url: url.toString(), expires: Date.now() + 6 * 60 * 60_000 });
+    return apiRoute(`/api/cinema/stream/${token}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Link M3U8 gốc của nguồn admin nhập tay, để trình phát thử trực tiếp trước. */
+export function customDirectStreamUrl(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || isPrivateHost(url.hostname)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function streamUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return registerStreamSource(value.trim());
@@ -329,6 +374,27 @@ async function getMoviePeople(slug: string) {
   }
 }
 
+/**
+ * Mốc thời gian để xếp phim mới lên đầu: ưu tiên ngày cập nhật, sau đó ngày tạo.
+ * Phim không có mốc nào sẽ nằm cuối.
+ */
+function freshness(movie: Movie): number {
+  const stamp = movie.updatedAt || movie.createdAt || "";
+  const time = Date.parse(stamp);
+  return Number.isFinite(time) ? time : 0;
+}
+
+/**
+ * Trộn phim thủ công với phim từ API theo đúng thứ tự thời gian.
+ *
+ * Trước đây phim admin thêm luôn được đẩy lên đầu trang chủ nên mãi "đứng ngay
+ * đầu trang" dù sau đó có phim mới hơn. Nay phim vừa thêm vẫn nổi lên trên, còn
+ * khi có phim mới hơn thì tự xuống đúng vị trí theo ngày cập nhật.
+ */
+function sortByFreshness(list: Movie[]): Movie[] {
+  return [...list].sort((a, b) => freshness(b) - freshness(a));
+}
+
 export async function getHome(page = 1) {
   const payload = await upstream("/v1/api/home", { page: safePage(page) });
   const { items, pagination, pathImage } = unwrapItems(payload);
@@ -337,7 +403,7 @@ export async function getHome(page = 1) {
   const custom = safePage(page) === 1 ? await customMoviesForFilter({}) : [];
   if (custom.length === 0) return { items: apiItems, pagination };
   const seen = new Set(custom.map((movie) => movie.slug));
-  return { items: [...custom, ...apiItems.filter((movie: Movie) => !seen.has(movie.slug))], pagination };
+  return { items: sortByFreshness([...custom, ...apiItems.filter((movie: Movie) => !seen.has(movie.slug))]), pagination };
 }
 const listEndpoints: Record<string, string> = {
   latest: "/v1/api/danh-sach/phim-moi",
@@ -485,15 +551,15 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
       merged.push(movie);
     }
   }
-  merged.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")));
+  const ordered = sortByFreshness(merged);
 
   const kindKey = combos[0]?.kind ?? "latest";
   const filtered =
     kindKey === "ongoing"
-      ? merged.filter((movie) => !isCompletedSeries(movie))
+      ? ordered.filter((movie) => !isCompletedSeries(movie))
       : kindKey === "completed"
-        ? merged.filter(isCompletedSeries)
-        : merged;
+        ? ordered.filter(isCompletedSeries)
+        : ordered;
 
   // Một tổ hợp: nguồn cho số liệu chính xác (tổng số phim, tổng số trang).
   // Nhiều tổ hợp: không có tổng chính xác nên trả `null` thay vì con số sai.
@@ -624,7 +690,8 @@ export async function getDailyUpdates(page = 1) {
     const custom = await customMoviesForFilter({});
     if (custom.length === 0) return { items, pagination };
     const seen = new Set(custom.map((movie) => movie.slug));
-    return { items: [...custom, ...items.filter((movie) => !seen.has(movie.slug))], pagination };
+    // Phim thủ công nằm đúng vị trí theo ngày cập nhật, không luôn đứng đầu.
+    return { items: sortByFreshness([...custom, ...items.filter((movie) => !seen.has(movie.slug))]), pagination };
   };
 
   const cached = cache.get(`daily:${url}`);

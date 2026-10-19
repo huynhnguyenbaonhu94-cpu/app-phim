@@ -12,7 +12,7 @@ import crypto from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { movieSourceEpisodes, movieSources } from "../drizzle/schema";
-import { registerStreamSource } from "./cinema";
+import { customDirectStreamUrl, registerCustomStreamSource } from "./cinema";
 
 /** Một chất lượng của tập: mỗi chất lượng có link M3U8 và phụ đề riêng. */
 export type MovieSourceQuality = {
@@ -360,15 +360,15 @@ export async function mergeCustomSources(
         slug: `custom-${episode.id}`,
         filename: episode.name,
         embedUrl: null,
-        streamUrl: registerStreamSource(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
-        directStreamUrl: episode.qualities[0]?.streamUrl ?? episode.streamUrl,
+        streamUrl: registerCustomStreamSource(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
+        directStreamUrl: customDirectStreamUrl(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
         subtitleUrl: episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
         // Danh sách chất lượng để app cho người xem chọn 1080p / 2K / 4K…
         qualities: episode.qualities.length
           ? episode.qualities.map((quality) => ({
               label: quality.label,
-              streamUrl: registerStreamSource(quality.streamUrl),
-              directStreamUrl: quality.streamUrl,
+              streamUrl: registerCustomStreamSource(quality.streamUrl),
+              directStreamUrl: customDirectStreamUrl(quality.streamUrl),
               subtitleUrl: quality.subtitleUrl,
             }))
           : undefined,
