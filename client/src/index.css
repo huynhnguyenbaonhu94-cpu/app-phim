@@ -3409,3 +3409,222 @@ body {
 @media (max-width: 700px) {
   .admin-toast { top: auto; bottom: 18px; right: 12px; left: 12px; max-width: none; }
 }
+
+/* ============================================================
+   Cinema Player — Phụ đề rời: lớp vẽ + bảng tùy chỉnh
+   ============================================================ */
+
+.cinema-subtitle-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  padding: 0 4%;
+  pointer-events: none;
+}
+.cinema-subtitle-text {
+  display: inline-block;
+  max-width: 92%;
+  text-align: center;
+  line-height: 1.34;
+  letter-spacing: .004em;
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-wrap: balance;
+}
+.cinema-subtitle-line { display: block; }
+
+/* Nút phụ đề trên thanh điều khiển */
+.cinema-cc-btn { position: relative; }
+.cinema-cc-btn.is-on { color: var(--accent); }
+.cinema-cc-btn.is-on:hover { color: var(--accent); background: rgba(210,243,107,.12); }
+.cinema-cc-dot {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Bảng tùy chỉnh phụ đề — nằm trong khung trình phát nên hiện cả khi toàn màn hình */
+.cinema-subtitle-panel {
+  position: absolute;
+  right: 10px;
+  bottom: 58px;
+  z-index: 14;
+  width: 266px;
+  max-height: min(76%, 470px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 11px 12px 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 13px;
+  background: rgba(13,15,19,.94);
+  box-shadow: 0 18px 42px rgba(0,0,0,.5);
+  backdrop-filter: blur(10px);
+  color: #e8eaef;
+  font-size: 11px;
+  pointer-events: auto;
+  animation: cinemaSubtitleIn .16s ease-out;
+}
+@keyframes cinemaSubtitleIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cinema-subtitle-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.cinema-subtitle-panel-head strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+.cinema-subtitle-status {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: #8d94a1;
+}
+.cinema-subtitle-status.is-ready { color: #9fe870; }
+.cinema-subtitle-status.is-error { color: #ff9a8a; }
+.cinema-subtitle-panel-head button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 7px;
+  background: rgba(255,255,255,.05);
+  color: #cfd4dd;
+  cursor: pointer;
+}
+.cinema-subtitle-panel-head button:hover { color: var(--accent); border-color: rgba(210,243,107,.45); }
+
+.cinema-subtitle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  margin-bottom: 9px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+  cursor: pointer;
+  font-weight: 600;
+}
+.cinema-subtitle-switch input { accent-color: var(--accent); width: 14px; height: 14px; }
+
+.cinema-subtitle-field { margin-bottom: 9px; }
+.cinema-subtitle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #a8afbc;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.cinema-subtitle-label b { color: var(--accent); font-size: 10.5px; letter-spacing: 0; text-transform: none; }
+
+.cinema-subtitle-field input[type="range"] {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: rgba(255,255,255,.16);
+  cursor: pointer;
+}
+.cinema-subtitle-field input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.cinema-subtitle-field input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cinema-subtitle-colors { display: flex; align-items: center; gap: 7px; }
+.cinema-subtitle-colors button {
+  width: 19px;
+  height: 19px;
+  border: 2px solid rgba(255,255,255,.22);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform .14s, border-color .14s;
+}
+.cinema-subtitle-colors button:hover { transform: scale(1.08); }
+.cinema-subtitle-colors button.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(210,243,107,.22); }
+.cinema-subtitle-colors input[type="color"] {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cinema-subtitle-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cinema-subtitle-chips button {
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  color: #dfe3ea;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .14s, background .14s, color .14s;
+}
+.cinema-subtitle-chips button:hover { border-color: rgba(210,243,107,.4); color: #fff; }
+.cinema-subtitle-chips button.is-active {
+  border-color: rgba(210,243,107,.6);
+  background: rgba(210,243,107,.14);
+  color: var(--accent);
+}
+
+.cinema-subtitle-panel-foot { padding-top: 3px; }
+.cinema-subtitle-reset {
+  width: 100%;
+  padding: 7px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 9px;
+  background: rgba(255,255,255,.04);
+  color: #cfd4dd;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cinema-subtitle-reset:hover { color: var(--accent); border-color: rgba(210,243,107,.45); }
+
+@media (max-width: 680px) {
+  .cinema-subtitle-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: 56px;
+    max-height: 58%;
+    padding: 11px 12px 10px;
+  }
+  .cinema-subtitle-text { max-width: 96%; }
+}

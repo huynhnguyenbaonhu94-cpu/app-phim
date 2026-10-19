@@ -248,7 +248,11 @@ export async function updateCustomMovie(id: number, input: CustomMovieInput): Pr
   const slug = input.slug?.trim() && input.slug.trim() !== current.slug
     ? await uniqueSlug(input.slug, id)
     : current.slug;
-  await db.update(customMovies).set({ ...buildValues(input), slug }).where(eq(customMovies.id, id));
+  // Chỉ thao tác lưu của admin mới đổi ngày cập nhật.
+  await db
+    .update(customMovies)
+    .set({ ...buildValues(input), slug, updatedAt: new Date() })
+    .where(eq(customMovies.id, id));
   const row = await getCustomMovieById(id);
   if (!row) throw new Error("Không sửa được phim");
   return row;
@@ -265,7 +269,11 @@ export async function registerCustomMovieView(slug: string): Promise<void> {
   const db = await getDb();
   if (!db) return;
   try {
-    await db.execute(sql`UPDATE \`custom_movies\` SET \`viewCount\` = \`viewCount\` + 1 WHERE \`slug\` = ${slug}`);
+    // Cột updatedAt có ON UPDATE CURRENT_TIMESTAMP nên nếu không gán lại chính nó,
+    // mỗi lượt xem lại bị tính là "vừa cập nhật phim". Gán tường minh để giữ nguyên mốc.
+    await db.execute(
+      sql`UPDATE \`custom_movies\` SET \`viewCount\` = \`viewCount\` + 1, \`updatedAt\` = \`updatedAt\` WHERE \`slug\` = ${slug}`,
+    );
   } catch {
     /* đếm lượt xem không được làm hỏng việc mở phim */
   }

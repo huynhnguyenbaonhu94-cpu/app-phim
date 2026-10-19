@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Rewind,
   SkipForward,
+  Subtitles,
   Sun,
   Volume2,
   VolumeX,
@@ -38,9 +39,261 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+/* ─── Phụ đề rời: kiểu dáng + bộ đọc WebVTT ────────────── */
+
+interface SubtitleCue { start: number; end: number; text: string; }
+
+interface SubtitleStyle {
+  enabled: boolean;
+  /** Cỡ chữ tính theo % chiều cao khung hình để toàn màn hình vẫn cân đối */
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  /** Độ dày viền chữ (px), dùng cho kiểu nền "viền" */
+  outline: number;
+  outlineColor: string;
+  background: "none" | "soft" | "box";
+  /** Khoảng cách đáy tính theo % chiều cao khung hình */
+  bottom: number;
+  /** Độ trễ (giây): dương = phụ đề hiện muộn hơn tiếng */
+  delay: number;
+}
+
+const SUBTITLE_STYLE_KEY = "cinemora.subtitle.style";
+
+const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  enabled: true,
+  fontSize: 4.2,
+  color: "#FFFFFF",
+  bold: false,
+  outline: 2,
+  outlineColor: "#000000",
+  background: "soft",
+  bottom: 10,
+  delay: 0,
+};
+
+/** Màu chữ hay dùng nhất cho phụ đề phim. */
+const SUBTITLE_COLORS = ["#FFFFFF", "#FFE066", "#7DF9FF", "#9DFF9A", "#FFB3D9"];
+const SUBTITLE_DELAY_STEPS = [-1, -0.5, 0.5, 1];
+
+function loadSubtitleStyle(): SubtitleStyle {
+  try {
+    const raw = window.localStorage.getItem(SUBTITLE_STYLE_KEY);
+    if (!raw) return { ...DEFAULT_SUBTITLE_STYLE };
+    const parsed = JSON.parse(raw) as Partial<SubtitleStyle>;
+    return { ...DEFAULT_SUBTITLE_STYLE, ...parsed };
+  } catch {
+    return { ...DEFAULT_SUBTITLE_STYLE };
+  }
+}
+
+function parseSubtitleTimestamp(value: string): number {
+  const parts = value.trim().replace(",", ".").split(":").map((item) => Number.parseFloat(item));
+  if (parts.some((item) => !Number.isFinite(item))) return Number.NaN;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0];
+}
+
+/** Bỏ thẻ định dạng và giải mã thực thể HTML còn sót trong phụ đề. */
+function cleanSubtitleText(raw: string): string {
+  return raw
+    .replace(/<[^>]*>/g, "")
+    .replace(/\{\\[^}]*\}/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Đọc tệp phụ đề thành danh sách cue.
+ *
+ * Chấp nhận cả WebVTT lẫn SRT (một số nguồn trả SRT dù đuôi là .vtt) nên chỉ cần
+ * tìm dòng có "-->" là đủ. Tệp hỏng thì trả về danh sách rỗng thay vì lỗi.
+ */
+function parseSubtitleFile(raw: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  const text = raw.replace(/\r\n?/g, "\n").replace(/^\uFEFF/, "");
+  for (const block of text.split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    const timeIndex = lines.findIndex((line) => line.includes("-->"));
+    if (timeIndex === -1) continue;
+    const [startRaw, endRaw] = lines[timeIndex].split("-->");
+    const start = parseSubtitleTimestamp((startRaw || "").split(" ")[0]);
+    const end = parseSubtitleTimestamp((endRaw || "").trim().split(" ")[0]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const body = cleanSubtitleText(lines.slice(timeIndex + 1).join("\n"));
+    if (!body) continue;
+    cues.push({ start, end, text: body });
+  }
+  cues.sort((a, b) => a.start - b.start);
+  return cues;
+}
+
+/** Tìm cue đang hiển thị theo thời điểm phát (tìm nhị phân cho tệp dài). */
+function findActiveCue(cues: SubtitleCue[], time: number): SubtitleCue | null {
+  let low = 0;
+  let high = cues.length - 1;
+  let candidate: SubtitleCue | null = null;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (cues[mid].start <= time) {
+      candidate = cues[mid];
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (candidate && time <= candidate.end) return candidate;
+  return null;
+}
+
+/** Bảng tùy chỉnh phụ đề — đặt trong khung trình phát nên hiện cả khi toàn màn hình. */
+interface SubtitlePanelProps {
+  style: SubtitleStyle;
+  onChange: (patch: Partial<SubtitleStyle>) => void;
+  onReset: () => void;
+  status: "none" | "loading" | "ready" | "error";
+  onClose: () => void;
+}
+
+function SubtitlePanel({ style, onChange, onReset, status, onClose }: SubtitlePanelProps) {
+  const statusText =
+    status === "loading"
+      ? "Đang tải phụ đề…"
+      : status === "ready"
+        ? "Phụ đề đã sẵn sàng"
+        : status === "error"
+          ? "Không đọc được phụ đề của tập này"
+          : "Tập này không có phụ đề rời";
+
+  return (
+    <div
+      className="cinema-subtitle-panel"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      onTouchEnd={(event) => event.stopPropagation()}
+    >
+      <div className="cinema-subtitle-panel-head">
+        <div>
+          <strong>Tùy chỉnh phụ đề</strong>
+          <span className={`cinema-subtitle-status is-${status}`}>{statusText}</span>
+        </div>
+        <button type="button" aria-label="Đóng" onClick={onClose}>
+          <X size={14} />
+        </button>
+      </div>
+
+      <label className="cinema-subtitle-switch">
+        <input
+          type="checkbox"
+          checked={style.enabled}
+          onChange={(event) => onChange({ enabled: event.target.checked })}
+        />
+        <span>{style.enabled ? "Đang bật phụ đề" : "Đang tắt phụ đề"}</span>
+      </label>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Cỡ chữ <b>{style.fontSize.toFixed(1)}%</b></span>
+        <input
+          type="range"
+          min={2.6}
+          max={8}
+          step={0.2}
+          value={style.fontSize}
+          onChange={(event) => onChange({ fontSize: Number(event.target.value) })}
+        />
+      </div>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Màu chữ</span>
+        <div className="cinema-subtitle-colors">
+          {SUBTITLE_COLORS.map((color) => (
+            <button
+              type="button"
+              key={color}
+              className={color === style.color ? "is-active" : ""}
+              style={{ background: color }}
+              aria-label={`Màu chữ ${color}`}
+              onClick={() => onChange({ color })}
+            />
+          ))}
+          <input
+            type="color"
+            value={style.color}
+            aria-label="Chọn màu chữ khác"
+            onChange={(event) => onChange({ color: event.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Nền phụ đề</span>
+        <div className="cinema-subtitle-chips">
+          {([["soft", "Viền chữ"], ["box", "Hộp đen"], ["none", "Trong suốt"]] as const).map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              className={style.background === value ? "is-active" : ""}
+              onClick={() => onChange({ background: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Vị trí <b>{Math.round(style.bottom)}%</b></span>
+        <input
+          type="range"
+          min={3}
+          max={42}
+          step={1}
+          value={style.bottom}
+          onChange={(event) => onChange({ bottom: Number(event.target.value) })}
+        />
+      </div>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Độ trễ <b>{style.delay === 0 ? "0s" : `${style.delay > 0 ? "+" : ""}${style.delay}s`}</b></span>
+        <div className="cinema-subtitle-chips">
+          <button type="button" onClick={() => onChange({ delay: Number((style.delay - 0.5).toFixed(1)) })}>-0.5s</button>
+          <button type="button" onClick={() => onChange({ delay: 0 })}>Đặt lại</button>
+          <button type="button" onClick={() => onChange({ delay: Number((style.delay + 0.5).toFixed(1)) })}>+0.5s</button>
+        </div>
+      </div>
+
+      <div className="cinema-subtitle-field">
+        <span className="cinema-subtitle-label">Kiểu chữ</span>
+        <div className="cinema-subtitle-chips">
+          <button type="button" className={style.bold ? "is-active" : ""} onClick={() => onChange({ bold: !style.bold })}>Đậm</button>
+          <button type="button" className={style.outline >= 3 ? "is-active" : ""} onClick={() => onChange({ outline: style.outline >= 3 ? 2 : 3 })}>Viền dày</button>
+        </div>
+      </div>
+
+      <div className="cinema-subtitle-panel-foot">
+        <button type="button" className="cinema-subtitle-reset" onClick={onReset}>Đặt lại mặc định</button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── types ─────────────────────────────────────────────── */
 interface CinemaPlayerProps {
   streamUrl?: string;
+  /** Phụ đề rời (.vtt) của tập đang phát — nguồn admin thêm tay cũng dùng link này */
+  subtitleUrl?: string;
   /** Link M3U8 gốc, không qua proxy — thử trước nếu có */
   directStreamUrl?: string;
   fallbackEmbedUrl?: string;
@@ -205,6 +458,7 @@ function isAppleSafari() {
 /* ─── Main component ─────────────────────────────────────── */
 export function CinemaPlayer({
   streamUrl,
+  subtitleUrl,
   directStreamUrl,
   fallbackEmbedUrl,
   title,
@@ -248,6 +502,14 @@ export function CinemaPlayer({
   const hlsRef      = useRef<Hls | null>(null);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  // ── Phụ đề rời ──
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(() => loadSubtitleStyle());
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+  const [subtitleText, setSubtitleText] = useState("");
+  const [subtitleStatus, setSubtitleStatus] = useState<"none" | "loading" | "ready" | "error">("none");
+  const [subtitlePanelOpen, setSubtitlePanelOpen] = useState(false);
+  const [wrapHeight, setWrapHeight] = useState(0);
+  const nativeTrackRef = useRef<HTMLTrackElement | null>(null);
   // Chỉ dùng nguồn M3U8: thử link gốc trước, rồi tới link qua proxy của máy chủ.
   const streamSources = [directStreamUrl, streamUrl].filter(
     (item, index, all): item is string => Boolean(item && item.trim()) && all.indexOf(item) === index
@@ -1033,6 +1295,94 @@ export function CinemaPlayer({
 
   if (!activeStream) return null;
 
+  /* ─── Phụ đề: nạp tệp VTT, đồng bộ theo tiến trình phim ─── */
+
+  useEffect(() => {
+    try { window.localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify(subtitleStyle)); } catch { /* trình duyệt chặn lưu */ }
+  }, [subtitleStyle]);
+
+  useEffect(() => {
+    // Đổi sang tập khác thì đóng bảng chỉnh phụ đề, tránh tự bật lại ở tập sau.
+    setSubtitlePanelOpen(false);
+    if (!subtitleUrl) {
+      setSubtitleCues([]);
+      setSubtitleText("");
+      setSubtitleStatus("none");
+      return;
+    }
+    let cancelled = false;
+    setSubtitleStatus("loading");
+    fetch(subtitleUrl, { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.text() : ""))
+      .then((body) => {
+        if (cancelled) return;
+        const cues = parseSubtitleFile(body);
+        setSubtitleCues(cues);
+        setSubtitleStatus(cues.length > 0 ? "ready" : "error");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSubtitleCues([]);
+        setSubtitleStatus("error");
+      });
+    return () => { cancelled = true; };
+  }, [subtitleUrl]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!subtitleStyle.enabled || subtitleCues.length === 0) {
+      setSubtitleText("");
+      return;
+    }
+    let shown = "";
+    const update = () => {
+      const cue = findActiveCue(subtitleCues, v.currentTime + subtitleStyle.delay);
+      const next = cue ? cue.text : "";
+      if (next !== shown) {
+        shown = next;
+        setSubtitleText(next);
+      }
+    };
+    update();
+    v.addEventListener("timeupdate", update);
+    v.addEventListener("seeked", update);
+    v.addEventListener("loadedmetadata", update);
+    return () => {
+      v.removeEventListener("timeupdate", update);
+      v.removeEventListener("seeked", update);
+      v.removeEventListener("loadedmetadata", update);
+    };
+  }, [subtitleCues, subtitleStyle.enabled, subtitleStyle.delay]);
+
+  // Cỡ chữ phụ đề tính theo chiều cao khung hình: toàn màn hình vẫn cân đối.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      setWrapHeight(entries[0]?.contentRect?.height ?? 0);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // iOS mở toàn màn hình bằng trình phát hệ thống: nhường phụ đề cho trình phát gốc
+  // vì không thể vẽ lớp phụ đề riêng đè lên giao diện hệ thống.
+  useEffect(() => {
+    const v = videoRef.current;
+    const track = nativeTrackRef.current?.track;
+    if (!v || !track) return;
+    track.mode = "hidden";
+    const showNative = () => { track.mode = subtitleStyle.enabled ? "showing" : "hidden"; };
+    const hideNative = () => { track.mode = "hidden"; };
+    v.addEventListener("webkitbeginfullscreen", showNative);
+    v.addEventListener("webkitendfullscreen", hideNative);
+    return () => {
+      v.removeEventListener("webkitbeginfullscreen", showNative);
+      v.removeEventListener("webkitendfullscreen", hideNative);
+    };
+  }, [subtitleUrl, subtitleStyle.enabled]);
+
   /* ─── Render ──────────────────────────────────────────── */
   return (
     <>
@@ -1070,7 +1420,36 @@ export function CinemaPlayer({
         x5-playsinline="true"
         onClick={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
-      />
+      >
+        {subtitleUrl ? (
+          <track ref={nativeTrackRef} kind="subtitles" src={subtitleUrl} srcLang="vi" label="Phụ đề" default />
+        ) : null}
+      </video>
+
+      {/* Phụ đề rời: tự vẽ để tùy chỉnh được cỡ chữ, màu, nền, vị trí, độ trễ */}
+      {subtitleStyle.enabled && subtitleText && (
+        <div className="cinema-subtitle-layer" style={{ bottom: `${subtitleStyle.bottom}%` }}>
+          <span
+            className="cinema-subtitle-text"
+            style={{
+              fontSize: `${Math.max(13, Math.round((wrapHeight || 420) * (subtitleStyle.fontSize / 100)))}px`,
+              color: subtitleStyle.color,
+              fontWeight: subtitleStyle.bold ? 700 : 500,
+              background: subtitleStyle.background === "box" ? "rgba(0,0,0,.62)" : "transparent",
+              padding: subtitleStyle.background === "box" ? "0.22em 0.6em" : 0,
+              borderRadius: subtitleStyle.background === "box" ? "0.35em" : 0,
+              textShadow:
+                subtitleStyle.background === "none"
+                  ? "none"
+                  : `0 0 ${subtitleStyle.outline}px ${subtitleStyle.outlineColor}, 0 0 ${subtitleStyle.outline * 2}px ${subtitleStyle.outlineColor}, 0 1px ${subtitleStyle.outline}px ${subtitleStyle.outlineColor}`,
+            }}
+          >
+            {subtitleText.split("\n").map((line, index) => (
+              <span className="cinema-subtitle-line" key={index}>{line}</span>
+            ))}
+          </span>
+        </div>
+      )}
 
       {adActive && !nativeFullscreenAd && (
         <video
@@ -1323,6 +1702,20 @@ export function CinemaPlayer({
               )}
             </div>}
 
+            {/* Phụ đề rời: chỉ hiện nút khi tập này thật sự có phụ đề để chỉnh */}
+            {!adActive && subtitleUrl ? (
+              <button
+                className={`cinema-cc-btn${subtitleStyle.enabled ? " is-on" : ""}`}
+                aria-label="Tùy chỉnh phụ đề"
+                title="Tùy chỉnh phụ đề"
+                onClick={(e) => { e.stopPropagation(); setSubtitlePanelOpen((open) => !open); }}
+                onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setSubtitlePanelOpen((open) => !open); }}
+              >
+                <Subtitles size={15} />
+                {subtitleStyle.enabled ? <span className="cinema-cc-dot" /> : null}
+              </button>
+            ) : null}
+
             {/* Next episode */}
             {onNextEpisode && !adActive && (
               <button
@@ -1344,6 +1737,17 @@ export function CinemaPlayer({
           </div>
         </div>
       </div>}
+
+      {/* Bảng tùy chỉnh phụ đề — chỉ dành cho tập có phụ đề rời */}
+      {subtitlePanelOpen && !adActive && subtitleUrl ? (
+        <SubtitlePanel
+          style={subtitleStyle}
+          onChange={(patch) => setSubtitleStyle((current) => ({ ...current, ...patch }))}
+          onReset={() => setSubtitleStyle({ ...DEFAULT_SUBTITLE_STYLE })}
+          status={subtitleStatus}
+          onClose={() => setSubtitlePanelOpen(false)}
+        />
+      ) : null}
 
       {/* AutoNext countdown overlay */}
       {autoNextCountdown !== null && onNextEpisode && (

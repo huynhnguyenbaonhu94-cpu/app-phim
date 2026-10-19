@@ -157,3 +157,26 @@ TMDB_API_KEY=<API Key v3 hoặc Access Token v4>
 - **cPanel:** *Setup Node.js App* → **Environment Variables** → thêm biến `TMDB_API_KEY` → **Restart**.
 - Hoặc tạo tệp `.env` trong thư mục ứng dụng với dòng trên rồi Restart.
 - Khoá sai hoặc hết hạn mức thì hệ thống tự quay về Wikidata, không bị trắng kết quả.
+
+## Ngày cập nhật phim thủ công bị nhảy dù không sửa gì
+
+Bản mới đã tự sửa khi khởi động (bỏ thuộc tính `ON UPDATE CURRENT_TIMESTAMP` của cột `updatedAt`).
+Sau khi upload và Restart, chỉ cần admin bấm lưu phim một lần là mốc ngày được ghi đúng.
+
+Các phim đã bị nhảy ngày trước đó có thể chỉnh lại một lần bằng SQL (tuỳ chọn):
+
+```sql
+-- Đưa ngày cập nhật về mốc tạo phim cho những phim chưa từng được sửa lại.
+-- Nếu admin đã sửa phim sau khi tạo, mốc này sẽ thấp hơn thực tế cho tới lần lưu kế tiếp.
+UPDATE `custom_movies` SET `updatedAt` = `createdAt`;
+```
+
+Kiểm tra nhanh cột đã bỏ tự động cập nhật chưa:
+
+```sql
+SELECT EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'custom_movies' AND COLUMN_NAME = 'updatedAt';
+```
+
+Kết quả không còn chữ `on update CURRENT_TIMESTAMP` là đạt.
+

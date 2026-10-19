@@ -1736,3 +1736,88 @@ Năm lỗi biên dịch của vòng trước và cách xử lý:
   chọn), phóng to 1–3x có dựng lại vùng chọn theo đúng tỉ lệ, thêm nút **Toàn bộ ảnh** (lấy trọn ảnh gốc,
   không cắt) và **Đặt lại**. Phép tính vùng cắt nay dựa trên vùng ảnh hiển thị thật nên ảnh cắt ra khớp
   đúng những gì đang thấy.
+
+## 62. Phim thủ công không còn đứng đầu trang và nguồn riêng xem được trên web
+
+**1. Phim thêm thủ công bị ghim ở đầu trang chủ**
+`getHome` (và `getDailyUpdates`) ghép danh sách theo kiểu `[...custom, ...api]` nên phim admin thêm
+**luôn** nằm trên cùng, mãi không chịu xuống dù sau đó có phim mới hơn từ API. Nay hai chỗ này trộn rồi
+sắp theo mốc thời gian (`sortByFreshness`: ưu tiên `updatedAt`, sau đó `createdAt`), và `getMovies` dùng
+chung tiện ích đó. Kết quả: phim vừa thêm vẫn nổi lên trên như mong muốn, nhưng khi có phim mới hơn thì
+tự xuống đúng vị trí theo ngày cập nhật — cả trên web lẫn app vì thứ tự do máy chủ quyết định.
+
+**2. Web báo "Nguồn phim đang được cập nhật" với nguồn admin thêm tay**
+`registerStreamSource` chỉ chấp nhận host trong danh sách CDN của API (`kvp726.com`, `kkphimplayer*`,
+`phim1280.tv`, `cdn-player.com`). Nguồn riêng của admin (ví dụ `v5.streamvsmov.com`) không thuộc danh
+sách nên `streamUrl` và `directStreamUrl` đều `null` → web không có gì để phát. App vẫn xem được vì đọc
+thẳng link M3U8 gốc.
+
+Đã thêm hai hàm riêng cho nguồn do admin nhập:
+- `registerCustomStreamSource`: nhận mọi host **https công khai** (không giới hạn danh sách CDN) và cấp
+  token proxy — nhờ đó web xem được kể cả khi CDN không gửi header CORS.
+- `customDirectStreamUrl`: trả link M3U8 gốc để trình phát thử trực tiếp trước, lỗi mới quay về proxy.
+
+`mergeCustomSources` dùng hai hàm này cho cả tập lẫn từng mức chất lượng. Vẫn chặn host nội bộ/không
+công khai (`localhost`, `127.*`, `10.*`, `192.168.*`, `172.16–31.*`, `169.254.*`, `.local`, IPv6 nội bộ)
+và bắt buộc https để proxy không bị lợi dụng.
+
+## 63. Phụ đề rời trên web + bảng tùy chỉnh phụ đề trong trình phát
+
+**1. Web không hiện phụ đề của nguồn admin thêm tay**
+Máy chủ đã trả `subtitleUrl` cho từng tập (route `/api/movies/subtitle/:id.vtt`, có CORS), nhưng phía web
+thiếu hẳn phần đọc phụ đề: kiểu `Episode` không có trường phụ đề và `CinemaPlayer` không hề vẽ phụ đề.
+Nay `Detail.tsx` khai báo `subtitleUrl`, truyền vào trình phát, và `canPlayEpisode` cũng tính cả nguồn
+trực tiếp để tập có link M3U8 gốc vẫn phát được.
+
+**2. Bộ đọc phụ đề trong trình phát web**
+- `parseSubtitleFile` đọc cả WebVTT lẫn SRT (một số nguồn trả SRT dù đuôi `.vtt`), chấp nhận dấu phẩy
+  thập phân, bỏ khối `NOTE`/`STYLE`, gỡ thẻ `<i>`, `{\an8}`, giải mã `&amp;`… và bỏ qua tệp rác.
+- `findActiveCue` tìm nhị phân nên phụ đề dài (hàng nghìn cue) vẫn nhẹ.
+- Lớp phụ đề tự vẽ (`cinema-subtitle-layer`) đồng bộ theo `timeupdate`/`seeked`, chỉ cập nhật state khi
+  nội dung đổi để không re-render thừa.
+- Trên iOS, trình phát hệ thống mở toàn màn hình nên không thể đè lớp riêng: thẻ `<track>` được giữ ở
+  chế độ ẩn và tự chuyển sang hiện khi vào toàn màn hình hệ thống, nhờ đó phụ đề vẫn có.
+
+**3. Bảng tùy chỉnh phụ đề (dùng được cả trong toàn màn hình)**
+Nút CC trên thanh điều khiển mở bảng nằm **trong khung trình phát** — vì khung này chính là phần tử được
+đưa lên toàn màn hình nên bảng và phụ đề vẫn hiện y như khi xem thường. Gồm các mục thường dùng nhất:
+bật/tắt phụ đề, cỡ chữ (2.6–8% chiều cao khung hình nên toàn màn hình vẫn cân), màu chữ (5 màu nhanh +
+bảng màu tự chọn), kiểu nền (viền chữ / hộp đen / trong suốt), vị trí (3–42% từ đáy), độ trễ ±0.5s, chữ
+đậm, viền dày, và nút đặt lại mặc định. Mọi lựa chọn lưu vào `localStorage` nên nhớ cho lần xem sau.
+
+## 64. Sửa lỗi "ngày cập nhật" tự nhảy dù admin không sửa gì
+
+**Nguyên nhân gốc**
+Cột `updatedAt` của bảng `custom_movies` được tạo với `ON UPDATE CURRENT_TIMESTAMP`. Trong khi đó hàm
+`registerCustomMovieView()` chạy **mỗi lần có người mở trang chi tiết phim thủ công** (cả app lẫn web) và
+chạy câu lệnh `UPDATE custom_movies SET viewCount = viewCount + 1 ...`. Vì câu lệnh này không gán
+`updatedAt`, MySQL tự cập nhật cột đó thành thời điểm hiện tại — nên chỉ cần có người xem phim là "ngày
+cập nhật" nhảy sang hôm nay, dù admin không sửa gì. Phụ phẩm kéo theo: thứ tự "phim mới cập nhật" ở
+trang chủ cũng bị đổi theo lượt xem.
+
+Đã kiểm chứng trên MySQL thật: cùng một bản ghi, câu lệnh cũ làm `updatedAt` nhảy từ `2026-10-14 09:00:00`
+sang thời điểm chạy; câu lệnh mới giữ nguyên.
+
+**Cách sửa (ba lớp bảo vệ)**
+1. `registerCustomMovieView()` gán tường minh `updatedAt = updatedAt`, nên dù cột còn thuộc tính ON UPDATE
+   thì lượt xem cũng không đổi ngày.
+2. `ensureCustomMoviesCompatibility()` khi khởi động kiểm tra `INFORMATION_SCHEMA` và chạy một lần
+   `ALTER TABLE custom_movies MODIFY COLUMN updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP` để bỏ
+   hẳn thuộc tính ON UPDATE trên hosting cũ.
+3. Bỏ `.onUpdateNow()` khỏi schema và cho `updateCustomMovie()` tự gán `updatedAt: new Date()` — chỉ thao
+   tác lưu của admin mới đổi ngày.
+
+**Thêm: sửa nguồn/tập cũng tính là cập nhật phim**
+`movieSources.ts` nay gọi `touchMovie()` khi admin thêm/đổi tên/xoá nguồn, thêm/sửa/xoá tập, hoặc sắp xếp
+lại tập — vì đó là thao tác sửa phim thật. Lượt xem thì không.
+
+## 65. Nút chỉnh phụ đề chỉ hiện với tập có phụ đề rời
+
+Trước đây nút CC luôn hiện trên thanh điều khiển của mọi tập; bấm vào với tập không có phụ đề thì bảng chỉ
+báo "Tập này không có phụ đề rời" — vừa thừa vừa gây hiểu nhầm là phụ đề đang lỗi.
+
+Nay nút CC (và cả bảng tùy chỉnh) **chỉ xuất hiện khi tập đang phát thật sự có phụ đề rời** (trường
+`subtitleUrl`), tức các tập thuộc nguồn admin thêm tay có kèm phụ đề. Phim lấy từ API không có phụ đề rời
+thì thanh điều khiển gọn như cũ, không còn nút thừa.
+
+Kèm theo: khi đổi tập, bảng chỉnh phụ đề tự đóng để không bật lại ngoài ý muốn ở tập kế tiếp.

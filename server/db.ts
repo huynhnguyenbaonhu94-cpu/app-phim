@@ -106,6 +106,25 @@ export async function ensureCustomMoviesCompatibility(db: ReturnType<typeof driz
   for (const statement of [
     "ALTER TABLE `movie_source_episodes` ADD COLUMN `qualities` text NULL",
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* cột đã có */ } }
+
+  // Cột updatedAt của bản cũ có ON UPDATE CURRENT_TIMESTAMP nên mỗi lượt xem (câu lệnh
+  // chỉ tăng viewCount) cũng bị tính là vừa sửa phim. Bỏ thuộc tính đó một lần duy nhất.
+  try {
+    const [columnRows] = await db.execute(sql`
+      SELECT EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'custom_movies' AND COLUMN_NAME = 'updatedAt'
+    `);
+    const list = Array.isArray(columnRows) ? (columnRows as Array<{ EXTRA?: unknown }>) : [];
+    const extra = list.length > 0 ? String(list[0].EXTRA ?? "") : "";
+    if (/on update/i.test(extra)) {
+      await db.execute(
+        sql.raw("ALTER TABLE `custom_movies` MODIFY COLUMN `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+      );
+      console.log("[Database] Đã bỏ tự động đổi updatedAt khi chỉ tăng lượt xem của custom_movies");
+    }
+  } catch {
+    /* bảng hoặc cột chưa tồn tại: lần khởi động sau sẽ thử lại */
+  }
 }
 
 export async function initializeDatabase() {

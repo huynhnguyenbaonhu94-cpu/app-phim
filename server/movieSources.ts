@@ -9,7 +9,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { movieSourceEpisodes, movieSources } from "../drizzle/schema";
 import { customDirectStreamUrl, registerCustomStreamSource } from "./cinema";
@@ -114,6 +114,43 @@ function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpi
 }
 
 /** Danh sách nguồn thủ công của một phim, kèm tập của từng nguồn. */
+/**
+ * Đánh dấu phim vừa được admin sửa.
+ *
+ * Ngày cập nhật của phim thủ công phải đổi khi admin thêm/sửa/xoá nguồn hoặc tập,
+ * nhưng không được đổi khi chỉ có người xem mở phim.
+ */
+async function touchMovie(slug: string | null | undefined): Promise<void> {
+  if (!slug) return;
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.execute(sql`UPDATE \`custom_movies\` SET \`updatedAt\` = NOW() WHERE \`slug\` = ${slug}`);
+  } catch {
+    /* đánh dấu ngày không được làm hỏng thao tác chính */
+  }
+}
+
+/** Slug phim của một nguồn (dùng trước khi xoá để còn biết đánh dấu phim nào). */
+async function sourceMovieSlug(sourceId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(movieSources).where(eq(movieSources.id, sourceId));
+  return row?.movieSlug ?? null;
+}
+
+/** Slug phim của tập (đi ngược từ tập sang nguồn). */
+async function episodeMovieSlug(episodeId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [episode] = await db
+    .select()
+    .from(movieSourceEpisodes)
+    .where(eq(movieSourceEpisodes.id, episodeId));
+  if (!episode) return null;
+  return sourceMovieSlug(episode.sourceId);
+}
+
 export async function listMovieSources(movieSlug: string): Promise<MovieSource[]> {
   const db = await getDb();
   if (!db) return [];
@@ -147,6 +184,7 @@ export async function addMovieSource(movieSlug: string, name: string): Promise<M
     .insert(movieSources)
     .values({ movieSlug, name, sortOrder: existing.length })
     .$returningId();
+  await touchMovie(movieSlug);
   return { id: inserted.id, movieSlug, name, sortOrder: existing.length, episodes: [] };
 }
 
@@ -154,15 +192,19 @@ export async function addMovieSource(movieSlug: string, name: string): Promise<M
 export async function renameMovieSource(id: number, name: string): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
+  const movieSlug = await sourceMovieSlug(id);
   await db.update(movieSources).set({ name }).where(eq(movieSources.id, id));
+  await touchMovie(movieSlug);
 }
 
 /** Xoá nguồn và toàn bộ tập của nó. */
 export async function removeMovieSource(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
+  const movieSlug = await sourceMovieSlug(id);
   await db.delete(movieSourceEpisodes).where(eq(movieSourceEpisodes.sourceId, id));
   await db.delete(movieSources).where(eq(movieSources.id, id));
+  await touchMovie(movieSlug);
 }
 
 /** Thêm một tập cho nguồn: link M3U8 bắt buộc, phụ đề có thể là link ngoài hoặc VTT đã tải lên. */
@@ -204,6 +246,7 @@ export async function addMovieEpisode(input: {
     .select()
     .from(movieSourceEpisodes)
     .where(eq(movieSourceEpisodes.id, inserted.id));
+  await touchMovie(source.movieSlug);
   return toEpisode(row);
 }
 
@@ -220,6 +263,7 @@ export async function updateMovieEpisode(
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
+  const movieSlug = await episodeMovieSlug(id);
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.streamUrl !== undefined) patch.streamUrl = input.streamUrl;
@@ -235,13 +279,16 @@ export async function updateMovieEpisode(
   if (input.qualities !== undefined) patch.qualities = await resolveQualities(input.qualities);
   if (Object.keys(patch).length === 0) return;
   await db.update(movieSourceEpisodes).set(patch).where(eq(movieSourceEpisodes.id, id));
+  await touchMovie(movieSlug);
 }
 
 /** Xoá một tập. */
 export async function removeMovieEpisode(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
+  const movieSlug = await episodeMovieSlug(id);
   await db.delete(movieSourceEpisodes).where(eq(movieSourceEpisodes.id, id));
+  await touchMovie(movieSlug);
 }
 
 /** Sắp xếp lại tập của một nguồn theo danh sách id. */
@@ -254,6 +301,7 @@ export async function reorderMovieEpisodes(sourceId: number, ids: number[]): Pro
       .set({ sortOrder: index })
       .where(and(eq(movieSourceEpisodes.id, ids[index]), eq(movieSourceEpisodes.sourceId, sourceId)));
   }
+  await touchMovie(await sourceMovieSlug(sourceId));
 }
 
 /** Chuẩn hoá phụ đề: chuyển SRT sang WebVTT vì AVPlayer chỉ đọc được VTT. */

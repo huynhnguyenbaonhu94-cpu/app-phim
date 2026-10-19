@@ -250,7 +250,9 @@ export const customMovies = mysqlTable("custom_movies", {
   directors: text("directors"),
   isPublished: boolean("isPublished").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  // Không dùng onUpdateNow(): ngày cập nhật chỉ đổi khi admin lưu phim, không đổi
+  // khi hệ thống tăng lượt xem. Nơi ghi dữ liệu tự gán mốc thời gian.
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 }, (table) => ({ slugIndex: uniqueIndex("custom_movies_slug_idx").on(table.slug) }));
 
 export type CustomMovie = typeof customMovies.$inferSelect;
