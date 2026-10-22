@@ -732,13 +732,9 @@ struct CinemaPlayerScreen: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
-                // Neo ẩn cho MPVolumeView. iOS chỉ cho điều khiển âm lượng của máy
-                // khi view này nằm trong cây giao diện, nên nó được đặt ở đây với
-                // kích thước 2×2 và không nhận chạm.
-                SystemVolumeAnchor()
-                    .frame(width: 2, height: 2)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                // Không đặt neo MPVolumeView ở đây nữa: khung nhỏ không cắt được nội
+                // dung bên trong nên thanh âm lượng hệ thống lộ ra ngoài giao diện.
+                // MPVolumeView ẩn được gắn một lần trong cửa sổ ở gốc app.
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     subtitleOverlay(bottomInset: proxy.safeAreaInsets.bottom)

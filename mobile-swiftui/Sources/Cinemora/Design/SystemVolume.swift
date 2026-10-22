@@ -40,11 +40,34 @@ final class SystemVolume: ObservableObject {
         }
     }
 
-    /// `MPVolumeView` dùng chung để gắn vào cây giao diện của trình phát đang mở.
+    /// Cửa sổ đang giữ `MPVolumeView`.
+    private weak var installedWindow: UIWindow?
+
+    /// Đưa `MPVolumeView` vào cửa sổ ứng dụng, mỗi cửa sổ chỉ một lần.
     ///
     /// iOS chỉ cho `MPVolumeView` điều khiển âm lượng hệ thống khi nó nằm trong cây
-    /// giao diện, nên mỗi trình phát đặt một neo 1×1 ẩn (xem `SystemVolumeAnchor`).
-    var anchorView: MPVolumeView { volumeView }
+    /// giao diện. Trước đây mỗi trình phát tự đặt một neo 2×2, nhưng khung nhỏ **không**
+    /// cắt được nội dung bên trong (`UIView` mặc định `clipsToBounds = false`), nên
+    /// thanh âm lượng của hệ thống lộ hẳn ra ngoài và dính lên trang chủ. Nay chỉ có
+    /// một bản nằm trong cửa sổ, kích thước 1×1, cắt nội dung và trong suốt.
+    @MainActor
+    func attach(to window: UIWindow) {
+        guard installedWindow !== window else { return }
+        installedWindow = window
+        volumeView.removeFromSuperview()
+        volumeView.showsRouteButton = false
+        volumeView.showsVolumeSlider = true
+        volumeView.clipsToBounds = true
+        volumeView.alpha = 0.001
+        volumeView.isUserInteractionEnabled = false
+        volumeView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        window.addSubview(volumeView)
+        window.sendSubviewToBack(volumeView)
+        // Ép bố cục ngay để thanh trượt con được tạo, nhờ vậy lần chỉnh âm lượng đầu
+        // tiên đã có tác dụng thay vì phải chờ một vòng bố cục.
+        volumeView.setNeedsLayout()
+        volumeView.layoutIfNeeded()
+    }
 
     /// Đặt âm lượng thiết bị. Dùng thanh trượt con của `MPVolumeView` vì đây là API
     /// công khai duy nhất cho việc này; giá trị được gửi kèm sự kiện `valueChanged`.
@@ -96,14 +119,34 @@ final class SystemVolume: ObservableObject {
     }
 }
 
-/// Neo 1×1 đặt `MPVolumeView` vào cây giao diện của trình phát.
+/// Gắn `MPVolumeView` ẩn vào cửa sổ ứng dụng — đặt một lần ở gốc app.
 ///
-/// Không hiển thị gì (trong suốt, không nhận chạm) nhưng đủ để iOS cho phép điều
-/// khiển âm lượng thiết bị.
-struct SystemVolumeAnchor: UIViewRepresentable {
-    func makeUIView(context: Context) -> MPVolumeView {
-        SystemVolume.shared.anchorView
+/// Bản thân view này chỉ là cái móc để biết cửa sổ nào đang dùng; `MPVolumeView` được
+/// thêm trực tiếp vào cửa sổ với kích thước 1×1, cắt nội dung và gần như trong suốt,
+/// nên không bao giờ lộ ra trên giao diện.
+struct SystemVolumeWindowInstaller: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = InstallerView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.onWindow = { [weak view] window in
+            guard view != nil else { return }
+            SystemVolume.shared.attach(to: window)
+        }
+        return view
     }
 
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if let window = uiView.window { SystemVolume.shared.attach(to: window) }
+    }
+
+    /// Báo ngay khi view vào cửa sổ, và báo lại nếu cửa sổ đổi.
+    final class InstallerView: UIView {
+        var onWindow: (@MainActor (UIWindow) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let window { onWindow?(window) }
+        }
+    }
 }

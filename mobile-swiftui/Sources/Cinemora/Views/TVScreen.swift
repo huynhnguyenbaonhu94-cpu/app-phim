@@ -749,9 +749,8 @@ private struct TVPlayerView: View {
             .onAppear { scheduleHide() }
             .onDisappear { hideTask?.cancel() }
         }
-        // Âm lượng đi thẳng vào thiết bị (xem SystemVolume) nên trình phát không
-        // còn giữ mức riêng; chỉ cần neo MPVolumeView để iOS cho phép điều khiển.
-        .background(SystemVolumeAnchor().frame(width: 2, height: 2).allowsHitTesting(false))
+        // Âm lượng đi thẳng vào thiết bị (xem SystemVolume) nên trình phát không giữ
+        // mức riêng. MPVolumeView ẩn đã được gắn một lần trong cửa sổ ở gốc app.
     }
 
     private var topBar: some View {

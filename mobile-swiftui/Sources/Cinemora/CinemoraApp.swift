@@ -54,6 +54,16 @@ struct CinemoraApp: App {
                 .environment(connectivity)
                 .environment(downloads)
                 .preferredColorScheme(.dark)
+                // MPVolumeView ẩn được gắn vào cửa sổ từ đây: nó cần nằm trong cây
+                // giao diện để iOS cho điều khiển âm lượng của máy, nhưng không được
+                // lộ ra, nên chỉ có đúng một bản trong cửa sổ thay vì mỗi trình phát
+                // một neo (khung nhỏ không cắt được nội dung bên trong).
+                .background {
+                    SystemVolumeWindowInstaller()
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
         }
     }
 }

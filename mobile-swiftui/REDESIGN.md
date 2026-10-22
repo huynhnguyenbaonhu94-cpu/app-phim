@@ -2357,3 +2357,15 @@ Khung ảnh nhãn chỉ đặt `maxWidth` nên trong hàng bình luận nó luô
   (trước đây chỉnh âm lượng riêng của AVPlayer nên máy vẫn to). Áp dụng cho trình phát phim, trình
   phát kênh trực tiếp và trình phát video đã đăng; thanh trượt, nút tắt tiếng và thao tác vuốt dọc
   đều đi theo âm lượng máy, và khi bấm nút cứng bên hông máy thì thanh trượt trong app cập nhật theo.
+
+## 90. Sửa lỗi thanh âm lượng hệ thống lộ ra trên giao diện
+
+- Bản 89 đặt một neo `MPVolumeView` 2×2 trong từng trình phát. Khung nhỏ **không** cắt được
+  nội dung bên trong vì `UIView` mặc định `clipsToBounds = false`, nên thanh âm lượng của hệ
+  thống cùng nút loa lộ hẳn ra ngoài và dính lên thẻ phim ở trang chủ.
+- Nay chỉ còn **một** `MPVolumeView` gắn trực tiếp vào cửa sổ ứng dụng từ gốc app
+  (`SystemVolumeWindowInstaller`): kích thước 1×1, `clipsToBounds = true`, `alpha = 0.001`,
+  không nhận chạm và đưa xuống dưới cùng. Các neo trong trình phát phim và trình phát kênh
+  trực tiếp đã được bỏ.
+- Sau khi gắn, bố cục được ép chạy ngay để thanh trượt con tồn tại, nên lần chỉnh âm lượng
+  đầu tiên đã có tác dụng.
