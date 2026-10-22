@@ -12,7 +12,10 @@ import UIKit
 
 extension Color {
     /// Đọc màu từ chuỗi hex mà trang quản trị gửi lên, ví dụ `#d2f36b`.
-    init?(hex: String) {
+    ///
+    /// Tên `cssHex` để không trùng với `Color(hex:)` đã có trong
+    /// `SubtitlePreferences` — hai khởi tạo cùng tham số sẽ bị coi là khai báo lại.
+    init?(cssHex: String) {
         var value = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if value.hasPrefix("#") { value.removeFirst() }
         guard value.count == 6 || value.count == 8, let number = UInt64(value, radix: 16) else { return nil }
@@ -165,8 +168,8 @@ struct CommentBadgeChip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
-    private var tint: Color { Color(hex: badge.color) ?? Color.auroraViolet }
-    private var surface: Color { Color(hex: badge.background) ?? tint.opacity(0.18) }
+    private var tint: Color { Color(cssHex: badge.color) ?? Color.auroraViolet }
+    private var surface: Color { Color(cssHex: badge.background) ?? tint.opacity(0.18) }
     private var isOutline: Bool { badge.style == "outline" }
     private var isGlow: Bool { badge.style == "glow" || badge.animation == "float" }
     private var isGradient: Bool { badge.style == "gradient" }
@@ -191,12 +194,19 @@ struct CommentBadgeChip: View {
         }
     }
 
+    /// `Font.italic(_:)` không dùng được ở đây (trình biên dịch coi là API iOS 26),
+    /// nên in nghiêng được chọn bằng cách tạo hai `Font` rồi lấy một.
+    private var badgeFont: Font {
+        let base = Font.system(size: fontSize, weight: .heavy, design: fontDesign)
+        return badge.font == "script" ? base.italic() : base
+    }
+
     var body: some View {
         if badge.isImage {
             CommentBadgeImage(urlString: badge.imageURL)
         } else {
             Text(badge.text)
-                .font(.system(size: fontSize, weight: .heavy, design: fontDesign).italic(badge.font == "script"))
+                .font(badgeFont)
                 .foregroundStyle(isGradient ? AnyShapeStyle(LinearGradient(
                     colors: [tint, tint.opacity(0.55), tint],
                     startPoint: .topLeading,
@@ -286,7 +296,7 @@ struct StyledCommentName: View {
         Color(red: 0.16, green: 0.48, blue: 1.0),
     ]
 
-    private var customColor: Color? { style?.color.isEmpty == false ? Color(hex: style?.color ?? "") : nil }
+    private var customColor: Color? { style?.color.isEmpty == false ? Color(cssHex: style?.color ?? "") : nil }
     private var effect: String { style?.effect ?? "none" }
 
     private var baseColor: Color {

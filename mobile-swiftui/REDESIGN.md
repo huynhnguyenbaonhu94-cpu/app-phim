@@ -2244,3 +2244,15 @@ rỗng, nên không còn trường hợp màn trắng.
 - Ô nhập có nhãn phía trên, gợi ý nhỏ bên dưới, viền sáng khi focus; bộ đếm `x/6 nhãn` cạnh
   nút *Thêm nhãn*.
 - Hàng ảnh đại diện xếp thành lưới 92px + phần thao tác, không còn tràn ra ngoài thẻ.
+
+## 83. Sửa lỗi build IPA: khai báo lại `Color(hex:)` và `.italic(_:)`
+
+Hai lỗi biên dịch trong `Design/CommentBadges.swift`:
+
+- **`invalid redeclaration of 'init(hex:)'`** — `State/SubtitlePreferences.swift` đã có
+  `Color.init(hex:)`; bản thêm cho nhãn hiển thị dùng cùng tham số nên bị coi là khai báo
+  lại. Đổi tên bản mới thành `Color.init?(cssHex:)` và cập nhật ba chỗ gọi trong
+  `CommentBadges.swift`. Phần phụ đề giữ nguyên `Color(hex:)` cũ.
+- **`'italic' is only available in iOS 26.0 or newer`** — `.italic(badge.font == "script")`
+  bị trình biên dịch xếp vào API mới. Thay bằng thuộc tính `badgeFont`: tạo `Font` nền rồi
+  chọn `base.italic()` khi font là kiểu viết tay, nên chỉ dùng API có từ lâu.
