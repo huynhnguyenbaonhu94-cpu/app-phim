@@ -16,7 +16,7 @@ extension Color {
     /// Tên `cssHex` để không trùng với `Color(hex:)` đã có trong
     /// `SubtitlePreferences` — hai khởi tạo cùng tham số sẽ bị coi là khai báo lại.
     init?(cssHex: String) {
-        var value = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        var value = cssHex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if value.hasPrefix("#") { value.removeFirst() }
         guard value.count == 6 || value.count == 8, let number = UInt64(value, radix: 16) else { return nil }
         let red: Double

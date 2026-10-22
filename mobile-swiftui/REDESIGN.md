@@ -2256,3 +2256,9 @@ Hai lỗi biên dịch trong `Design/CommentBadges.swift`:
 - **`'italic' is only available in iOS 26.0 or newer`** — `.italic(badge.font == "script")`
   bị trình biên dịch xếp vào API mới. Thay bằng thuộc tính `badgeFont`: tạo `Font` nền rồi
   chọn `base.italic()` khi font là kiểu viết tay, nên chỉ dùng API có từ lâu.
+
+## 84. Sửa lỗi build IPA: tham chiếu `hex` còn sót
+
+Sau khi đổi `Color.init?(hex:)` thành `Color.init?(cssHex:)`, phần thân hàm vẫn còn dùng tên
+tham số cũ nên trình biên dịch báo `cannot find 'hex' in scope`. Đã đổi thành `cssHex` và quét
+lại toàn bộ tệp: không còn tên `hex` trần nào ngoài chú thích.
