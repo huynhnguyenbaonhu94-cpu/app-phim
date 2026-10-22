@@ -2262,3 +2262,42 @@ Hai lỗi biên dịch trong `Design/CommentBadges.swift`:
 Sau khi đổi `Color.init?(hex:)` thành `Color.init?(cssHex:)`, phần thân hàm vẫn còn dùng tên
 tham số cũ nên trình biên dịch báo `cannot find 'hex' in scope`. Đã đổi thành `cssHex` và quét
 lại toàn bộ tệp: không còn tên `hex` trần nào ngoài chú thích.
+
+## 85. Trang quản trị tài khoản: icon tên, danh sách chọn, hiệu ứng tên
+
+- **Icon cạnh tên**: ô ảnh đại diện trong hàng tài khoản và ở đầu bảng chỉnh sửa giờ hiện
+  chữ cái đầu của tên trên nền chuyển sắc, thay cho biểu tượng khiên bị lệch; chữ trong hàng
+  tài khoản cũng được nâng cỡ cho dễ đọc và bỏ khai báo `min-width` cũ làm hàng bị co.
+- **Danh sách chọn**: thêm `components/SelectField.tsx` thay toàn bộ `<select>` của trình duyệt
+  (quyền, kiểu nhãn, font, kích thước, chuyển động, hiệu ứng tên). Bảng chọn vẽ theo tông tối của
+  trang, có mũi tên xoay, dòng đang chọn in đậm kèm dấu tích, đóng khi bấm ra ngoài hoặc nhấn Esc,
+  hỗ trợ phím mũi tên và Enter.
+- **Hiệu ứng viền chữ**: `.cin-name--outline` trước đây lấy viền theo `currentColor` mà chữ lại đặt
+  trong suốt nên tên biến mất khỏi khung xem trước; nay viền lấy từ biến `--cin-name-color`.
+- **Thêm hiệu ứng**: tên người dùng có thêm Neon, Ánh kim, Băng giá, Lửa, Bóng đổ, Gạch chân,
+  Thở nhẹ (tổng 13 hiệu ứng); nhãn có thêm kiểu Neon, Ánh kim, Hologram và chuyển động Nhún nhảy,
+  Nghiêng nhẹ, Chớp tắt. Cả web lẫn app đều dựng được các lựa chọn mới; máy chủ đã mở rộng danh
+  sách giá trị hợp lệ cho `style`, `animation`, `effect`.
+
+## 86. Giao diện trả lời bình luận: rõ đang trả lời ai
+
+Trước đây mọi trả lời đều bị gắn về bình luận gốc nên app không biết người dùng vừa trả lời ai:
+trả lời chỉ thụt lề 14pt kèm một vạch dọc mờ, trông không khác bình luận thường, còn ô soạn chỉ có
+một dòng chữ nhỏ "Đang trả lời …".
+
+- **Dữ liệu**: `CommentsStore.send` giữ đúng `parentID` của bình luận được trả lời thay vì nhảy lên
+  bình luận gốc; cây vẫn chỉ lồng một cấp vì `rebuild()` gom mọi trả lời về gốc của nhánh. Nhờ vậy
+  app biết chính xác ai đang được trả lời, kể cả sau khi tải lại danh sách.
+- **Xoá theo nhánh**: vì nhánh có thể sâu vài tầng, `CommentsStore.delete`, `deleteMovieComment`
+  (server Node) và bản PHP `cpanel-comments` đều xoá toàn bộ trả lời nằm bên dưới, không để lại
+  bình luận mồ côi.
+- **Thẻ trả lời**: mỗi trả lời là một thẻ bo góc 16pt có nền sáng nhẹ, vạch tím chuyển sắc bên trái
+  và khoảng đệm riêng, tách hẳn khỏi bình luận gốc.
+- **Dòng ngữ cảnh**: đầu mỗi trả lời có "↩ Trả lời <tên>" (giữ nguyên nhãn và hiệu ứng tên của người
+  được trả lời) kèm trích đoạn 40 ký tự của bình luận gốc.
+- **Ô soạn**: thay dòng chữ nhỏ bằng thẻ "Đang trả lời" có ảnh đại diện, tên người được trả lời và
+  trích đoạn nội dung, viền tím nhạt cùng nút huỷ rõ ràng.
+- **Đánh dấu đích**: bình luận đang được trả lời có viền tím và nút "Trả lời" đổi màu, nên khi cuộn
+  trong luồng dài vẫn thấy mình đang trả lời bình luận nào.
+- **Web admin**: `groupComments` đi ngược lên gốc nhánh nên trả lời của trả lời không còn bị bỏ sót
+  khỏi danh sách bình luận trong trang quản trị.

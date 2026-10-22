@@ -2,10 +2,17 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { Edit3, Image as ImageIcon, LogOut, Plus, RefreshCw, Save, ShieldCheck, Smartphone, Trash2, Upload, X } from "lucide-react";
 import { AuthDialog } from "@/components/AuthDialog";
+import { SelectField } from "@/components/SelectField";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { BadgeChip, NameText, emptyBadge, parseBadges, parseNameStyle, type CinemaBadge, type CinemaNameStyle } from "@/lib/cinemaBadges";
+
+/** Chữ cái đầu của tên, dùng làm ảnh đại diện tạm khi tài khoản chưa có ảnh. */
+function accountInitial(name: unknown) {
+  const clean = typeof name === "string" ? name.trim() : "";
+  return clean.length > 0 ? clean[0].toUpperCase() : "?";
+}
 
 function formatDate(value: unknown) {
   if (!value) return "Chưa có";
@@ -24,6 +31,9 @@ const BADGE_STYLES: Array<[BadgeDraft["style"], string]> = [
   ["glow", "Phát sáng"],
   ["shine", "Loé sáng"],
   ["pulse", "Nhấp nháy"],
+  ["neon", "Neon"],
+  ["gold", "Ánh kim"],
+  ["hologram", "Hologram"],
 ];
 
 const BADGE_FONTS: Array<[BadgeDraft["font"], string]> = [
@@ -53,6 +63,13 @@ const NAME_EFFECTS: Array<[NameStyleDraft["effect"], string]> = [
   ["shine", "Loé sáng"],
   ["rainbow", "Cầu vồng"],
   ["outline", "Viền chữ"],
+  ["neon", "Neon"],
+  ["gold", "Ánh kim"],
+  ["ice", "Băng giá"],
+  ["fire", "Lửa"],
+  ["shadow", "Bóng đổ"],
+  ["underline", "Gạch chân"],
+  ["breathe", "Thở nhẹ"],
 ];
 
 const SUGGESTED_NAMES = ["VIP", "MOD", "Kim cương", "Thành viên vàng", "Tác giả"];
@@ -169,7 +186,7 @@ export default function AdminAccounts() {
         const legacyBadges = accountBadges.length === 0 && profile.badge ? [{ ...emptyBadge(0), id: "legacy", text: profile.badge }] : accountBadges;
         return <article className={`admin-account-card${selectedUserId === account.id ? " is-selected" : ""}`} key={account.id}>
         <div className="admin-account-main">
-          <div className="admin-account-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <ShieldCheck size={17} />}</div>
+          <div className="admin-account-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <span>{accountInitial(account.name)}</span>}</div>
           <div className="admin-account-copy"><strong><NameText name={account.name || "Chưa đặt tên"} style={accountNameStyle} />{legacyBadges.map((badge) => <BadgePreview key={badge.id} badge={badge} />)}</strong><span>{account.email || "Không có email"} · ID #{account.id} · {account.role}</span><small>Đăng ký: {formatDate(account.createdAt)} · Đăng nhập gần nhất: {formatDate(account.lastSignedIn)}</small></div>
           <div className="admin-account-stats"><b>{account.activeDeviceCount}/5</b><span>thiết bị</span><b>{account.favoriteCount}</b><span>yêu thích</span><b>{account.historyCount}</b><span>lịch sử</span></div>
           <button className="button button-ghost" onClick={() => setSelectedUserId(selectedUserId === account.id ? null : account.id)}><Smartphone size={14} /> Thiết bị</button>
@@ -179,7 +196,7 @@ export default function AdminAccounts() {
         {editingUserId === account.id && <div className="admin-account-edit">
           <div className="admin-edit-head">
             <div className="admin-edit-identity">
-              <span className="admin-edit-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <ShieldCheck size={20} />}</span>
+              <span className="admin-edit-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <span>{accountInitial(account.name)}</span>}</span>
               <div>
                 <strong><NameText name={account.name || "Chưa đặt tên"} style={accountNameStyle} />{legacyBadges.map(badge => <BadgePreview key={badge.id} badge={badge} />)}</strong>
                 <span>{account.email || "Không có email"} · ID #{account.id} · {account.role}</span>
@@ -196,7 +213,7 @@ export default function AdminAccounts() {
                   <label className="is-wide">Tên hiển thị<input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} required minLength={2} /></label>
                   <label className="is-wide">Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} required /></label>
                   <label>Mật khẩu mới<small>Để trống nếu không đổi.</small><input type="password" value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Ít nhất 8 ký tự" minLength={8} /></label>
-                  <label>Quyền<small>admin xem được trang quản trị.</small><select value={form.role} onChange={event => setForm({ ...form, role: event.target.value as "user" | "admin" })}><option value="user">user</option><option value="admin">admin</option></select></label>
+                  <label>Quyền<small>admin xem được trang quản trị.</small><SelectField value={form.role} ariaLabel="Quyền" options={[{ value: "user", label: "user" }, { value: "admin", label: "admin" }]} onChange={(next) => setForm({ ...form, role: next as "user" | "admin" })} /></label>
                 </div>
                 <div className="admin-edit-foot">
                   <button className="button button-primary" disabled={updateAccount.isPending}><Save size={14} /> {updateAccount.isPending ? "Đang lưu…" : "Lưu thông tin"}</button>
@@ -240,10 +257,10 @@ export default function AdminAccounts() {
                       <label>Nội dung nhãn<input value={badge.text} maxLength={24} onChange={event => updateBadge(index, { text: event.target.value })} placeholder="VIP, MOD, Kim cương…" /></label>
                       <label>Màu chữ<input type="color" value={badge.color || "#d2f36b"} onChange={event => updateBadge(index, { color: event.target.value })} /></label>
                       <label>Màu nền<input type="color" value={badge.background || "#243018"} onChange={event => updateBadge(index, { background: event.target.value })} /></label>
-                      <label>Kiểu<select value={badge.style} onChange={event => updateBadge(index, { style: event.target.value as BadgeDraft["style"] })}>{BADGE_STYLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                      <label>Font chữ<select value={badge.font} onChange={event => updateBadge(index, { font: event.target.value as BadgeDraft["font"] })}>{BADGE_FONTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                      <label>Kích thước<select value={badge.size} onChange={event => updateBadge(index, { size: event.target.value as BadgeDraft["size"] })}>{BADGE_SIZES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                      <label>Hiệu ứng chuyển động<select value={badge.animation} onChange={event => updateBadge(index, { animation: event.target.value as BadgeDraft["animation"] })}>{BADGE_ANIMATIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                      <label>Kiểu<SelectField value={badge.style} options={BADGE_STYLES.map(([value, label]) => ({ value, label }))} onChange={(next) => updateBadge(index, { style: next as BadgeDraft["style"] })} /></label>
+                      <label>Font chữ<SelectField value={badge.font} options={BADGE_FONTS.map(([value, label]) => ({ value, label }))} onChange={(next) => updateBadge(index, { font: next as BadgeDraft["font"] })} /></label>
+                      <label>Kích thước<SelectField value={badge.size} options={BADGE_SIZES.map(([value, label]) => ({ value, label }))} onChange={(next) => updateBadge(index, { size: next as BadgeDraft["size"] })} /></label>
+                      <label>Hiệu ứng chuyển động<SelectField value={badge.animation} options={BADGE_ANIMATIONS.map(([value, label]) => ({ value, label }))} onChange={(next) => updateBadge(index, { animation: next as BadgeDraft["animation"] })} /></label>
                       <div className="admin-badge-suggest"><span>Gợi ý nhanh</span><div>{SUGGESTED_NAMES.map(name => <button type="button" key={name} onClick={() => updateBadge(index, { text: name })}>{name}</button>)}</div></div>
                     </div> : <div className="admin-badge-grid">
                       <label className="is-wide">Link ảnh hoặc GIF<input value={badge.imageUrl} onChange={event => updateBadge(index, { imageUrl: event.target.value })} placeholder="https://.../nhan.gif hoặc /uploads/movie-images/....png" /></label>
@@ -263,7 +280,7 @@ export default function AdminAccounts() {
                 <div className="admin-edit-card-head"><span className="admin-edit-step">04</span><div><strong>Làm nổi bật tên người dùng</strong><small>Đổi màu và hiệu ứng cho tên người này khi bình luận.</small></div></div>
                 <div className="admin-name-style">
                   <label>Màu tên<input type="color" value={nameStyle.color || "#ffffff"} onChange={event => setNameStyle({ ...nameStyle, color: event.target.value })} /></label>
-                  <label>Hiệu ứng<select value={nameStyle.effect} onChange={event => setNameStyle({ ...nameStyle, effect: event.target.value as NameStyleDraft["effect"] })}>{NAME_EFFECTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label>Hiệu ứng<SelectField value={nameStyle.effect} options={NAME_EFFECTS.map(([value, label]) => ({ value, label }))} onChange={(next) => setNameStyle({ ...nameStyle, effect: next as NameStyleDraft["effect"] })} /></label>
                   <div className="admin-badge-preview"><span>Xem trước</span><div><NameText name={form.name || account.name || "Tên người dùng"} style={nameStyle} /></div></div>
                   <button type="button" className="button button-ghost" onClick={() => setNameStyle({ color: "", effect: "none" })}>Đặt lại mặc định</button>
                 </div>

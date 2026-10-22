@@ -176,6 +176,12 @@ struct CommentBadgeChip: View {
     private var isShine: Bool { badge.style == "shine" || badge.animation == "shine" }
     private var isPulsing: Bool { badge.style == "pulse" || badge.animation == "pulse" }
     private var isFloating: Bool { badge.animation == "float" }
+    private var isNeon: Bool { badge.style == "neon" }
+    private var isGold: Bool { badge.style == "gold" }
+    private var isHologram: Bool { badge.style == "hologram" }
+    private var isBouncing: Bool { badge.animation == "bounce" }
+    private var isTilting: Bool { badge.animation == "tilt" }
+    private var isBlinking: Bool { badge.animation == "blink" }
 
     private var fontSize: CGFloat {
         switch badge.size {
@@ -201,6 +207,45 @@ struct CommentBadgeChip: View {
         return badge.font == "script" ? base.italic() : base
     }
 
+    /// Nhãn ánh kim và hologram nền sáng nên chữ phải sẫm mới đọc được.
+    private var textTint: Color {
+        (isGold || isHologram) ? Color(red: 0.05, green: 0.07, blue: 0.03) : tint
+    }
+
+    private var fillStyle: AnyShapeStyle {
+        if isGold {
+            return AnyShapeStyle(LinearGradient(
+                colors: [
+                    Color(red: 0.97, green: 0.84, blue: 0.45),
+                    Color(red: 0.72, green: 0.53, blue: 0.04),
+                    Color(red: 1.0, green: 0.91, blue: 0.66),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ))
+        }
+        if isHologram {
+            return AnyShapeStyle(LinearGradient(
+                colors: [
+                    Color(red: 0.49, green: 0.90, blue: 0.53),
+                    Color(red: 0.39, green: 0.70, blue: 1.0),
+                    Color(red: 0.78, green: 0.57, blue: 0.92),
+                    Color(red: 1.0, green: 0.62, blue: 0.80),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            ))
+        }
+        if isGradient {
+            return AnyShapeStyle(LinearGradient(
+                colors: [surface.opacity(0.95), surface.opacity(0.55)],
+                startPoint: .top,
+                endPoint: .bottom
+            ))
+        }
+        return AnyShapeStyle(surface)
+    }
+
     var body: some View {
         if badge.isImage {
             CommentBadgeImage(urlString: badge.imageURL)
@@ -208,29 +253,23 @@ struct CommentBadgeChip: View {
             Text(badge.text)
                 .font(badgeFont)
                 .foregroundStyle(isGradient ? AnyShapeStyle(LinearGradient(
-                    colors: [tint, tint.opacity(0.55), tint],
+                    colors: [textTint, textTint.opacity(0.55), textTint],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
-                )) : AnyShapeStyle(tint))
+                )) : AnyShapeStyle(textTint))
                 .lineLimit(1)
                 .padding(.horizontal, badge.size == "lg" ? 9 : 7)
                 .padding(.vertical, 2.5)
                 .background {
                     if isOutline {
                         Capsule().fill(Color.clear)
-                    } else if isGradient {
-                        Capsule().fill(LinearGradient(
-                            colors: [surface.opacity(0.95), surface.opacity(0.55)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ))
                     } else {
-                        Capsule().fill(surface)
+                        Capsule().fill(fillStyle)
                     }
                 }
                 .overlay {
                     if isOutline {
-                        Capsule().strokeBorder(tint.opacity(0.9), lineWidth: 1)
+                        Capsule().strokeBorder(tint.opacity(0.9), lineWidth: isNeon ? 1.4 : 1)
                     }
                 }
                 .overlay {
@@ -245,17 +284,19 @@ struct CommentBadgeChip: View {
                     }
                 }
                 .clipShape(Capsule())
-                .shadow(color: isGlow ? tint.opacity(animate ? 0.55 : 0.3) : .clear, radius: 5)
+                .shadow(color: (isGlow || isNeon) ? tint.opacity(animate ? 0.55 : 0.3) : .clear, radius: isNeon ? 7 : 5)
                 .scaleEffect(isPulsing && animate ? 1.06 : 1)
-                .offset(y: isFloating && animate ? -1.5 : 0)
+                .offset(y: isFloating && animate ? -1.5 : (isBouncing && animate ? -2 : 0))
+                .rotationEffect(.degrees(isTilting ? (animate ? 2 : -2) : 0))
+                .opacity(isBlinking && animate ? 0.55 : 1)
                 .task(id: badge.id) { await runAnimation() }
         }
     }
 
     /// Nhịp chuyển động nhẹ, chỉ chạy khi nhãn thật sự có hiệu ứng.
     private func runAnimation() async {
-        guard (isShine || isPulsing || isGlow || isFloating), !reduceMotion else { return }
-        let duration = isShine ? 1.6 : 1.9
+        guard (isShine || isPulsing || isGlow || isFloating || isNeon || isBouncing || isTilting || isBlinking), !reduceMotion else { return }
+        let duration = isShine ? 1.6 : (isBlinking ? 1.9 : 2.2)
         while !Task.isCancelled {
             withAnimation(.easeInOut(duration: duration)) { animate.toggle() }
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
@@ -307,13 +348,18 @@ struct StyledCommentName: View {
     }
 
     var body: some View {
-        Text(name)
-            .font(.auroraLabel(12, weight: (isAdmin || effect != "none") ? .heavy : .bold))
+        nameText
             .lineLimit(1)
             .foregroundStyle(textStyle)
-            .shadow(color: glowColor, radius: effect == "glow" || isAdmin ? 6 : 0)
+            .shadow(color: glowColor, radius: (effect == "glow" || isAdmin || effect == "neon" || effect == "breathe") ? 6 : (effect == "shadow" ? 3 : 0))
             .opacity(effect == "shine" && phase ? 0.88 : 1)
             .task(id: effect) { await runEffect() }
+    }
+
+    /// `Text.underline()` không tham số để không phụ thuộc API mới của hệ điều hành.
+    private var nameText: Text {
+        let base = Text(name).font(.auroraLabel(12, weight: (isAdmin || effect != "none") ? .heavy : .bold))
+        return effect == "underline" ? base.underline() : base
     }
 
     private var textStyle: AnyShapeStyle {
@@ -336,6 +382,40 @@ struct StyledCommentName: View {
             ))
         case "outline":
             return AnyShapeStyle(baseColor.opacity(0.98))
+        case "gold":
+            return AnyShapeStyle(LinearGradient(
+                colors: [
+                    Color(red: 0.97, green: 0.84, blue: 0.45),
+                    Color(red: 0.72, green: 0.53, blue: 0.04),
+                    Color(red: 1.0, green: 0.91, blue: 0.66),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            ))
+        case "ice":
+            return AnyShapeStyle(LinearGradient(
+                colors: [
+                    Color(red: 0.81, green: 0.94, blue: 1.0),
+                    Color(red: 0.39, green: 0.70, blue: 1.0),
+                    Color.white,
+                    Color(red: 0.49, green: 0.88, blue: 1.0),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            ))
+        case "fire":
+            return AnyShapeStyle(LinearGradient(
+                colors: [
+                    Color(red: 1.0, green: 0.82, blue: 0.40),
+                    Color(red: 1.0, green: 0.48, blue: 0.24),
+                    Color(red: 1.0, green: 0.30, blue: 0.30),
+                    Color(red: 1.0, green: 0.70, blue: 0.28),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            ))
+        case "neon", "breathe":
+            return AnyShapeStyle(baseColor)
         default:
             if isAdmin && customColor == nil {
                 return AnyShapeStyle(LinearGradient(colors: Self.adminColors, startPoint: .leading, endPoint: .trailing))
@@ -347,13 +427,16 @@ struct StyledCommentName: View {
     private var glowColor: Color {
         switch effect {
         case "glow": return baseColor.opacity(0.7)
+        case "neon": return baseColor.opacity(0.85)
+        case "breathe": return baseColor.opacity(phase ? 0.85 : 0.25)
+        case "shadow": return Color.black.opacity(0.8)
         case "rainbow": return Color.white.opacity(phase ? 0.4 : 0.15)
         default: return isAdmin ? Self.adminColors[1].opacity(0.55) : .clear
         }
     }
 
     private func runEffect() async {
-        guard !reduceMotion, effect == "shine" || effect == "rainbow" else { return }
+        guard !reduceMotion, effect == "shine" || effect == "rainbow" || effect == "breathe" else { return }
         let duration = effect == "shine" ? 1.5 : 2.6
         while !Task.isCancelled {
             withAnimation(.easeInOut(duration: duration)) { phase.toggle() }

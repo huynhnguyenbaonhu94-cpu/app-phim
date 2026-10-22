@@ -168,8 +168,10 @@ final class CommentsStore: ObservableObject {
 
         var parentID: String?
         if let replyingTo, !replyingTo.isPending, !replyingTo.isFailed {
-            let root = rootID(for: replyingTo, in: index())
-            if root != replyingTo.id { parentID = root }
+            // Gắn vào đúng bình luận được trả lời thay vì nhảy lên bình luận gốc, để
+            // giao diện hiển thị chính xác đang trả lời ai. Cây vẫn chỉ lồng một cấp
+            // vì `rebuild()` gom mọi trả lời về bình luận gốc của nhánh.
+            parentID = replyingTo.id
         }
 
         let draft = MovieComment(
@@ -253,8 +255,9 @@ final class CommentsStore: ObservableObject {
 
     func delete(_ comment: MovieComment, author: CommentAuthor) {
         guard comment.isMine else { return }
-        let removed = all.filter { $0.id == comment.id || $0.parentID == comment.id }
-        all.removeAll { $0.id == comment.id || $0.parentID == comment.id }
+        let removed = subtree(of: comment)
+        let removedIDs = Set(removed.map(\.id))
+        all.removeAll { removedIDs.contains($0.id) }
         rebuild()
         if comment.isLocal || isLocalOnly || comment.isPending || comment.isFailed {
             persist()
@@ -274,6 +277,24 @@ final class CommentsStore: ObservableObject {
     }
 
     // MARK: - Dựng cây
+
+    /// Bình luận được chọn cùng toàn bộ trả lời nằm bên dưới nó (có thể nhiều tầng).
+    private func subtree(of comment: MovieComment) -> [MovieComment] {
+        var found: [MovieComment] = [comment]
+        var seen: Set<String> = [comment.id]
+        var frontier: Set<String> = [comment.id]
+        for _ in 0..<8 {
+            let children = all.filter { item in
+                guard let parent = item.parentID, !parent.isEmpty else { return false }
+                return frontier.contains(parent) && !seen.contains(item.id)
+            }
+            if children.isEmpty { break }
+            children.forEach { seen.insert($0.id) }
+            frontier = Set(children.map(\.id))
+            found.append(contentsOf: children)
+        }
+        return found
+    }
 
     private func index() -> [String: MovieComment] {
         Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

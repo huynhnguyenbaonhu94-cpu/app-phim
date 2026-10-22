@@ -230,9 +230,28 @@ final class Store
             Respond::fail('Bạn chỉ xoá được bình luận của mình.');
         }
 
-        // Xoá cả các trả lời trực thuộc để không còn trả lời mồ côi.
-        $statement = $this->pdo->prepare('DELETE FROM comments WHERE id = ? OR parent_id = ?');
-        $statement->execute([$id, $id]);
+        // Trả lời gắn vào đúng bình luận người dùng chọn nên nhánh có thể sâu vài tầng:
+        // gom toàn bộ nhánh rồi xoá một lượt để không còn trả lời mồ côi.
+        $doomed = [$id];
+        $frontier = [$id];
+        for ($depth = 0; $depth < 8 && $frontier !== []; $depth++) {
+            $placeholders = implode(',', array_fill(0, count($frontier), '?'));
+            $statement = $this->pdo->prepare("SELECT id FROM comments WHERE parent_id IN ($placeholders)");
+            $statement->execute($frontier);
+            $next = [];
+            foreach ($statement->fetchAll() as $child) {
+                $childId = (int) $child['id'];
+                if (!in_array($childId, $doomed, true)) {
+                    $doomed[] = $childId;
+                    $next[] = $childId;
+                }
+            }
+            $frontier = $next;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($doomed), '?'));
+        $statement = $this->pdo->prepare("DELETE FROM comments WHERE id IN ($placeholders)");
+        $statement->execute($doomed);
     }
 
     private function find(int $id): ?array

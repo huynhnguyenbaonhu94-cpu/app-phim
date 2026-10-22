@@ -665,11 +665,28 @@ export async function addMovieComment(
   return toCommentView(row, profiles.get(row.userId), viewer);
 }
 
-/** Xoá bình luận và các trả lời trực thuộc để không còn trả lời mồ côi. */
+/**
+ * Xoá bình luận cùng toàn bộ trả lời nằm bên dưới.
+ *
+ * Trả lời giờ gắn vào đúng bình luận mà người dùng chọn nên nhánh có thể sâu vài
+ * tầng; duyệt theo tầng để không để lại trả lời mồ côi.
+ */
 export async function deleteMovieComment(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  await db.delete(movieComments).where(or(eq(movieComments.id, id), eq(movieComments.parentId, id)));
+
+  const doomed = new Set<number>([id]);
+  let frontier: number[] = [id];
+  for (let depth = 0; depth < 8 && frontier.length > 0; depth += 1) {
+    const children = await db
+      .select({ id: movieComments.id })
+      .from(movieComments)
+      .where(inArray(movieComments.parentId, frontier));
+    frontier = children.map((row) => row.id).filter((childId) => !doomed.has(childId));
+    frontier.forEach((childId) => doomed.add(childId));
+  }
+
+  await db.delete(movieComments).where(inArray(movieComments.id, Array.from(doomed)));
 }
 
 /** Ghim hoặc bỏ ghim một bình luận (chỉ admin gọi được). */

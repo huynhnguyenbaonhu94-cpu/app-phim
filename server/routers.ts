@@ -52,16 +52,16 @@ const badgeInput = z.object({
   imageUrl: z.string().trim().max(600).optional().default(""),
   color: z.string().trim().max(24).optional().default(""),
   background: z.string().trim().max(60).optional().default(""),
-  style: z.enum(["solid", "gradient", "outline", "glow", "shine", "pulse"]).optional().default("solid"),
+  style: z.enum(["solid", "gradient", "outline", "glow", "shine", "pulse", "neon", "gold", "hologram"]).optional().default("solid"),
   font: z.enum(["sans", "serif", "mono", "script"]).optional().default("sans"),
   size: z.enum(["sm", "md", "lg"]).optional().default("md"),
-  animation: z.enum(["none", "pulse", "shine", "float"]).optional().default("none"),
+  animation: z.enum(["none", "pulse", "shine", "float", "bounce", "tilt", "blink"]).optional().default("none"),
 });
 
 /** Kiểu chữ tên người dùng: màu và hiệu ứng làm nổi bật. */
 const nameStyleInput = z.object({
   color: z.string().trim().max(24).optional().default(""),
-  effect: z.enum(["none", "glow", "gradient", "shine", "rainbow", "outline"]).optional().default("none"),
+  effect: z.enum(["none", "glow", "gradient", "shine", "rainbow", "outline", "neon", "gold", "ice", "fire", "shadow", "underline", "breathe"]).optional().default("none"),
 });
 
 /** Chuẩn hoá danh sách nhãn trước khi lưu: bỏ nhãn rỗng, giới hạn số lượng. */

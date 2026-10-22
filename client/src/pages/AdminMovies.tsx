@@ -60,10 +60,28 @@ function sortComments(items: CommentItem[]) {
 type GroupedComment = CommentItem & { replies: CommentItem[] };
 
 function groupComments(items: CommentItem[]): GroupedComment[] {
-  const roots: GroupedComment[] = items.filter(comment => comment.parentId === null).map(comment => ({ ...comment, replies: [] }));
+  const byId = new Map(items.map(comment => [comment.id, comment]));
+  const roots: GroupedComment[] = items
+    .filter(comment => comment.parentId === null || !byId.has(comment.parentId))
+    .map(comment => ({ ...comment, replies: [] }));
   const rootsById = new Map(roots.map(comment => [comment.id, comment]));
-  items.filter(comment => comment.parentId !== null).forEach(reply => {
-    const root = rootsById.get(reply.parentId as string);
+
+  // Trả lời có thể nằm dưới một trả lời khác: đi ngược lên tới bình luận gốc của nhánh
+  // để không bỏ sót bình luận nào khỏi danh sách quản trị.
+  const rootIdOf = (comment: CommentItem): string => {
+    let current = comment;
+    for (let hop = 0; hop < 12; hop += 1) {
+      const parentId = current.parentId;
+      if (!parentId) return current.id;
+      const parent = byId.get(parentId);
+      if (!parent) return current.id;
+      current = parent;
+    }
+    return current.id;
+  };
+
+  items.filter(comment => !rootsById.has(comment.id)).forEach(reply => {
+    const root = rootsById.get(rootIdOf(reply));
     if (root) root.replies.push(reply);
   });
   return roots;

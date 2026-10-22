@@ -144,23 +144,59 @@ struct CommentsSection: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let replyTarget {
-                HStack(spacing: 7) {
-                    Image(systemName: "arrowshape.turn.up.left.fill")
-                        .font(.system(size: 9, weight: .black))
-                    Text("Đang trả lời \(replyTarget.authorName)")
-                        .font(.auroraLabel(10, weight: .bold))
+                HStack(spacing: 9) {
+                    avatar(replyTarget, isReply: true)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrowshape.turn.up.left.fill")
+                                .font(.system(size: 8.5, weight: .black))
+                            Text("Đang trả lời")
+                                .font(.auroraLabel(10, weight: .bold))
+                            StyledCommentName(
+                                name: replyTarget.displayName,
+                                style: replyTarget.nameStyle,
+                                isAdmin: replyTarget.isAdmin,
+                                isMine: replyTarget.isMine
+                            )
+                        }
+                        .foregroundStyle(Color.auroraViolet)
                         .lineLimit(1)
+
+                        Text(snippet(replyTarget.content))
+                            .font(.auroraBody(9.5))
+                            .foregroundStyle(Color.auroraTextTertiary)
+                            .lineLimit(1)
+                    }
+
                     Spacer(minLength: 0)
+
                     Button {
                         withAnimation(Motion.tap) { self.replyTarget = nil }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.auroraViolet.opacity(0.9))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Huỷ trả lời")
                 }
-                .foregroundStyle(Color.auroraViolet)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.auroraViolet.opacity(0.10))
+                }
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color.auroraViolet.opacity(0.8))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 7)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.auroraViolet.opacity(0.28), lineWidth: 1)
+                }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
@@ -275,22 +311,22 @@ struct CommentsSection: View {
         } else if comments.totalCount == 0 {
             StateMessage(icon: "bubble.left.and.bubble.right", title: "Chưa có bình luận", detail: isSignedIn ? "Hãy là người đầu tiên chia sẻ cảm nhận về phim này." : "Đăng nhập để là người đầu tiên bình luận về phim này.")
         } else {
+            let lookup = commentIndex
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(comments.threads) { thread in
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         commentRow(thread.root, isReply: false)
                         if !thread.replies.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 ForEach(thread.replies) { reply in
-                                    commentRow(reply, isReply: true)
+                                    commentRow(
+                                        reply,
+                                        isReply: true,
+                                        replyTo: lookup[reply.parentID ?? ""] ?? thread.root
+                                    )
                                 }
                             }
-                            .padding(.leading, 14)
-                            .overlay(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                    .fill(Color.white.opacity(0.08))
-                                    .frame(width: 2)
-                            }
+                            .padding(.leading, 12)
                         }
                     }
                 }
@@ -298,11 +334,25 @@ struct CommentsSection: View {
         }
     }
 
-    private func commentRow(_ comment: MovieComment, isReply: Bool) -> some View {
+    /// Tra cứu bình luận theo id để biết mỗi trả lời đang hướng tới ai.
+    private var commentIndex: [String: MovieComment] {
+        var map: [String: MovieComment] = [:]
+        for thread in comments.threads {
+            map[thread.root.id] = thread.root
+            for reply in thread.replies { map[reply.id] = reply }
+        }
+        return map
+    }
+
+    private func commentRow(_ comment: MovieComment, isReply: Bool, replyTo: MovieComment? = nil) -> some View {
         HStack(alignment: .top, spacing: isReply ? 9 : 11) {
             avatar(comment, isReply: isReply)
 
             VStack(alignment: .leading, spacing: 5) {
+                if isReply, let replyTo {
+                    replyContext(replyTo)
+                }
+
                 HStack(spacing: 6) {
                     nameLabel(comment)
                     CommentBadgeRow(badges: comment.visibleBadges)
@@ -349,9 +399,13 @@ struct CommentsSection: View {
                                     composerFocused = true
                                 }
                             } label: {
-                                Text("Trả lời")
-                                    .font(.auroraLabel(10, weight: .semibold))
-                                    .foregroundStyle(Color.auroraTextSecondary)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrowshape.turn.up.left")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text("Trả lời")
+                                        .font(.auroraLabel(10, weight: .semibold))
+                                }
+                                .foregroundStyle(replyTarget?.id == comment.id ? Color.auroraViolet : Color.auroraTextSecondary)
                             }
                             .buttonStyle(.plain)
                         }
@@ -370,7 +424,66 @@ struct CommentsSection: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, isReply ? 10 : 2)
+        .padding(.horizontal, isReply ? 11 : 0)
+        .background {
+            if isReply {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.045))
+            }
+        }
+        .overlay(alignment: .leading) {
+            if isReply {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color.auroraViolet.opacity(0.85), Color.auroraViolet.opacity(0.12)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .frame(width: 2.5)
+                    .padding(.vertical, 9)
+            }
+        }
+        .overlay {
+            if isReply, replyTarget?.id == comment.id {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.auroraViolet.opacity(0.5), lineWidth: 1.2)
+            }
+        }
+        .animation(Motion.gentle, value: replyTarget?.id)
+    }
+
+    /// Dòng ngữ cảnh "Trả lời ai" kèm trích đoạn ngắn của bình luận được trả lời.
+    private func replyContext(_ target: MovieComment) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrowshape.turn.up.left.fill")
+                .font(.system(size: 8.5, weight: .black))
+                .foregroundStyle(Color.auroraViolet)
+            Text("Trả lời")
+                .font(.auroraLabel(9.5, weight: .bold))
+                .foregroundStyle(Color.auroraTextSecondary)
+            StyledCommentName(
+                name: target.displayName,
+                style: target.nameStyle,
+                isAdmin: target.isAdmin,
+                isMine: target.isMine
+            )
+            if !target.content.isEmpty {
+                Text("· " + snippet(target.content))
+                    .font(.auroraBody(9.5))
+                    .foregroundStyle(Color.auroraTextTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Rút gọn nội dung thành một dòng ngắn để làm trích đoạn ngữ cảnh.
+    private func snippet(_ text: String) -> String {
+        let flat = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return flat.count > 40 ? String(flat.prefix(40)) + "…" : flat
     }
 
     @ViewBuilder

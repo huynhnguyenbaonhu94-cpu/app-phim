@@ -4164,3 +4164,60 @@ body {
 .admin-edit-card .admin-avatar-actions .admin-style-note,
 .admin-edit-card .admin-avatar-actions .admin-tv-error { font-size: 12.5px; }
 @media (max-width: 620px) { .admin-edit-card .admin-avatar-row { grid-template-columns: 1fr; } }
+
+/* ===== Danh sách chọn tự dựng (thay <select> của trình duyệt) ===== */
+.sel-field { position: relative; }
+.sel-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: rgba(255, 255, 255, .05); border: 1px solid var(--line, rgba(255, 255, 255, .12)); border-radius: 10px; padding: 9px 11px; color: inherit; font-size: 13.5px; font-family: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease; }
+.sel-trigger:hover { border-color: rgba(210, 243, 107, .45); }
+.sel-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.sel-field.is-open .sel-trigger { border-color: #d2f36b; box-shadow: 0 0 0 3px rgba(210, 243, 107, .12); }
+.sel-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sel-value.is-placeholder { color: var(--muted, #9aa0a6); }
+.sel-caret { flex: 0 0 auto; opacity: .7; transition: transform .18s ease; }
+.sel-field.is-open .sel-caret { transform: rotate(180deg); opacity: 1; }
+.sel-menu { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; right: 0; max-height: 264px; overflow-y: auto; padding: 6px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .14); background: #12161b; box-shadow: 0 18px 40px rgba(0, 0, 0, .55); display: grid; gap: 2px; }
+.sel-menu::-webkit-scrollbar { width: 8px; }
+.sel-menu::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .18); border-radius: 99px; }
+.sel-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: #dfe3e8; font-size: 13px; font-family: inherit; text-align: left; cursor: pointer; }
+.sel-option.is-cursor { background: rgba(255, 255, 255, .07); }
+.sel-option.is-active { color: #d2f36b; font-weight: 700; }
+.sel-option.is-active.is-cursor { background: rgba(210, 243, 107, .14); }
+
+/* ===== Hàng tài khoản: ảnh đại diện chữ cái đầu, chữ dễ đọc hơn ===== */
+.admin-account-avatar { width: 38px; height: 38px; border-radius: 12px; font-size: 15px; font-weight: 800; letter-spacing: .02em; background: linear-gradient(135deg, #d2f36b, #86c02f); color: #10160a; }
+.admin-account-copy { min-width: 0; gap: 4px; }
+.admin-account-copy strong { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
+.admin-account-copy > span { font-size: 12px; }
+.admin-account-copy > small { font-size: 11.5px; }
+.admin-edit-avatar span { font-size: 18px; font-weight: 800; color: #d2f36b; }
+.admin-badge-preview > div { background: linear-gradient(90deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .11)); }
+
+/* ===== Sửa hiệu ứng viền chữ: trước đây viền lấy `currentColor` mà chữ đặt
+   trong suốt nên tên biến mất khỏi khung xem trước. Giờ viền lấy đúng màu đã chọn. ===== */
+.cin-name--outline { -webkit-text-stroke: 1px var(--cin-name-color, #d2f36b); color: transparent; }
+
+/* ===== Thêm hiệu ứng cho tên người dùng ===== */
+.cin-name--neon { color: var(--cin-name-color, #d2f36b); text-shadow: 0 0 4px var(--cin-name-color, #d2f36b), 0 0 12px var(--cin-name-color, #d2f36b), 0 0 26px rgba(255, 255, 255, .35); }
+.cin-name--gold { background-image: linear-gradient(100deg, #f7d774 10%, #b8860b 35%, #ffe9a8 55%, #d4a017 80%, #f7d774 95%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: cinNameShine 3.4s linear infinite; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .55)); }
+.cin-name--ice { background-image: linear-gradient(100deg, #cfefff 10%, #63b3ff 40%, #ffffff 55%, #7ee0ff 75%, #cfefff 95%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: cinNameShine 3.6s linear infinite; }
+.cin-name--fire { background-image: linear-gradient(100deg, #ffd166 8%, #ff7b3d 38%, #ff4d4d 58%, #ffb347 78%, #ffd166 96%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: cinNameShine 3.2s linear infinite; filter: drop-shadow(0 0 8px rgba(255, 123, 61, .45)); }
+.cin-name--shadow { text-shadow: 0 2px 0 rgba(0, 0, 0, .85), 0 4px 10px rgba(0, 0, 0, .65); }
+.cin-name--underline { text-decoration: underline; text-decoration-color: var(--cin-name-color, #d2f36b); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.cin-name--breathe { color: var(--cin-name-color, #d2f36b); animation: cinNameBreathe 2.6s ease-in-out infinite; }
+
+@keyframes cinNameBreathe {
+  0%, 100% { text-shadow: 0 0 3px var(--cin-name-color, #d2f36b); }
+  50% { text-shadow: 0 0 10px var(--cin-name-color, #d2f36b), 0 0 22px var(--cin-name-color, #d2f36b); }
+}
+
+/* ===== Thêm kiểu nhãn và chuyển động cho nhãn ===== */
+.cin-badge--neon { border-color: currentColor; box-shadow: 0 0 8px currentColor, inset 0 0 6px rgba(255, 255, 255, .22); }
+.cin-badge--gold { background-image: linear-gradient(135deg, #f7d774, #b8860b 45%, #ffe9a8); color: #3a2a05; border-color: #f0c674; box-shadow: 0 1px 0 rgba(255, 255, 255, .35) inset; }
+.cin-badge--hologram { background-image: linear-gradient(120deg, #7ee787, #63b3ff 25%, #c792ea 50%, #ff9ecb 75%, #7ee787); background-size: 260% 100%; color: #0b0f14; border-color: transparent; animation: cinNameShine 4.2s linear infinite; }
+.cin-badge--anim-bounce { animation: cinBadgeBounce 1.7s ease-in-out infinite; }
+.cin-badge--anim-tilt { animation: cinBadgeTilt 2.5s ease-in-out infinite; }
+.cin-badge--anim-blink { animation: cinBadgeBlink 1.9s steps(2, end) infinite; }
+
+@keyframes cinBadgeBounce { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-2.5px); } }
+@keyframes cinBadgeTilt { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg); } }
+@keyframes cinBadgeBlink { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }

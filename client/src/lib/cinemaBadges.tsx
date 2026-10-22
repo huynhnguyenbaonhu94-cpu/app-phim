@@ -5,11 +5,24 @@
  * Mọi nơi hiển thị đều đi qua tệp này để nhãn trên web giống hệt nhãn trong app.
  */
 
-export type BadgeStyle = "solid" | "gradient" | "outline" | "glow" | "shine" | "pulse";
+export type BadgeStyle = "solid" | "gradient" | "outline" | "glow" | "shine" | "pulse" | "neon" | "gold" | "hologram";
 export type BadgeFont = "sans" | "serif" | "mono" | "script";
 export type BadgeSize = "sm" | "md" | "lg";
-export type BadgeAnimation = "none" | "pulse" | "shine" | "float";
-export type NameEffect = "none" | "glow" | "gradient" | "shine" | "rainbow" | "outline";
+export type BadgeAnimation = "none" | "pulse" | "shine" | "float" | "bounce" | "tilt" | "blink";
+export type NameEffect =
+  | "none"
+  | "glow"
+  | "gradient"
+  | "shine"
+  | "rainbow"
+  | "outline"
+  | "neon"
+  | "gold"
+  | "ice"
+  | "fire"
+  | "shadow"
+  | "underline"
+  | "breathe";
 
 export type CinemaBadge = {
   id: string;
@@ -26,11 +39,11 @@ export type CinemaBadge = {
 
 export type CinemaNameStyle = { color: string; effect: NameEffect };
 
-const STYLES: BadgeStyle[] = ["solid", "gradient", "outline", "glow", "shine", "pulse"];
+const STYLES: BadgeStyle[] = ["solid", "gradient", "outline", "glow", "shine", "pulse", "neon", "gold", "hologram"];
 const FONTS: BadgeFont[] = ["sans", "serif", "mono", "script"];
 const SIZES: BadgeSize[] = ["sm", "md", "lg"];
-const ANIMATIONS: BadgeAnimation[] = ["none", "pulse", "shine", "float"];
-const EFFECTS: NameEffect[] = ["none", "glow", "gradient", "shine", "rainbow", "outline"];
+const ANIMATIONS: BadgeAnimation[] = ["none", "pulse", "shine", "float", "bounce", "tilt", "blink"];
+const EFFECTS: NameEffect[] = ["none", "glow", "gradient", "shine", "rainbow", "outline", "neon", "gold", "ice", "fire", "shadow", "underline", "breathe"];
 
 export function emptyBadge(index: number): CinemaBadge {
   return {
@@ -120,7 +133,12 @@ export function BadgeChipList({ badges }: { badges: CinemaBadge[] }) {
 export function NameText({ name, style }: { name: string; style: CinemaNameStyle }) {
   if (style.effect === "none" && !style.color) return <>{name}</>;
   return (
-    <span className={`cin-name cin-name--${style.effect}`} style={{ color: style.color || undefined }}>
+    <span
+      className={`cin-name cin-name--${style.effect}`}
+      // `--cin-name-color` để hiệu ứng viền chữ vẽ được đường viền đúng màu:
+      // trước đây viền dùng `currentColor` mà chữ lại đặt trong suốt nên tên biến mất.
+      style={{ color: style.color || undefined, "--cin-name-color": style.color || "#ffffff" } as React.CSSProperties}
+    >
       {name}
     </span>
   );
