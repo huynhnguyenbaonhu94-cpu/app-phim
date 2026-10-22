@@ -5,8 +5,9 @@ Gói này là **phần backend** để upload lên cPanel Node.js Selector, khô
 ## 1. Gói này có gì
 
 ```text
-client/            website (Vite + React) + trang quản trị phim mới /admin/movies
-server/            tRPC API, gồm commentFeed.ts (bình luận real-time)
+dist/              BẢN ĐÃ DỰNG SẴN: index.js (server) + public/ (website) — không phải build lại
+client/            website (Vite + React) + trang quản trị phim /admin/movies
+server/            tRPC API, gồm commentFeed.ts (bình luận real-time), movieCredits.ts
 drizzle/           schema + migration
 shared/            kiểu dùng chung
 cpanel-comments/   dịch vụ bình luận PHP (tuỳ chọn, chỉ cần nếu không dùng Node)
@@ -16,23 +17,48 @@ package.json, tsconfig.json, vite.config.ts, drizzle.config.ts …
 Không có `mobile-swiftui/` (app iOS không cần cho backend) và không có `node_modules`
 (cPanel tự cài).
 
+**Quan trọng:** gói đã kèm sẵn `dist/` nên trên hosting **không cần chạy `npm run build`**.
+Đây cũng là cách tránh lỗi `Cannot find module @rollup/rollup-linux-x64-gnu` của `vite build`
+trên máy chủ dùng chung.
+
 ## 2. Các bước
 
 Đúng theo cấu hình bạn đang dùng: Application root `cinemora2`, URL
 `https://cungcapicloud.id.vn`, startup file `dist/index.js`.
 
 ```bash
-# 1. Giải nén đè vào thư mục ứng dụng (giữ nguyên node_modules cũ)
+# 1. Giải nén đè vào thư mục ứng dụng
 cd /home/vfviehep/cinemora2
 unzip -o /duong/dan/Cinemora-Backend-Cpanel.zip
 
-# 2. Cài dependency và build
+# 2. Chỉ cài dependency chạy thật (không cần dev, không cần build)
 source /home/vfviehep/nodevenv/cinemora2/22/bin/activate
-npm install --include=dev
-npm run build
+npm install --omit=dev --legacy-peer-deps
 ```
 
 Sau đó vào cPanel Node.js Selector bấm **Restart**.
+
+Nếu lần trước bạn đã xoá `dist` hoặc `node_modules` thì làm đúng ba bước trên là app chạy lại:
+`dist/` nằm trong gói, chỉ còn thiếu dependency nên `npm install` là đủ.
+
+### Nếu vẫn muốn build trên hosting
+
+Chỉ khi bạn sửa mã nguồn ngay trên hosting mới cần build. Khi đó:
+
+```bash
+source /home/vfviehep/nodevenv/cinemora2/22/bin/activate
+npm install --include=dev --legacy-peer-deps
+npm run build
+```
+
+Gói này đã khai báo sẵn `@rollup/rollup-linux-x64-gnu` trong `optionalDependencies` nên npm
+luôn cài đúng gói nhị phân cho Linux. Nếu vẫn gặp lỗi rollup, xoá hẳn rồi cài lại:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install --include=dev
+npm run build
+```
 
 ## 3. Không cần chạy SQL tay
 
@@ -51,7 +77,29 @@ Log khởi động cần thấy:
 Migration and default admin check completed.
 ```
 
-## 4. Environment variables
+## 4. Sự cố thường gặp
+
+### `export: '=43e64c…': not a valid identifier`
+
+Dòng này xuất hiện mỗi lần chạy `npm` hoặc `node`, nghĩa là biến môi trường `TMDB_API_KEY` bị
+khai báo sai trong cPanel (thiếu tên biến, chỉ có giá trị). Cách sửa:
+
+1. cPanel → **Setup Node.js App** → ứng dụng `cinemora2` → **Environment Variables**.
+2. Xoá biến đang bị lỗi, rồi thêm lại đúng hai ô: **Name** = `TMDB_API_KEY`,
+   **Value** = khoá TMDB (chỉ dán khoá, không thêm `export`, không thêm dấu `=` hay dấu ngoặc).
+3. Bấm **Save** rồi **Restart** ứng dụng.
+
+Hoặc gọn hơn: tạo tệp `.env` trong thư mục ứng dụng với đúng một dòng:
+
+```text
+TMDB_API_KEY=43e64c7e89ca344b6e5b540fca083afb
+```
+
+Server đã nạp `.env` sẵn (`import "dotenv/config"`) nên không cần khai báo trong cPanel nữa.
+Khi biến này thiếu, trang quản trị vẫn lấy được diễn viên vì nút *Lấy từ TMDB/IMDB* tự chuyển
+sang gọi từ trình duyệt, nhưng nên sửa để máy chủ gọi được và nhanh hơn.
+
+## 5. Environment variables
 
 Không cần thêm biến mới cho đợt này. Giữ nguyên những biến đang chạy:
 
@@ -65,7 +113,7 @@ ADMIN_EMAIL=…
 ADMIN_PASSWORD=…
 ```
 
-## 5. Kiểm tra sau khi Restart
+## 6. Kiểm tra sau khi Restart
 
 1. `https://cungcapicloud.id.vn/admin/movies` — chọn một phim, xem bình luận.
 2. Mở app, gửi một bình luận ở cùng phim đó → trang quản trị phải nhảy bình luận lên
@@ -76,14 +124,14 @@ ADMIN_PASSWORD=…
 5. Trong app: **Tài khoản & thiết bị** → chạm vào ảnh đại diện → chọn ảnh → ảnh phải hiện
    ở mọi bình luận của tài khoản đó.
 
-## 6. Lưu ý
+## 7. Lưu ý
 
 - Đừng xoá thư mục `uploads/` khi giải nén, poster truyền hình đang nằm trong đó.
 - Không upload `node_modules`; nếu đã lỡ có thì xoá rồi `npm install` lại.
 - Nếu `npm run build` báo thiếu dependency, chạy `npm install --include=dev` trước.
 - `cpanel-comments/` chỉ là phương án dự phòng khi hosting không chạy được Node; dùng nó
   thì app sẽ tự lùi về làm mới bình luận mỗi 6 giây và không có ghim/nhãn quyền.
-## 7. Xử lý sự cố
+## 8. Xử lý sự cố
 
 ### Lỗi khi đặt Nhãn hiển thị (badge)
 

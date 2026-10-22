@@ -18,6 +18,8 @@ struct CommentsSection: View {
     @State private var showLogin = false
     @State private var pendingDelete: MovieComment?
     @State private var sentPulse = 0
+    /// Mốc thời gian tự đổi mỗi 30 giây để nhãn "vừa xong", "3 giờ" luôn đúng.
+    @State private var clock = Date()
     @FocusState private var composerFocused: Bool
 
     private var author: CommentAuthor {
@@ -45,6 +47,13 @@ struct CommentsSection: View {
         .auroraReveal(4)
         .sensoryFeedback(.success, trigger: sentPulse)
         .task(id: movie.slug) { comments.start(slug: movie.slug, author: author) }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if Task.isCancelled { break }
+                clock = Date()
+            }
+        }
         .onDisappear { comments.stop() }
         .onChange(of: store.accountUser?.id) { _, _ in
             // Đăng nhập xong thì nạp lại với tư cách thành viên.
@@ -296,6 +305,7 @@ struct CommentsSection: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     nameLabel(comment)
+                    CommentBadgeRow(badges: comment.visibleBadges)
                     if comment.isAdmin { AdminBadge() }
                     if comment.isMine && !comment.isAdmin {
                         Text("BẠN")
@@ -307,7 +317,7 @@ struct CommentsSection: View {
                             .background(Capsule().fill(Color.auroraViolet.opacity(0.16)))
                     }
                     Spacer(minLength: 6)
-                    Text(comment.relativeTime)
+                    Text(comment.relativeTime(from: clock))
                         .font(.auroraBody(9))
                         .foregroundStyle(Color.auroraTextTertiary)
                 }
@@ -403,22 +413,13 @@ struct CommentsSection: View {
     @ViewBuilder
     private func nameLabel(_ comment: MovieComment) -> some View {
         HStack(spacing: 6) {
-            if comment.isAdmin {
-                // Tên của quản trị viên phải nổi bật giữa danh sách.
-                Text(comment.displayName)
-                    .font(.auroraLabel(12, weight: .heavy))
-                    .foregroundStyle(LinearGradient(
-                        colors: [Color(red: 0.44, green: 0.72, blue: 1.0), Color(red: 0.16, green: 0.48, blue: 1.0)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ))
-                    .lineLimit(1)
-            } else {
-                Text(comment.displayName)
-                    .font(.auroraLabel(12, weight: .bold))
-                    .foregroundStyle(comment.isMine ? Color.auroraViolet : Color.white.opacity(0.92))
-                    .lineLimit(1)
-            }
+            // Quản trị viên mặc định nổi bật; nếu được đặt kiểu riêng thì kiểu riêng thắng.
+            StyledCommentName(
+                name: comment.displayName,
+                style: comment.nameStyle,
+                isAdmin: comment.isAdmin,
+                isMine: comment.isMine
+            )
             if comment.isPinned {
                 statusChip(text: "ĐÃ GHIM", icon: "pin.fill", tint: Color.auroraSky)
             }

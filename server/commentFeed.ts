@@ -43,6 +43,16 @@ export function publishComments(slug: string): void {
 }
 
 /**
+ * Báo thay đổi cho mọi phim đang được theo dõi.
+ *
+ * Dùng khi thông tin người bình luận đổi (nhãn, kiểu tên, ảnh đại diện) — lúc đó danh
+ * sách bình luận cũ ở mọi phim đều cần vẽ lại, không chỉ phim vừa có bình luận mới.
+ */
+export function publishAllComments(): void {
+  for (const slug of Array.from(revisions.keys())) publishComments(slug);
+}
+
+/**
  * Chờ tối đa `timeoutMs` cho tới khi phim có thay đổi mới hơn `since`.
  * Trả về ngay nếu đã có thay đổi từ trước.
  */

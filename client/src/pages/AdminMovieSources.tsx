@@ -5,6 +5,7 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import BulkEpisodesInput from "@/components/BulkEpisodesInput";
 
 type MovieSourceEpisode = {
   id: number;
@@ -41,9 +42,21 @@ type EpisodeDraft = {
 type EpisodeFormProps = {
   initial?: EpisodeDraft & { existingUploaded?: boolean };
   onSubmit: (payload: EpisodePayload) => Promise<void>;
+  /** Thêm một lượt nhiều tập (ô dán danh sách) — chỉ dùng cho form "Thêm tập". */
+  onSubmitMany?: (items: EpisodePayload[]) => Promise<{ added: number; skipped: number }>;
+  /** Tập đang có của nguồn, dùng để phát hiện trùng khi admin dán danh sách. */
+  existingEpisodes?: Array<{ name: string; streamUrl: string }>;
   onCancel?: () => void;
   submitLabel: string;
 };
+
+/** Cuộn tới đúng tập vừa mở form sửa để không bị khuất trong danh sách có thanh cuộn. */
+function scrollEpisodeIntoView(id: number) {
+  window.requestAnimationFrame(() => {
+    const node = document.querySelector(`[data-episode-id="${id}"]`);
+    node?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
 
 function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -57,13 +70,16 @@ function readFileAsBase64(file: File) {
   });
 }
 
-function EpisodeForm({ initial, onSubmit, onCancel, submitLabel }: EpisodeFormProps) {
+function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCancel, submitLabel }: EpisodeFormProps) {
   const subtitleModeName = useId();
   const [draft, setDraft] = useState<EpisodeDraft>(initial || { name: "", streamUrl: "", subtitleUrl: "", subtitleMode: "url" });
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const uploadSubtitle = trpc.movieSources.uploadSubtitle.useMutation();
+  // Chế độ dán danh sách chỉ có khi thêm tập mới; sửa tập vẫn dùng form một tập.
+  const bulkAvailable = submitLabel === "Thêm tập" && Boolean(onSubmitMany);
+  const [mode, setMode] = useState<"single" | "bulk">("single");
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -109,8 +125,20 @@ function EpisodeForm({ initial, onSubmit, onCancel, submitLabel }: EpisodeFormPr
     }
   }
 
+  if (bulkAvailable && mode === "bulk" && onSubmitMany) {
+    return <BulkEpisodesInput
+      existingEpisodes={existingEpisodes || []}
+      pending={saving}
+      onClose={() => { setMode("single"); setError(null); }}
+      onSubmit={async items => {
+        const result = await onSubmitMany(items.map(item => ({ ...item, subtitleVtt: null })));
+        return result;
+      }}
+    />;
+  }
+
   return <form className="admin-source-episode-form" onSubmit={submit}>
-    <div className="admin-source-form-heading"><strong>{submitLabel === "Thêm tập" ? "Thêm tập mới" : "Chỉnh sửa tập"}</strong>{onCancel && <button type="button" className="admin-tv-refresh" onClick={onCancel} aria-label="Huỷ sửa"><X size={14} /></button>}</div>
+    <div className="admin-source-form-heading"><strong>{submitLabel === "Thêm tập" ? "Thêm tập mới" : "Chỉnh sửa tập"}</strong>{bulkAvailable ? <button type="button" className="admin-source-mode-switch" onClick={() => { setMode("bulk"); setError(null); }}>Dán danh sách nhiều tập</button> : onCancel && <button type="button" className="admin-tv-refresh" onClick={onCancel} aria-label="Huỷ sửa"><X size={14} /></button>}</div>
     <div className="admin-source-form-grid">
       <label>Tên tập<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} placeholder="Ví dụ: Tập 01" required /></label>
       <label>Link M3U8<input type="url" value={draft.streamUrl} onChange={event => setDraft({ ...draft, streamUrl: event.target.value })} placeholder="https://…/playlist.m3u8" required /></label>
@@ -155,11 +183,12 @@ export default function AdminMovieSources() {
   const addSource = trpc.movieSources.addSource.useMutation({ onSuccess: async () => { setSourceName(""); setAddingSource(false); await refreshSources("Đã thêm nguồn mới."); }, onError: error => setActionError(error.message) });
   const renameSource = trpc.movieSources.renameSource.useMutation({ onSuccess: () => refreshSources("Đã đổi tên nguồn.").catch(() => undefined), onError: error => setActionError(error.message) });
   const removeSource = trpc.movieSources.removeSource.useMutation({ onSuccess: () => refreshSources("Đã xoá nguồn và toàn bộ tập.").catch(() => undefined), onError: error => setActionError(error.message) });
+  const addEpisodes = trpc.movieSources.addEpisodes.useMutation();
   const addEpisode = trpc.movieSources.addEpisode.useMutation({ onSuccess: async (_episode, variables) => { setAddFormRevision(current => ({ ...current, [variables.sourceId]: (current[variables.sourceId] || 0) + 1 })); await refreshSources("Đã thêm tập mới."); }, onError: error => setActionError(error.message) });
   const updateEpisode = trpc.movieSources.updateEpisode.useMutation({ onSuccess: async () => { setEditingEpisodeId(null); await refreshSources("Đã cập nhật tập phim."); }, onError: error => setActionError(error.message) });
   const removeEpisode = trpc.movieSources.removeEpisode.useMutation({ onSuccess: () => refreshSources("Đã xoá tập phim.").catch(() => undefined), onError: error => setActionError(error.message) });
   const reorderEpisodes = trpc.movieSources.reorderEpisodes.useMutation({ onSuccess: () => refreshSources("Đã cập nhật thứ tự tập.").catch(() => undefined), onError: error => setActionError(error.message) });
-  const anyPending = addSource.isPending || renameSource.isPending || removeSource.isPending || addEpisode.isPending || updateEpisode.isPending || removeEpisode.isPending || reorderEpisodes.isPending;
+  const anyPending = addSource.isPending || renameSource.isPending || removeSource.isPending || addEpisode.isPending || addEpisodes.isPending || updateEpisode.isPending || removeEpisode.isPending || reorderEpisodes.isPending;
 
   if (loading) return <PageShell><main className="content-wrap inner-page"><p>Đang kiểm tra quyền truy cập…</p></main></PageShell>;
   if (!user) return <PageShell><main className="content-wrap inner-page"><div className="empty-state"><ShieldCheck size={30} /><h3>Cần đăng nhập admin</h3><p>Đăng nhập tài khoản quản trị viên để quản lý nguồn và tập phim.</p><button className="button button-primary" onClick={() => setAuthOpen(true)}>Đăng nhập</button></div><AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /></main></PageShell>;
@@ -196,6 +225,17 @@ export default function AdminMovieSources() {
     await addEpisode.mutateAsync({ sourceId, ...payload });
   }
 
+  /** Thêm cả danh sách tập trong một lần gọi, dùng cho ô dán danh sách. */
+  async function handleAddEpisodes(sourceId: number, items: EpisodePayload[]) {
+    if (items.length === 0) return { added: 0, skipped: 0 };
+    const result = await addEpisodes.mutateAsync({
+      sourceId,
+      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl ?? null, subtitleVtt: item.subtitleVtt ?? null })),
+    });
+    await refreshSources(`Đã thêm ${result.added} tập${result.skipped.length > 0 ? `, bỏ qua ${result.skipped.length} dòng trùng` : ""}.`);
+    return { added: result.added, skipped: result.skipped.length };
+  }
+
   async function handleUpdateEpisode(id: number, payload: EpisodePayload) {
     await updateEpisode.mutateAsync({ id, ...payload });
   }
@@ -215,8 +255,8 @@ export default function AdminMovieSources() {
       {sourcesQuery.isLoading ? <p className="admin-movies-muted">Đang tải nguồn thủ công…</p> : sources.length === 0 ? <div className="admin-source-empty"><Database size={24} /><strong>Chưa có nguồn thủ công</strong><span>Bấm “Thêm nguồn” để tạo nguồn đầu tiên cho phim này.</span></div> : <div className="admin-manual-source-list">{sources.map(source => <article className="admin-manual-source-card" key={source.id}>
         <div className="admin-manual-source-heading"><div className="admin-manual-source-name"><input value={sourceNameDrafts[source.id] ?? source.name} onChange={event => setSourceNameDrafts({ ...sourceNameDrafts, [source.id]: event.target.value })} aria-label={`Tên nguồn ${source.name}`} /><button type="button" className="button button-ghost" disabled={renameSource.isPending || !(sourceNameDrafts[source.id] || "").trim() || sourceNameDrafts[source.id] === source.name} onClick={() => saveSourceName(source)}><Save size={14} /> Lưu tên</button></div><button type="button" className="button button-danger" disabled={removeSource.isPending} onClick={() => { if (window.confirm(`Xoá nguồn “${source.name}” và toàn bộ ${source.episodes.length} tập?`)) removeSource.mutate({ id: source.id }); }}><Trash2 size={14} /> Xoá nguồn</button></div>
         <div className="admin-manual-source-meta">{source.episodes.length} tập · Nguồn do admin thêm</div>
-        <div className="admin-episode-list">{source.episodes.length === 0 ? <p className="admin-movies-muted">Nguồn chưa có tập nào.</p> : source.episodes.map((episode, index) => <div className="admin-manual-episode-wrap" key={episode.id}><article className="admin-manual-episode"><div className="admin-manual-episode-copy"><strong>{episode.name}</strong><a href={episode.streamUrl} target="_blank" rel="noreferrer"><Link2 size={13} />{episode.streamUrl}</a>{episode.subtitleUrl ? <a href={episode.subtitleUrl} target="_blank" rel="noreferrer" className="admin-subtitle-link"><FileText size={13} />Phụ đề {episode.hasUploadedSubtitle ? "đã upload" : "VTT ngoài"}</a> : <span className="admin-no-subtitle">Chưa có phụ đề</span>}</div><div className="admin-episode-actions"><button type="button" className="admin-movies-action" disabled={index === 0 || reorderEpisodes.isPending} onClick={() => moveEpisode(source, index, -1)} title="Di chuyển lên"><ArrowUp size={14} /> Lên</button><button type="button" className="admin-movies-action" disabled={index === source.episodes.length - 1 || reorderEpisodes.isPending} onClick={() => moveEpisode(source, index, 1)} title="Di chuyển xuống"><ArrowDown size={14} /> Xuống</button><button type="button" className="admin-movies-action" disabled={anyPending} onClick={() => setEditingEpisodeId(editingEpisodeId === episode.id ? null : episode.id)}><Pencil size={14} /> Sửa</button><button type="button" className="admin-movies-action is-danger" disabled={removeEpisode.isPending} onClick={() => { if (window.confirm(`Xoá tập “${episode.name}”?`)) removeEpisode.mutate({ id: episode.id }); }}><Trash2 size={14} /> Xoá</button></div></article>{editingEpisodeId === episode.id && <EpisodeForm key={`edit-${episode.id}`} initial={editDraft(episode)} submitLabel="Lưu tập" onCancel={() => setEditingEpisodeId(null)} onSubmit={payload => handleUpdateEpisode(episode.id, payload)} />}</div>)}</div>
-        <EpisodeForm key={`add-${source.id}-${addFormRevision[source.id] || 0}`} submitLabel="Thêm tập" onSubmit={payload => handleAddEpisode(source.id, payload)} />
+        <div className="admin-episode-list">{source.episodes.length === 0 ? <p className="admin-movies-muted">Nguồn chưa có tập nào.</p> : source.episodes.map((episode, index) => <div className="admin-manual-episode-wrap" key={episode.id} data-episode-id={episode.id}><article className="admin-manual-episode"><div className="admin-manual-episode-copy"><strong>{episode.name}</strong><a href={episode.streamUrl} target="_blank" rel="noreferrer"><Link2 size={13} />{episode.streamUrl}</a>{episode.subtitleUrl ? <a href={episode.subtitleUrl} target="_blank" rel="noreferrer" className="admin-subtitle-link"><FileText size={13} />Phụ đề {episode.hasUploadedSubtitle ? "đã upload" : "VTT ngoài"}</a> : <span className="admin-no-subtitle">Chưa có phụ đề</span>}</div><div className="admin-episode-actions"><button type="button" className="admin-movies-action" disabled={index === 0 || reorderEpisodes.isPending} onClick={() => moveEpisode(source, index, -1)} title="Di chuyển lên"><ArrowUp size={14} /> Lên</button><button type="button" className="admin-movies-action" disabled={index === source.episodes.length - 1 || reorderEpisodes.isPending} onClick={() => moveEpisode(source, index, 1)} title="Di chuyển xuống"><ArrowDown size={14} /> Xuống</button><button type="button" className="admin-movies-action" disabled={anyPending} onClick={() => { const next = editingEpisodeId === episode.id ? null : episode.id; setEditingEpisodeId(next); if (next) scrollEpisodeIntoView(episode.id); }}><Pencil size={14} /> Sửa</button><button type="button" className="admin-movies-action is-danger" disabled={removeEpisode.isPending} onClick={() => { if (window.confirm(`Xoá tập “${episode.name}”?`)) removeEpisode.mutate({ id: episode.id }); }}><Trash2 size={14} /> Xoá</button></div></article>{editingEpisodeId === episode.id && <EpisodeForm key={`edit-${episode.id}`} initial={editDraft(episode)} submitLabel="Lưu tập" onCancel={() => setEditingEpisodeId(null)} onSubmit={payload => handleUpdateEpisode(episode.id, payload)} />}</div>)}</div>
+        <EpisodeForm key={`add-${source.id}-${addFormRevision[source.id] || 0}`} submitLabel="Thêm tập" existingEpisodes={source.episodes.map(episode => ({ name: episode.name, streamUrl: episode.streamUrl }))} onSubmit={payload => handleAddEpisode(source.id, payload)} onSubmitMany={items => handleAddEpisodes(source.id, items)} />
       </article>)}</div>}
     </section>
   </main></PageShell>;

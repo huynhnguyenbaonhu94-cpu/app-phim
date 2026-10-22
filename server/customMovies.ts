@@ -16,7 +16,7 @@ import { getDb } from "./db";
 import { customMovies } from "../drizzle/schema";
 import type { Movie, MovieDetail } from "./cinema";
 import { registerStreamSource } from "./cinema";
-import { listMovieSources } from "./movieSources";
+import { listMovieSources, listSourceNamesBySlug } from "./movieSources";
 
 export type CustomMovieTag = { name: string; slug: string };
 /** Đầu vào từ biểu mẫu quản trị: slug có thể thiếu, sẽ tự sinh từ tên. */
@@ -322,6 +322,57 @@ function isCompleted(row: CustomMovieRow): boolean {
  * Quy ước giống API nguồn: nhiều lựa chọn trong cùng một nhóm là HOẶC, giữa các
  * nhóm là VÀ.
  */
+/**
+ * Bỏ dấu, hạ chữ thường và gom khoảng trắng để so khớp tên nguồn.
+ */
+function foldSourceName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Kiểu nguồn mà bộ lọc danh sách hỗ trợ, kèm các cách viết thường gặp. */
+const AUDIO_KIND_PATTERNS: Record<string, { phrases: string[]; tokens: string[] }> = {
+  vietsub: {
+    phrases: ["vietsub", "viet sub", "viesub", "phu de", "phude", "sub viet", "subviet"],
+    tokens: [],
+  },
+  thuyetminh: {
+    phrases: ["thuyet minh", "thuyetminh", "thuyet-minh"],
+    tokens: ["tm"],
+  },
+  longtieng: {
+    phrases: ["long tieng", "longtieng", "long-tieng"],
+    tokens: ["lt"],
+  },
+};
+
+/**
+ * Tên nguồn có đúng kiểu âm thanh mà bộ lọc yêu cầu không.
+ *
+ * Ví dụ nguồn "Vietsub" khớp `vietsub` và không khớp `thuyetminh`, nhờ vậy phim
+ * thủ công không còn lọt vào sai danh sách.
+ */
+export function sourceNameMatchesAudioKind(name: string, kind: string): boolean {
+  const pattern = AUDIO_KIND_PATTERNS[kind];
+  if (!pattern) return false;
+  const folded = foldSourceName(name);
+  if (!folded) return false;
+  if (pattern.phrases.some((phrase) => folded.includes(phrase))) return true;
+  return pattern.tokens.includes(folded);
+}
+
+/** Bộ lọc này có phải bộ lọc theo kiểu nguồn (vietsub/thuyết minh/lồng tiếng)? */
+function isAudioKind(kind: string): boolean {
+  return Object.prototype.hasOwnProperty.call(AUDIO_KIND_PATTERNS, kind);
+}
+
 export async function customMoviesForFilter(filter: CustomMovieFilter): Promise<Movie[]> {
   const rows = (await listCustomMovies()).filter((row) => row.isPublished);
   if (rows.length === 0) return [];
@@ -330,16 +381,28 @@ export async function customMoviesForFilter(filter: CustomMovieFilter): Promise<
   const categories = (filter.categories ?? []).map((value) => value.trim()).filter(Boolean);
   const countries = (filter.countries ?? []).map((value) => value.trim()).filter(Boolean);
   const years = (filter.years ?? []).filter((value) => Number.isInteger(value));
+  // Chỉ đọc bảng nguồn khi bộ lọc thật sự cần tới kiểu nguồn.
+  const needsSourceNames = kinds.some(isAudioKind);
+  const sourceNames = needsSourceNames ? await listSourceNamesBySlug() : null;
 
   return rows
     .filter((row) => {
       if (kinds.length) {
+        const ownSources = sourceNames?.get(row.slug) ?? [];
         const matched = kinds.some((kind) => {
           if (kind === "single") return row.movieType === "single";
           if (kind === "series" || kind === "shows") return row.movieType === "series";
           if (kind === "ongoing") return row.movieType === "series" && !isCompleted(row);
           if (kind === "completed") return row.movieType === "series" && isCompleted(row);
-          // latest, vietsub, thuyetminh…: phim thủ công luôn được coi là hợp lệ.
+          // Vietsub / Thuyết minh / Lồng tiếng: phải có nguồn đúng kiểu đó, nếu
+          // không thì phim thủ công sẽ lọt vào sai danh sách.
+          if (isAudioKind(kind)) {
+            // Ngôn ngữ admin ghi cho phim (ví dụ "Vietsub AI") cũng được tính, nên
+            // phim vẫn nằm đúng danh sách Vietsub dù nguồn đặt tên khác.
+            if (sourceNameMatchesAudioKind(row.lang ?? "", kind)) return true;
+            return ownSources.some((name) => sourceNameMatchesAudioKind(name, kind));
+          }
+          // latest, subteam, trailer…: phim thủ công luôn được coi là hợp lệ.
           return true;
         });
         if (!matched) return false;

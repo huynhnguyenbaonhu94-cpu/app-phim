@@ -116,5 +116,10 @@
     "overrides": {
       "tailwindcss>nanoid": "3.3.7"
     }
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.63.5",
+    "@rollup/rollup-linux-x64-musl": "4.63.5",
+    "@rollup/rollup-linux-arm64-gnu": "4.63.5"
   }
 }

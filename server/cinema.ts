@@ -539,8 +539,16 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
   }
   // Phim admin thêm thủ công được trộn vào danh sách, ưu tiên theo thời gian cập nhật.
   if (page === 1) {
+    // Bộ lọc một lựa chọn gửi ở `kind` (số ít), lọc nhiều lựa chọn gửi ở `kinds`.
+    // Trước đây chỉ đọc `kinds` nên khi chọn một mục, phim thủ công bỏ qua hẳn bước
+    // kiểm tra kiểu nguồn và lọt vào sai danh sách (vietsub hiện trong thuyết minh).
+    const requestedKinds = uniqueStrings(
+      [...(input.kinds || []), ...(input.kind ? [input.kind] : [])].filter(
+        (value) => value && value in listEndpoints,
+      ),
+    );
     const custom = await customMoviesForFilter({
-      kinds: uniqueStrings((input.kinds || []).filter((value) => value && value in listEndpoints)),
+      kinds: requestedKinds,
       categories: uniqueStrings(input.categories?.length ? input.categories : input.category ? [input.category] : []),
       countries: uniqueStrings(input.countries?.length ? input.countries : input.country ? [input.country] : []),
       years: Array.from(new Set((input.years?.length ? input.years : input.year ? [input.year] : []).filter((value) => Number.isInteger(value)))),

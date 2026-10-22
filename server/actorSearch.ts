@@ -191,6 +191,24 @@ function tmdbAuth(): { headers: Record<string, string>; params: URLSearchParams 
   return { headers, params };
 }
 
+/**
+ * Gọi TMDB bằng khoá đã cấu hình (dùng chung cho tìm diễn viên và lấy credits).
+ *
+ * Ném lỗi rõ ràng khi chưa có khoá để trang quản trị biết đường báo admin.
+ */
+export async function tmdbGet<T = unknown>(
+  path: string,
+  params: Record<string, string> = {},
+  timeoutMs = 8000,
+): Promise<T> {
+  if (!tmdbKey()) throw new Error("Chưa cấu hình TMDB_API_KEY");
+  const { headers, params: auth } = tmdbAuth();
+  const search = new URLSearchParams(params);
+  auth.forEach((value, name) => search.set(name, value));
+  const url = `https://api.themoviedb.org/3${path}?${search.toString()}`;
+  return (await fetchJson(url, headers, timeoutMs)) as T;
+}
+
 /** Tên chỉ gồm ký tự Latinh (tránh hiện tên gốc tiếng Hàn, Trung, Nhật…). */
 function isLatinName(value: string): boolean {
   return value.length > 0 && /^[\x20-\x7E]+$/.test(value);

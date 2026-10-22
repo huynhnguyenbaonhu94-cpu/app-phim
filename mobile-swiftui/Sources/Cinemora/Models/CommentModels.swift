@@ -153,6 +153,11 @@ struct MovieComment: Identifiable, Hashable, Codable {
     /// Do chính người dùng hiện tại viết.
     var isMine = false
 
+    /// Danh sách nhãn hiển thị (nhiều nhãn cho một tài khoản).
+    var badges: [CommentBadge] = []
+    /// Màu và hiệu ứng làm nổi bật tên người dùng.
+    var nameStyle: CommentNameStyle?
+
     var isAdmin: Bool {
         let role = CommentAuthor.normalize(authorRole)
         if role.contains("admin") || role.contains("quantri") || role.contains("moderator") { return true }
@@ -162,10 +167,14 @@ struct MovieComment: Identifiable, Hashable, Codable {
         return CommentAuthor.fallbackAdminEmails.contains(email)
     }
 
-    /// Tên kèm nhãn tuỳ chỉnh, ví dụ "Test v1 (VIP)".
-    var displayName: String {
-        guard let badge, !badge.isEmpty else { return authorName }
-        return "\(authorName) (\(badge))"
+    /// Tên hiển thị. Nhãn không còn ghép vào tên vì đã hiện thành chip riêng cạnh tên.
+    var displayName: String { authorName }
+
+    /// Nhãn dùng để hiện cạnh tên: ưu tiên danh sách nhãn mới, tài khoản cũ vẫn dùng một nhãn.
+    var visibleBadges: [CommentBadge] {
+        if !badges.isEmpty { return badges }
+        guard let badge, !badge.isEmpty else { return [] }
+        return [CommentBadge(legacyText: badge)]
     }
 
     var initials: String {
@@ -175,9 +184,12 @@ struct MovieComment: Identifiable, Hashable, Codable {
     }
 
     /// "vừa xong", "5 phút", "3 giờ", "2 ngày", sau đó là ngày cụ thể.
-    var relativeTime: String {
+    var relativeTime: String { relativeTime(from: Date()) }
+
+    /// Bản nhận mốc thời gian từ ngoài để danh sách tự đổi nhãn khi thời gian trôi qua.
+    func relativeTime(from now: Date) -> String {
         guard let createdAt else { return "" }
-        let seconds = Date().timeIntervalSince(createdAt)
+        let seconds = now.timeIntervalSince(createdAt)
         if seconds < 45 { return "vừa xong" }
         if seconds < 3600 { return "\(max(1, Int(seconds / 60))) phút" }
         if seconds < 86_400 { return "\(Int(seconds / 3600)) giờ" }
@@ -198,6 +210,8 @@ struct MovieComment: Identifiable, Hashable, Codable {
         authorEmail: String? = nil,
         createdAt: Date?,
         badge: String? = nil,
+        badges: [CommentBadge] = [],
+        nameStyle: CommentNameStyle? = nil,
         avatar: String? = nil,
         isPinned: Bool = false,
         canDelete: Bool = false,
@@ -215,6 +229,8 @@ struct MovieComment: Identifiable, Hashable, Codable {
         self.authorEmail = authorEmail
         self.createdAt = createdAt
         self.badge = badge
+        self.badges = badges
+        self.nameStyle = nameStyle
         self.avatar = avatar
         self.isPinned = isPinned
         self.canDelete = canDelete
@@ -236,6 +252,8 @@ struct MovieComment: Identifiable, Hashable, Codable {
         case isMine, mine, isOwner, is_owner
         case user, author_user, authorUser
         case badge, customRole, custom_role, label
+        case badges, badgesJson, badges_json, customBadges, custom_badges
+        case nameStyle, name_style
         case avatar, userAvatar, user_avatar, photo, picture
         case isPinned, pinned, is_pinned
         case canDelete, can_delete
@@ -254,6 +272,12 @@ struct MovieComment: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(authorEmail, forKey: .authorEmail)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(badge, forKey: .badge)
+        if !badges.isEmpty, let data = try? JSONEncoder().encode(badges), let json = String(data: data, encoding: .utf8) {
+            try container.encode(json, forKey: .badges)
+        }
+        if let nameStyle, let data = try? JSONEncoder().encode(nameStyle), let json = String(data: data, encoding: .utf8) {
+            try container.encode(json, forKey: .nameStyle)
+        }
         try container.encodeIfPresent(avatar, forKey: .avatar)
         try container.encode(isPinned, forKey: .isPinned)
         try container.encode(canDelete, forKey: .canDelete)
@@ -308,6 +332,12 @@ struct MovieComment: Identifiable, Hashable, Codable {
 
         let rawBadge = try firstValue(String.self, in: container, keys: [.badge, .customRole, .custom_role, .label])
         badge = (rawBadge?.isEmpty ?? true) ? nil : rawBadge
+
+        let rawBadges = try firstValue(FlexibleBadges.self, in: container, keys: [.badges, .badgesJson, .badges_json, .customBadges, .custom_badges])
+        badges = rawBadges?.badges ?? []
+
+        let rawNameStyle = try firstValue(FlexibleNameStyle.self, in: container, keys: [.nameStyle, .name_style])
+        nameStyle = rawNameStyle?.style
 
         let rawAvatar = try firstValue(String.self, in: container, keys: [.avatar, .userAvatar, .user_avatar, .photo, .picture])
         avatar = (rawAvatar?.isEmpty ?? true) ? nil : rawAvatar
@@ -470,5 +500,173 @@ struct CommentAuthor: Equatable {
     func matches(_ comment: MovieComment) -> Bool {
         if let id, let authorID = comment.authorID, !authorID.isEmpty { return id == authorID }
         return !name.isEmpty && comment.authorName.caseInsensitiveCompare(name) == .orderedSame
+    }
+}
+// MARK: - Nhãn hiển thị và kiểu tên người dùng
+
+/// Một nhãn hiển thị do quản trị viên đặt trên website.
+///
+/// Nhãn có thể là chữ (kèm màu, font, hiệu ứng) hoặc ảnh/GIF nhỏ hiện cạnh tên.
+/// Kích thước hiển thị trên app: cao 18pt, rộng tối đa 64pt.
+struct CommentBadge: Identifiable, Hashable, Codable {
+    var id: String
+    var type: String
+    var text: String
+    var imageURL: String
+    var color: String
+    var background: String
+    var style: String
+    var font: String
+    var size: String
+    var animation: String
+
+    var isImage: Bool { type == "image" && !imageURL.isEmpty }
+
+    init(
+        id: String = UUID().uuidString,
+        type: String = "text",
+        text: String = "",
+        imageURL: String = "",
+        color: String = "",
+        background: String = "",
+        style: String = "solid",
+        font: String = "sans",
+        size: String = "md",
+        animation: String = "none"
+    ) {
+        self.id = id
+        self.type = type
+        self.text = text
+        self.imageURL = imageURL
+        self.color = color
+        self.background = background
+        self.style = style
+        self.font = font
+        self.size = size
+        self.animation = animation
+    }
+
+    /// Tài khoản cũ chỉ có một nhãn chữ: dựng thành nhãn mặc định để không mất dữ liệu.
+    init(legacyText: String) {
+        self.init(id: "legacy", type: "text", text: legacyText)
+    }
+
+    private enum Keys: String, CodingKey {
+        case id, type, text, color, background, style, font, size, animation
+        case imageUrl, image_url, imageURL, url
+        case nameStyle, name_style
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        let rawID = (try? container.decode(String.self, forKey: .id)) ?? ""
+        id = rawID.isEmpty ? UUID().uuidString : rawID
+        let rawType = (try? container.decode(String.self, forKey: .type)) ?? "text"
+        type = rawType == "image" ? "image" : "text"
+        text = (try? container.decode(String.self, forKey: .text)) ?? ""
+        let rawImage = (try? container.decode(String.self, forKey: .imageURL))
+            ?? (try? container.decode(String.self, forKey: .imageUrl))
+            ?? (try? container.decode(String.self, forKey: .image_url))
+            ?? (try? container.decode(String.self, forKey: .url))
+        imageURL = rawImage ?? ""
+        color = (try? container.decode(String.self, forKey: .color)) ?? ""
+        background = (try? container.decode(String.self, forKey: .background)) ?? ""
+        style = CommentBadge.normalized(style: (try? container.decode(String.self, forKey: .style)) ?? "solid")
+        font = CommentBadge.normalized(font: (try? container.decode(String.self, forKey: .font)) ?? "sans")
+        size = CommentBadge.normalized(size: (try? container.decode(String.self, forKey: .size)) ?? "md")
+        animation = CommentBadge.normalized(animation: (try? container.decode(String.self, forKey: .animation)) ?? "none")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(text, forKey: .text)
+        try container.encode(imageURL, forKey: .imageURL)
+        try container.encode(color, forKey: .color)
+        try container.encode(background, forKey: .background)
+        try container.encode(style, forKey: .style)
+        try container.encode(font, forKey: .font)
+        try container.encode(size, forKey: .size)
+        try container.encode(animation, forKey: .animation)
+    }
+
+    /// Giá trị lạ do bản cập nhật sau này gửi lên sẽ rơi về mặc định thay vì làm vỡ giao diện.
+    private static func normalized(style value: String) -> String {
+        ["solid", "gradient", "outline", "glow", "shine", "pulse"].contains(value) ? value : "solid"
+    }
+
+    private static func normalized(font value: String) -> String {
+        ["sans", "serif", "mono", "script"].contains(value) ? value : "sans"
+    }
+
+    private static func normalized(size value: String) -> String {
+        ["sm", "md", "lg"].contains(value) ? value : "md"
+    }
+
+    private static func normalized(animation value: String) -> String {
+        ["none", "pulse", "shine", "float"].contains(value) ? value : "none"
+    }
+}
+
+/// Màu và hiệu ứng làm nổi bật tên người dùng khi bình luận.
+struct CommentNameStyle: Hashable, Codable {
+    var color: String
+    var effect: String
+
+    init(color: String = "", effect: String = "none") {
+        self.color = color
+        self.effect = effect
+    }
+
+    private enum Keys: String, CodingKey { case color, effect }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        color = (try? container.decode(String.self, forKey: .color)) ?? ""
+        let raw = (try? container.decode(String.self, forKey: .effect)) ?? "none"
+        effect = ["none", "glow", "gradient", "shine", "rainbow", "outline"].contains(raw) ? raw : "none"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        try container.encode(color, forKey: .color)
+        try container.encode(effect, forKey: .effect)
+    }
+}
+
+/// Máy chủ gửi danh sách nhãn dưới dạng chuỗi JSON; app cũng chấp nhận mảng object.
+struct FlexibleBadges: Decodable {
+    let badges: [CommentBadge]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let raw = try? container.decode(String.self) {
+            badges = FlexibleBadges.decode(raw)
+        } else if let list = try? container.decode([CommentBadge].self) {
+            badges = list
+        } else {
+            badges = []
+        }
+    }
+
+    static func decode(_ raw: String) -> [CommentBadge] {
+        guard !raw.isEmpty, let data = raw.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([CommentBadge].self, from: data)) ?? []
+    }
+}
+
+/// Kiểu tên có thể đến dưới dạng chuỗi JSON hoặc object.
+struct FlexibleNameStyle: Decodable {
+    let style: CommentNameStyle?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let raw = try? container.decode(String.self) {
+            guard !raw.isEmpty, let data = raw.data(using: .utf8) else { style = nil; return }
+            style = try? JSONDecoder().decode(CommentNameStyle.self, from: data)
+        } else {
+            style = try? container.decode(CommentNameStyle.self)
+        }
     }
 }

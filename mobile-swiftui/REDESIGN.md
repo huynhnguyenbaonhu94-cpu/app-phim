@@ -1840,3 +1840,407 @@ thống chọn luôn mục đó thay vì tạo bản trùng.
 Bản trước lưu 4 phần thông tin vào `localStorage` rồi nạp lại sau khi tạo phim, nên F5 hay bấm "Phim mới"
 vẫn thấy nguyên dữ liệu phim vừa lưu (ví dụ Klute). Nay bỏ hẳn việc đọc/ghi nháp: vào trang là form trắng,
 lưu xong cũng trắng, và bản nháp cũ còn sót trong trình duyệt được dọn tự động.
+
+## 67. Lọc "Phim Thuyết Minh" / "Phim Vietsub" trả về đúng phim thủ công
+
+**Nguyên nhân.** Trong `customMoviesForFilter`, mọi kiểu lọc không nằm trong nhóm đã xử lý riêng
+(`single`, `series`, `shows`, `ongoing`, `completed`) đều được coi là hợp lệ, kèm chú thích "phim thủ công
+luôn được coi là hợp lệ". Vì `vietsub`/`thuyetminh`/`longtieng` rơi vào nhánh này, phim thêm thủ công xuất
+hiện ở **mọi** danh sách theo nguồn — kể cả khi nguồn của nó chỉ là Vietsub.
+
+**Cách sửa.** Thêm phép so khớp kiểu nguồn dựa trên tên nguồn thật của phim:
+
+- `movieSources.listSourceNamesBySlug()` đọc tên nguồn của tất cả phim thủ công trong **một** truy vấn,
+  chỉ gọi khi bộ lọc thật sự cần (không tốn thêm truy vấn cho các lần lọc khác).
+- `sourceNameMatchesAudioKind(name, kind)` bỏ dấu tiếng Việt rồi so khớp: Vietsub khớp `vietsub`, `viet sub`,
+  `phụ đề`, `sub việt`; Thuyết minh khớp `thuyết minh` hoặc token `TM`; Lồng tiếng khớp `lồng tiếng` hoặc
+  token `LT`.
+- Phim thủ công chỉ vào danh sách Vietsub/Thuyết minh/Lồng tiếng khi **có ít nhất một nguồn đúng kiểu đó**.
+  Các bộ lọc khác (Mới cập nhật, Phim bộ, Phim lẻ, Đang chiếu…) giữ nguyên hành vi cũ.
+
+**Kiểm chứng.** Chạy 14 trường hợp tên nguồn thực tế qua hàm so khớp: `Vietsub` khớp `vietsub` và **không**
+khớp `thuyetminh`; `Thuyết minh`/`TM` khớp `thuyetminh`; `Lồng tiếng`/`LT` khớp `longtieng`; nguồn chung
+chung như `Nguồn 1` không lọt vào danh sách nào. Sửa ở tầng máy chủ nên **cả web và app** đều đúng.
+
+## 68. Ngôn ngữ có lựa chọn nhanh, lịch chọn ngày mới, lấy diễn viên & đạo diễn theo TMDB/IMDB ID
+
+**1. Ngôn ngữ (web).** Mục Ngôn ngữ từ ô nhập tự do thành danh sách chọn: *Vietsub*, *Thuyết minh*,
+*Lồng tiếng* và *Khác…*. Chọn *Khác…* thì hiện thêm ô nhập tự do (ví dụ "Vietsub AI") kèm dòng nhắc rằng
+phim vẫn nằm đúng danh sách lọc. Về phía máy chủ, `customMoviesForFilter` nay so khớp **cả ngôn ngữ của
+phim** lẫn tên nguồn, nên "Vietsub AI" vẫn được tính là Vietsub khi lọc.
+
+**2. Lịch chọn ngày (web).** Ô Ngày tạo thay lịch mặc định của hệ điều hành (khó bấm ra, phải chọc đúng
+biểu tượng nhỏ) bằng lịch riêng mở ngay dưới ô nhập: nút lùi/tiến tháng, ô chọn tháng, ô nhập năm để nhảy
+nhanh, lưới ngày kiểu Việt Nam (thứ Hai đầu tuần), đánh dấu ngày đang chọn và ngày hôm nay, kèm nút
+*Hôm nay* và *Xoá ngày*. Lịch đóng khi bấm ra ngoài hoặc ấn Esc, có hiệu ứng mở nhẹ. Vẫn gõ tay dd/mm/yyyy
+được như trước và giá trị gửi lên máy chủ không đổi.
+
+**3. Lấy diễn viên & đạo diễn theo TMDB/IMDB ID (web).** Thêm nút *Lấy từ TMDB/IMDB* ở mục 04. Dịch vụ mới
+`server/movieCredits.ts` dùng TMDB ID để gọi `movie/{id}/credits`, tự chuyển sang nhánh `tv/{id}/credits`
+cho phim bộ (lấy thêm `created_by` làm đạo diễn); nếu chỉ có IMDB ID thì tra qua `find/{id}` để đổi sang
+TMDB ID trước. Trả về tên phim, danh sách đạo diễn và diễn viên kèm ảnh; trang quản trị ghép vào form và
+bỏ qua người đã có. Kết quả nhớ tạm 10 phút. Nếu hosting không gọi được TMDB thì nút tự lấy từ trình duyệt
+(TMDB mở CORS) và báo rõ cho admin.
+
+**Kiểm chứng.** `fetchMovieCredits` chạy thật với 4 mã: TMDB `550` và IMDB `tt0137523` đều ra "Sàn Đấu Sinh
+Tử" + David Fincher + 6 diễn viên kèm ảnh; TMDB `1399` và IMDB `tt0903747` ra phim bộ với `created_by` làm
+đạo diễn. Bộ so khớp ngôn ngữ đúng 7/7 trường hợp, `tsc` sạch, `npm run build` và 14 test đều đạt.
+
+## 69. Sửa lỗi build trên hosting: gói backend kèm sẵn `dist`, khoá rollup theo nền tảng
+
+**Hiện tượng.** Chạy `npm install --include=dev && npm run build` trên cPanel báo:
+
+```text
+Error: Cannot find module @rollup/rollup-linux-x64-gnu
+    at requireWithFriendlyError (.../nodevenv/cinemora2/22/lib/node_modules/rollup/dist/native.js:121:9)
+```
+
+Nguyên nhân là lỗi nổi tiếng của npm với dependency tuỳ chọn (npm/cli#4828): `vite` cần gói nhị
+phân `@rollup/rollup-linux-x64-gnu` nhưng npm bỏ qua khi cài từ lockfile, rồi Node vớ phải bản
+`rollup` toàn cục trong nodevenv — bản này không có file `.node` cho Linux. Vì `dist` bị xoá
+trước khi build nên ứng dụng dừng luôn.
+
+**Ba thay đổi để không còn gặp lại:**
+
+1. **Gói backend kèm sẵn `dist/`** (`dist/index.js` + `dist/public/`) — bản đã dựng trong lúc đóng
+   gói. Trên hosting chỉ cần `npm install --omit=dev --legacy-peer-deps` rồi Restart, **không cần
+   `npm run build`** nên không còn phụ thuộc `vite`/`rollup`.
+2. **Khai báo rõ gói nhị phân rollup** trong `optionalDependencies` của `package.json` và
+   `package-lock.json` (`@rollup/rollup-linux-x64-gnu`, `…-musl`, `…-arm64-gnu`) để nếu admin vẫn
+   muốn build tại chỗ thì npm luôn cài đúng gói cho Linux.
+3. **Tài liệu `DEPLOY-CPANEL-VI.md`**: quy trình mới không build, kèm mục *Sự cố thường gặp* giải
+   thích cảnh báo `export: '=43e64c…': not a valid identifier` (biến `TMDB_API_KEY` bị khai báo
+   thiếu tên trong cPanel) và cách sửa — khai lại đúng Name/Value hoặc tạo tệp `.env`, vì server
+   đã nạp `.env` bằng `dotenv/config`.
+
+**Kiểm chứng.** Trong gói: `dist/index.js` chứa `fetchMovieCredits` và phần lọc theo ngôn ngữ phim;
+JS/CSS của website chứa nút *Lấy từ TMDB/IMDB*, danh sách Ngôn ngữ, lịch chọn ngày và lời gọi
+route `fetchCredits`. `npm install --dry-run` chạy sạch với lockfile mới.
+
+## 70. Sửa danh sách Ngôn ngữ, lịch chọn ngày và nút lấy diễn viên/đạo diễn
+
+**1. Danh sách Ngôn ngữ nhảy về "Chưa chọn".** Khi chọn *Khác…*, giá trị ô chọn được tính lại từ
+chuỗi ngôn ngữ đang trống nên rơi về "Chưa chọn", dù ô nhập tự do đã hiện. Nay trạng thái "đang chọn
+Khác" được ghi nhớ riêng (`langOther`) và dùng làm giá trị của ô chọn, nên chọn *Khác…* là danh sách
+giữ đúng *Khác…*; mở lại phim đã lưu có ngôn ngữ tự do cũng tự bật đúng trạng thái này.
+
+**2. Giao diện chọn tháng của lịch.** Ô Ngày tạo trước đây dùng `<select>` của hệ điều hành nên bấm
+vào hiện một danh sách dài, lệch khỏi khung và che cả form. Nay tên tháng là một nút trong đầu lịch;
+bấm vào sẽ mở lưới 12 tháng (T1–T12) gọn trong khung lịch, tháng đang xem được tô vàng, chọn xong
+quay lại lưới ngày ngay. Nút lùi/tiến tháng, ô nhập năm, nút *Hôm nay* / *Xoá ngày* giữ nguyên.
+
+**3. Nút "Lấy từ TMDB/IMDB" không rõ vì sao không thêm ai.** Thông báo cũ chỉ nói "Không có gì mới để
+thêm" nên không biết TMDB không trả về gì hay mọi người đã có sẵn. Nay:
+
+- Luôn thử qua máy chủ trước, chỉ khi máy chủ lỗi mới gọi từ trình duyệt (trước đây dựa vào cờ
+  "máy chủ không gọi được" của phần tìm diễn viên nên có thể đi sai đường).
+- Thông báo nêu rõ số lượng: *"Đã thêm 12 diễn viên và 1 đạo diễn từ TMDB cho phim … (TMDB trả về
+  12 diễn viên và 1 đạo diễn)"*, hoặc *"TMDB trả về 12 diễn viên và 1 đạo diễn, nhưng tất cả đã có
+  trong danh sách nên không thêm gì."*, hoặc *"TMDB không trả về diễn viên hay đạo diễn nào cho mã
+  đã nhập."*
+- Khi cả hai phía đều lỗi thì báo gộp: *"Máy chủ: … · Trình duyệt: …"* (đọc được cả lỗi tRPC dạng
+  object), nhờ đó biết ngay là thiếu khoá TMDB, sai mã phim, hay máy chủ chưa có route mới.
+
+**4. Kèm sẵn khoá TMDB cho máy chủ.** Gói backend nay có tệp `.env` chứa `TMDB_API_KEY` để sau khi
+giải nén là máy chủ gọi được TMDB ngay, không phụ thuộc biến môi trường cấu hình sai trong cPanel.
+`dotenv` không ghi đè biến đã có nên nếu cPanel đã đặt đúng thì vẫn giữ giá trị cũ. `.env` nằm trong
+`.gitignore` nên không đi lên GitHub.
+
+## 71. Sửa gốc lỗi "TMDB trả về 2 diễn viên nhưng không thêm gì" và đổi danh sách Ngôn ngữ
+
+**1. Vì sao TMDB trả về diễn viên mà không thêm được ai.** Hàm so trùng tên cũ rút gọn tên bằng
+`.replace(/[^a-z0-9]/g, "")` — chỉ giữ chữ Latin. Tên chữ Hán/Hàn/Nhật bị rút thành chuỗi rỗng, nên
+mọi diễn viên loại này đều bị coi là "đã có trong danh sách" và bị bỏ qua, dù danh sách đang trống.
+Nay hàm chỉ bỏ khoảng trắng và dấu câu, **giữ chữ của mọi hệ chữ**, thêm cả xử lý `đ/Đ`:
+
+- `章子怡` → `章子怡` (trước đây → rỗng)
+- `장혁` → `장혁` (trước đây → rỗng)
+- `Trần Bảo Sơn` → `tranbaoson`, `Lee Min-ho` → `leeminho` (giữ nguyên như cũ)
+
+Thêm nữa, nếu tên không rút gọn được thì lấy chính tên gốc làm khoá, và chỉ bỏ qua khi tên trống hẳn
+— nên không còn trường hợp "trùng với chính chuỗi rỗng".
+
+**2. Danh sách Ngôn ngữ.** Ô chọn cũ là `<select>` của hệ điều hành nên bấm vào hiện bảng xanh mặc
+định của trình duyệt, lệch hẳn tông giao diện. Nay thay bằng danh sách tự vẽ: nút hiện ngôn ngữ đang
+chọn, bấm mở bảng nền tối đúng tông web, mục đang chọn được tô vàng kèm dấu ✓, chọn xong tự đóng,
+bấm ra ngoài hoặc Esc cũng đóng. Chọn *Khác…* vẫn mở ô nhập tự do như trước và giữ nguyên chữ đã gõ.
+
+## 72. Lấy đủ diễn viên và đạo diễn từ TMDB
+
+**1. Chọn đúng nhánh phim lẻ / phim bộ.** Mã số TMDB tồn tại ở cả hai nhánh `movie` và `tv`, nên
+nhập mã của một phim bộ có thể lấy nhầm một phim lẻ khác trùng số — đúng hiện tượng "TMDB trả về 2
+diễn viên và 0 đạo diễn". Nay nút gửi kèm *Loại phim* và *Tên phim* của form: phim bộ ưu tiên nhánh
+TV, phim lẻ ưu tiên nhánh movie; đồng thời đọc cả hai nhánh rồi chọn bản có tiêu đề khớp với tên
+phim đã nhập (trùng hẳn 3 điểm, chứa nhau 2 điểm). Tiêu đề TMDB trả về vẫn hiện trong thông báo nên
+nếu chọn nhầm là thấy ngay.
+
+**2. Lấy nhiều người hơn.** Trước đây cắt còn 12 diễn viên; nay lấy 30 (trần 60) cho cả đường máy
+chủ lẫn đường dự phòng từ trình duyệt.
+
+**3. Đạo diễn của phim bộ.** Ngoài job `Director`, nay nhận thêm job `Creator` trong crew và danh
+sách `created_by` của TMDB — nhờ đó phim bộ không còn trắng ô Đạo diễn.
+
+**4. Tên diễn viên.** Nếu TMDB thiếu `name` thì lấy `original_name`, tránh bỏ sót người.
+
+**5. Báo đúng lỗi khi thiếu khoá.** Trước đây mọi lỗi gọi TMDB đều bị nuốt và hiện thành "TMDB không
+có dữ liệu diễn viên". Nay lỗi thật (thiếu `TMDB_API_KEY`, mạng không ra ngoài…) được giữ lại và
+hiển thị nguyên văn. Gói backend cũng đã kèm `.env` chứa khoá TMDB nên máy chủ có khoá ngay.
+
+**Kết quả kiểm chứng thật:** mã 550 (Fight Club) → 30 diễn viên, đạo diễn David Fincher; mã 1399
+(Game of Thrones, khai phim bộ) → 14 diễn viên, 3 đạo diễn gồm cả người tạo phim.
+
+## 73. Phim bộ: lấy đủ diễn viên như trên web TMDB
+
+**Vì sao "Between Steps" chỉ ra 2 diễn viên.** TMDB có hai endpoint cho phim bộ:
+
+- `/tv/{id}/credits` → chỉ vài người ghi ở cấp phim (phim mới lên sóng thường đúng 2).
+- `/tv/{id}/aggregate_credits` → gom diễn viên của **mọi mùa**, đúng bằng danh sách trên web TMDB.
+
+Bản cũ chỉ gọi đường thứ nhất nên ra 2 người. Nay với phim bộ, hệ thống đọc cả hai đường và giữ bản
+nhiều diễn viên nhất; phim lẻ vẫn dùng `/movie/{id}/credits` (vốn đã đầy đủ).
+
+**Tên diễn viên.** Credits nay đọc với `language=en-US` nên tên người Hàn/Trung/Nhật hiện ở dạng
+Latin (`Choo Young-woo`, `Kim So-hyun`…) thay vì chữ bản địa; tiêu đề phim vẫn lấy theo tiếng Việt.
+
+**Đạo diễn phim bộ.** `aggregate_credits` gom đạo diễn của từng tập nên danh sách rất dài (Game of
+Thrones có 20 người). Nay cân theo `total_episode_count`, đưa người tạo phim (`created_by`) lên đầu
+và chỉ giữ **6 người chính**; dạng crew của aggregate cũng dùng mảng `jobs` nên đã đọc đúng cả hai
+dạng dữ liệu.
+
+**Kết quả kiểm chứng thật:**
+
+| Nhập | Trước | Sau |
+|---|---|---|
+| Between Steps (307106, phim bộ) | 2 diễn viên, 0 đạo diễn | **17 diễn viên** (đúng bằng web TMDB) + đạo diễn Ahn Pan-seok |
+| Game of Thrones (1399, phim bộ) | 14 diễn viên, 20 đạo diễn | **30 diễn viên**, 6 đạo diễn (D. B. Weiss, David Benioff, …) |
+| Fight Club (550, phim lẻ) | 12 diễn viên | **30 diễn viên** + David Fincher |
+
+## 74. Chọn đúng nhánh khi mã TMDB trùng giữa phim lẻ và phim bộ
+
+**Hiện tượng.** Nhập mã **16346** (Center Stage: Turn It Up, 21 diễn viên, 1 đạo diễn) nhưng hệ thống
+báo đã thêm 1 diễn viên cho phim **"Game Show in My Head"**. Tra thẳng TMDB thì thấy mã 16346 tồn tại
+ở cả hai nhánh:
+
+| Nhánh | Tiêu đề | Diễn viên |
+|---|---|---|
+| `movie/16346` | Center Stage: Turn It Up | **21** |
+| `tv/16346` | Game Show in My Head | **1** |
+
+Bản cũ chỉ dựa vào ô *Loại phim* của form, nên khi form để "Phim bộ" mà ô *Tên phim* còn trống thì
+lấy nhánh phim bộ và chỉ ra 1 diễn viên.
+
+**Cách sửa.**
+
+1. Tiêu đề dùng để đối chiếu nay lấy bản **tiếng Anh** (trước lấy tiếng Việt nên tên quốc tế như
+   "Fight Club" không khớp với "Sàn Đấu Sinh Tử").
+2. Khi tên phim trống, hoặc không khớp cả hai nhánh, hệ thống chọn nhánh **đầy đủ dữ liệu hơn hẳn**
+   (nhiều diễn viên gấp 3 lần và từ 5 người trở lên) — đúng trường hợp 1 so với 21.
+3. Thứ tự ưu tiên theo *Loại phim* vẫn được giữ khi hai nhánh tương đương nhau.
+
+**Kết quả kiểm chứng thật:**
+
+| Nhập | Sau khi sửa |
+|---|---|
+| 16346, tên trống, khai phim bộ | **Center Stage: Turn It Up — 21 diễn viên, đạo diễn Steven Jacobson** |
+| 16346, tên đúng, khai phim bộ | Center Stage: Turn It Up — 21 diễn viên |
+| 550 Fight Club, khai nhầm phim bộ | Fight Club — 30 diễn viên, David Fincher |
+| 1399 Game of Thrones, phim bộ | Game of Thrones — 30 diễn viên, 6 đạo diễn |
+| 307106 Between Steps, phim bộ | Between Steps — 17 diễn viên, đạo diễn Ahn Pan-seok |
+
+## 75. Sửa lỗi app "không thể phát video"
+
+**Nguyên nhân.** App ưu tiên phát thẳng link M3U8 của CDN ngoài, trong khi website phát qua proxy của
+máy chủ. Các CDN này chặn client không phải trình duyệt, nên chỉ cần CDN đổi cách kiểm tra là app
+không phát được phim nào — đúng hiện tượng "vô xem phim báo không thể phát video". Kiểm tra trực tiếp
+trên máy chủ thật cho thấy proxy của Cinemora chạy đủ cả ba bước:
+
+| Bước | Kết quả |
+|---|---|
+| Master playlist `/api/cinema/stream/<token>` | 200 · `application/vnd.apple.mpegurl` |
+| Playlist tập (variant) | 200 · 64 KB danh sách phân đoạn |
+| Phân đoạn video | 200 · `video/mp2t` |
+
+**Cách sửa.**
+
+1. `playbackURL` của tập phim nay **ưu tiên link proxy** của Cinemora, link CDN gốc chỉ là phương án
+   sau — đúng đường mà website đang phát được.
+2. Đường phát kèm phụ đề rời (`subtitledPlaylistURL`) cũng dùng link proxy, và nhận diện được link
+   proxy nên PiP vẫn có nhóm phụ đề hợp lệ.
+3. Route `/api/cinema/subtitled.m3u8` trước yêu cầu link video phải chứa `.m3u8`, nên khi app truyền
+   link proxy (không có đuôi này) máy chủ trả 400. Nay route chấp nhận cả hai dạng.
+
+**Lưu ý khi cập nhật.** Sửa ở cả hai phía nên cần cập nhật **cả backend lẫn app**: backend để route
+phụ đề nhận link proxy, app để phát qua proxy. Nếu chỉ cập nhật một phía, phim có phụ đề rời vẫn lỗi.
+
+## 76. Lọc theo kiểu nguồn và giữ vị trí trang khi quay lại
+
+**1. Phim Vietsub lọt vào danh sách Thuyết minh.** Bộ lọc gửi lên hai dạng: chọn **một** mục thì app
+gửi `kind` (số ít — "Phim Thuyết Minh", "Phim Vietsub"…), chọn **nhiều** mục thì gửi `kinds` (mảng).
+Đoạn gộp phim thủ công vào danh sách chỉ đọc `kinds`, nên khi chọn một mục thì danh sách kiểu nguồn
+rỗng và phim thủ công **bỏ qua hẳn** bước kiểm tra — vietsub hiện trong thuyết minh.
+
+Nay hai dạng được gộp lại trước khi lọc. Bảng đối chiếu tên nguồn cũng đã kiểm chứng:
+
+| Tên nguồn | Lọc theo | Kết quả |
+|---|---|---|
+| Vietsub | thuyết minh | loại — đúng |
+| Vietsub / Vietsub AI | vietsub | nhận — đúng |
+| Thuyết Minh / TM | thuyết minh | nhận — đúng |
+| Lồng Tiếng | vietsub | loại — đúng |
+
+**2. Xem phim xong quay lại bị về trang 1.** Mục Khám phá ghi nhớ "lần nạp trước" và tự nạp lại khi
+dữ liệu cũ quá 3 phút. Lần nạp đó xoá lưới và bắt đầu lại từ trang 1, nên đang xem ở trang 3 mà mở
+một phim rồi quay lại là mất vị trí.
+
+Nay nếu người dùng đang ở trang sâu (từ trang 2 trở đi) thì lần quay lại **giữ nguyên lưới và vị trí**,
+không tự nạp lại. Việc tự làm mới vẫn giữ cho trang 1, nơi không mất gì.
+
+## 77. Web: tua phim đang xem dở bị kéo về đoạn cũ
+
+**Hiện tượng.** Vào mục Thư viện → "Bạn đang xem dở", mở lại một phim và tua thì phim cứ nhảy về đúng
+đoạn đang xem dở; phải F5 trang mới tua được.
+
+**Nguyên nhân.** Trình phát áp vị trí xem dở trong sự kiện `canplay`:
+
+```tsx
+const seekTo = startAtRef.current;
+if (seekTo && seekTo > 5 && Math.abs(v.currentTime - seekTo) > 2) {
+  v.currentTime = seekTo;
+}
+```
+
+`canplay` không chỉ bật một lần khi tải nguồn: trình duyệt bật lại sự kiện này **sau mỗi lần tua** và
+sau mỗi lần đệm xong. Vì điều kiện chỉ so khoảng cách với vị trí cũ, mỗi lần người xem tua đi quá 2
+giây là trình phát lập tức kéo về đoạn cũ. Tải lại trang thì vị trí xem dở đã bằng đúng chỗ đang xem
+nên không còn bị kéo nữa — đúng như bạn thấy.
+
+**Cách sửa.** Vị trí xem dở giờ chỉ được áp **một lần cho mỗi lần nạp nguồn**, qua cờ
+`resumeSeekAppliedRef`:
+
+1. Đặt lại cờ khi nạp nguồn mới (đổi tập, đổi nguồn, đổi chất lượng) — resume vẫn hoạt động như cũ.
+2. Trong `canplay`, chỉ tua khi cờ chưa bật.
+3. Ngay khi người xem tự tua (`seeking`), bật cờ khoá — vị trí xem dở không bao giờ kéo ngược lại nữa.
+
+Nhờ vậy: mở phim từ "Bạn đang xem dở" vẫn vào đúng đoạn cũ, nhưng tua là ăn ngay, không cần F5.
+
+## 78. Dán danh sách nhiều tập cho một nguồn
+
+Trang **Quản lý nguồn & tập phim** → nguồn thêm thủ công → khối "Thêm tập mới" nay có thêm nút
+**"Dán danh sách nhiều tập"**. Chuyển sang chế độ đó, admin dán hàng chục tập một lượt theo mẫu:
+
+```
+Tập 01|https://v8.streamvsmov.com/video/…/master.m3u8|https://…/vie.vtt
+Tập 02|https://v8.streamvsmov.com/video/…/master.m3u8
+https://v8.streamvsmov.com/video/…/master.m3u8        ← bỏ tên, hệ thống tự đánh số
+```
+
+- Mỗi dòng một tập, ba cột ngăn bằng dấu `|` (nhận cả dấu Tab): **tên tập | link M3U8 | link sub**.
+  Cột phụ đề bỏ trống được; bỏ trống tên tập thì hệ thống tự đánh "Tập 01, Tập 02…".
+  Dòng trống và dòng bắt đầu bằng `#` được bỏ qua.
+
+**Kiểm tra một lượt khi bấm Thêm tập.** Toàn bộ danh sách được đọc và đối chiếu ngay khi dán, hiện
+thành bảng có số dòng:
+
+| Trường hợp | Kết quả |
+|---|---|
+| Trùng link M3U8 với tập đã có | dòng bôi đỏ, báo "Trùng link M3U8 với tập đã có" |
+| Trùng tên tập với tập đã có | dòng bôi đỏ, báo "Trùng tên tập với tập đã có" |
+| Trùng ngay trong danh sách vừa dán | dòng sau bị bôi đỏ |
+| Thiếu cột link M3U8 | dòng bôi đỏ, báo thiếu link |
+| Link không phải http/https | dòng bôi đỏ, báo sai định dạng |
+
+Khi bấm **Thêm … tập**, trang tự **cuộn tới đúng dòng lỗi đầu tiên**. Các dòng hợp lệ được thêm trong
+**một lần gọi máy chủ** (`movieSources.addEpisodes`) nên dán 100 tập vẫn nhanh, không bấm từng tập.
+Những dòng lỗi/trùng được **giữ lại trong ô nhập** để admin sửa rồi gửi tiếp.
+
+Máy chủ kiểm tra lại lần nữa trước khi ghi: bỏ qua dòng trùng tên hoặc trùng link đã có trong nguồn và
+trả về số tập đã thêm kèm danh sách bị bỏ qua, nên kể cả hai tab cùng thao tác cũng không sinh tập trùng.
+Thêm tập hàng loạt vẫn đánh dấu ngày cập nhật của phim như thao tác thủ công.
+
+## 79. Ô dán danh sách tập có mặt ở cả trang phim thủ công
+
+Khối **Nguồn & tập** trong trang *Thêm / chỉnh sửa phim thủ công* nay có nút **"Dán danh sách nhiều tập"**
+ngay trên ô "Thêm tập mới". Bấm vào là đổi sang ô dán danh sách, dán bao nhiêu tập cũng được trong một
+lượt, đúng định dạng `tên tập | link m3u8 | link sub (nếu có)`.
+
+Toàn bộ phần đọc – kiểm tra – bôi đỏ – cuộn tới dòng lỗi – gửi một lần được tách thành thành phần dùng
+chung `client/src/components/BulkEpisodesInput.tsx`, nên hai nơi dùng chung một cách xử lý:
+
+| Nơi dùng | Đường dẫn |
+|---|---|
+| Quản lý nguồn & tập phim | `/admin/movies/sources?slug=…` |
+| Nguồn & tập trong phim thủ công | `/admin/movies/custom/...` |
+
+Sửa định dạng hay cách báo lỗi ở thành phần dùng chung là cả hai trang cập nhật theo, không lệch nhau.
+Khi đang ở chế độ dán danh sách, nút **"Nhập từng tập"** đưa về lại ô nhập một tập kèm chất lượng và
+phụ đề upload như trước; chế độ sửa tập vẫn giữ nguyên form một tập.
+
+## 80. Danh sách tập gọn trong khung có thanh cuộn
+
+Trước đây nguồn có nhiều tập thì danh sách kéo dài hết trang, cuộn chuột rất mỏi. Nay khối tập của mỗi
+nguồn nằm trong một khung cao tối đa 336px, tự xuất hiện thanh cuộn khi vượt:
+
+- Áp dụng cho cả hai nơi: **Quản lý nguồn & tập phim** và khối **Nguồn & tập** trong trang phim thủ công
+  (cùng dùng lớp `.admin-episode-list`).
+- Nguồn ít tập thì khung tự co lại đúng số tập, không có thanh cuộn thừa.
+- Cuộn trong khung không kéo theo cả trang (`overscroll-behavior: contain`) nên lăn chuột tới cuối danh
+  sách không làm nhảy trang.
+- Thanh cuộn được tô theo tông giao diện (mảnh, màu vàng chanh mờ) thay vì thanh xám mặc định của trình
+  duyệt.
+- Bấm **Sửa** một tập thì trang tự cuộn nhẹ để hàng đang mở form nằm trong tầm nhìn, không bị khuất trong
+  khung.
+
+## 81. Nhãn hiển thị nhiều lớp, kiểu tên nổi bật, ảnh đại diện và giờ bình luận
+
+**Thời gian bình luận không còn "vừa xong" mãi.** Máy chủ đọc `UNIX_TIMESTAMP(createdAt)`
+để lấy thời điểm tuyệt đối thay vì tin vào múi giờ của MySQL, nên `createdAt` gửi cho app
+luôn đúng. Trên app, danh sách bình luận có thêm nhịp 30 giây tự cập nhật nhãn thời gian
+("vừa xong", "3 giờ", "2 ngày") nên để app mở lâu vẫn đúng.
+
+**Nhiều nhãn cho một tài khoản.** Cột `users.badges` lưu mảng JSON (tối đa 6 nhãn), mỗi nhãn:
+- *Chữ*: nội dung, màu chữ, màu nền, kiểu (đặc, chuyển sắc, viền, phát sáng, loé sáng, nhấp nháy),
+  font (không chân, có chân, đều, viết tay), kích thước (nhỏ, vừa, lớn), hiệu ứng chuyển động
+  (nhịp nhàng, loé sáng, bồng bềnh).
+- *Ảnh / GIF*: dán link hoặc tải tệp lên. Trên app ảnh cao **18pt**, rộng tối đa **64pt**
+  (làm ảnh cao 54–72px để nét trên màn hình Retina, dung lượng dưới 300KB; GIF nên dán link
+  để giữ chuyển động).
+
+**Làm nổi bật tên người dùng.** Cột `users.nameStyle` lưu màu và hiệu ứng tên: phát sáng,
+chuyển sắc, loé sáng, cầu vồng, viền chữ. Quản trị viên vẫn mặc định có tên xanh nổi bật và
+tích xanh động như trước; kiểu riêng đặt trên web sẽ thắng kiểu mặc định.
+
+**Quản lý ảnh đại diện.** Trang *Quản lý tài khoản* xem được ảnh lớn, tải ảnh mới lên (tự cắt
+vuông giữa ảnh rồi thu về 256px trước khi lưu), dán link, hoặc xoá ảnh đại diện. Mọi thay đổi
+phát tín hiệu làm mới nên app thấy ngay.
+
+**Đồng bộ tức thì.** Mọi thao tác đổi nhãn, đổi kiểu tên, đổi/xoá ảnh đại diện đều gọi
+`publishAllComments()`: bình luận **cũ** của người đó cũng hiện nhãn mới ngay, không phải
+bình luận lại.
+
+**Giao diện web.** Trình soạn nhãn nằm trong mục *Sửa* của từng tài khoản: chọn Chữ / Ảnh-GIF,
+xem trước ngay cạnh tên, gợi ý nhanh VIP · MOD · Kim cương. Danh sách bình luận trong trang
+*Quản lý phim* hiện đủ nhiều nhãn và tên nổi bật đúng như trên app.
+
+## 82. Sửa màn hình trắng khi quay lại danh sách "Xem thêm" và làm lại bố cục sửa tài khoản
+
+**Màn hình trắng sau khi xem chi tiết phim.** Trang chủ → *Xem thêm* một mục (ví dụ Phim
+Bộ) → mở một phim → *Trở lại*: cả danh sách biến mất, chỉ còn nút "Trở lại" và thanh tab.
+
+Nguyên nhân: hiệu ứng vào của mỗi ô do `AuroraReveal` điều khiển, và nó bắt đầu ở
+`opacity(0)` rồi bật lên trong `onAppear`. Lưới lười (`LazyVStack`/`LazyVGrid`) dựng lại các
+ô khi màn hình bị che rồi hiện lại — nhưng lần dựng lại đó `onAppear` có thể không chạy, nên
+trạng thái kẹt ở "chưa hiện" và cả danh sách trong suốt vĩnh viễn.
+
+Cách sửa: `AuroraReveal` **không còn dùng độ mờ làm điểm bắt đầu**. Chuyển động vào giờ chỉ
+dùng độ dời 10pt và tỉ lệ 0.985 → 1, nên dù animation có chạy hay không thì nội dung vẫn
+luôn đọc được. Kèm theo, `SectionListScreen` tự nạp lại danh sách nếu tỉnh dậy với danh sách
+rỗng, nên không còn trường hợp màn trắng.
+
+**Bố cục lại phần "Chỉnh sửa thông tin tài khoản"** trên web admin:
+- Đầu bảng có khối nhận diện: ảnh đại diện, tên kèm nhãn, email · ID · quyền, và nút đóng.
+- Chia hai cột: cột trái là *01 Thông tin tài khoản* và *02 Ảnh đại diện*; cột phải là
+  *03 Nhãn hiển thị* và *04 Làm nổi bật tên*. Dưới 1080px tự gộp về một cột.
+- Mỗi nhóm là một thẻ riêng, có số thứ tự, tiêu đề, mô tả ngắn và hàng nút lưu riêng.
+- Ô nhập có nhãn phía trên, gợi ý nhỏ bên dưới, viền sáng khi focus; bộ đếm `x/6 nhãn` cạnh
+  nút *Thêm nhãn*.
+- Hàng ảnh đại diện xếp thành lưới 92px + phần thao tác, không còn tràn ra ngoài thẻ.

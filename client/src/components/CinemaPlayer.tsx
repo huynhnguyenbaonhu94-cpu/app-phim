@@ -539,6 +539,10 @@ export function CinemaPlayer({
   const initialPlayAttemptedRef = useRef(false);
   const fullscreenBusyRef = useRef(false);
   const seekingRef = useRef(false);
+  // Vị trí xem dở chỉ được áp MỘT lần cho mỗi lần nạp nguồn. `canplay` bật lại sau
+  // mỗi lần tua hoặc sau khi đệm xong, nên nếu áp lại thì phim cứ nhảy về đoạn cũ
+  // và người xem không tua được cho tới khi tải lại trang.
+  const resumeSeekAppliedRef = useRef(false);
   const resumeAfterSeekRef = useRef(false);
 
   useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
@@ -649,6 +653,7 @@ export function CinemaPlayer({
 
     // Store startAt for this load
     startAtRef.current = startAt;
+    resumeSeekAppliedRef.current = false;
     nextAdAtRef.current = Math.max(0, startAt || 0) + randomAdInterval();
 
     function destroyHls() {
@@ -780,7 +785,8 @@ export function CinemaPlayer({
     const onCanPlay    = () => {
       if (!nativeFullscreenAdRef.current) {
         const seekTo = startAtRef.current;
-        if (seekTo && seekTo > 5 && Math.abs(v.currentTime - seekTo) > 2) {
+        if (!resumeSeekAppliedRef.current && seekTo && seekTo > 5 && Math.abs(v.currentTime - seekTo) > 2) {
+          resumeSeekAppliedRef.current = true;
           v.currentTime = seekTo;
         }
         if (!initialPlayAttemptedRef.current && !userPausedRef.current && !document.hidden) {
@@ -799,6 +805,8 @@ export function CinemaPlayer({
     };
     const onMovieSeeking = () => {
       if (adActiveRef.current || nativeFullscreenAdRef.current) return;
+      // Người xem đã tua thì khoá vị trí xem dở lại, không để nó kéo về đoạn cũ nữa.
+      resumeSeekAppliedRef.current = true;
       seekingRef.current = true;
       resumeAfterSeekRef.current = !v.paused && !userPausedRef.current;
       setBuffering(false);

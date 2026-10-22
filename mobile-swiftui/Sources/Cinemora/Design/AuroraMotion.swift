@@ -83,17 +83,23 @@ struct AuroraReveal: ViewModifier {
     @State private var shown = false
 
     func body(content: Content) -> some View {
+        // Không dùng `opacity(0)` làm điểm bắt đầu.
+        //
+        // Lưới lười (`LazyVStack`/`LazyVGrid`) có thể dựng lại các ô khi màn hình
+        // bị che rồi hiện lại (ví dụ: vào chi tiết phim rồi quay ra). Lúc đó
+        // `onAppear` có thể không chạy, và nếu trạng thái ban đầu là trong suốt
+        // thì cả danh sách kẹt ở opacity 0 — người dùng chỉ thấy màn hình trắng
+        // cùng nút "Trở lại". Vì vậy phần chuyển động chỉ dùng độ dời và tỉ lệ:
+        // dù animation có chạy hay không, nội dung vẫn luôn đọc được.
         content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 12)
+            .offset(y: shown ? 0 : 10)
+            .scaleEffect(shown ? 1 : 0.985, anchor: .top)
             .onAppear {
                 guard !shown else { return }
                 guard !reduceMotion else { shown = true; return }
-                // Only the first screenful animates in. Cards that are built
-                // later — while scrolling a long grid — appear instantly, so
-                // scrolling never has to run an entrance animation on a whole row
-                // of posters at once. That alone removed most of the stutter on
-                // the long shelves.
+                // Chỉ khung hình đầu chạy hiệu ứng vào; các ô dựng sau (khi cuộn
+                // lưới dài) hiện ngay để việc cuộn không phải chạy animation cho
+                // cả một hàng poster.
                 guard index <= 6 else { shown = true; return }
                 withAnimation(Motion.enter.delay(Double(index) * 0.02)) {
                     shown = true

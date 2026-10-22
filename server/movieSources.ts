@@ -175,6 +175,28 @@ export async function listMovieSources(movieSlug: string): Promise<MovieSource[]
   }));
 }
 
+/**
+ * Đọc tên nguồn của tất cả phim thủ công trong một truy vấn.
+ *
+ * Dùng cho bộ lọc kiểu "Phim Vietsub"/"Phim Thuyết Minh": phim thủ công chỉ
+ * được xếp vào danh sách khi nguồn của chính nó đúng kiểu đó.
+ */
+export async function listSourceNamesBySlug(): Promise<Map<string, string[]>> {
+  const db = await getDb();
+  const map = new Map<string, string[]>();
+  if (!db) return map;
+  const rows = await db
+    .select({ movieSlug: movieSources.movieSlug, name: movieSources.name })
+    .from(movieSources)
+    .orderBy(asc(movieSources.sortOrder), asc(movieSources.id));
+  for (const row of rows) {
+    const list = map.get(row.movieSlug) ?? [];
+    list.push(row.name);
+    map.set(row.movieSlug, list);
+  }
+  return map;
+}
+
 /** Thêm một nguồn mới cho phim. */
 export async function addMovieSource(movieSlug: string, name: string): Promise<MovieSource> {
   const db = await getDb();
@@ -248,6 +270,77 @@ export async function addMovieEpisode(input: {
     .where(eq(movieSourceEpisodes.id, inserted.id));
   await touchMovie(source.movieSlug);
   return toEpisode(row);
+}
+
+/**
+ * Thêm nhiều tập trong một lần gọi.
+ *
+ * Dùng cho ô "dán danh sách" ở trang quản trị: admin dán hàng chục tập một lượt
+ * thay vì bấm từng tập. Máy chủ kiểm tra lại một lượt và bỏ qua dòng trùng tên
+ * hoặc trùng link đã có, trả về số tập thêm được kèm danh sách bị bỏ qua.
+ */
+export async function addMovieEpisodes(input: {
+  sourceId: number;
+  episodes: Array<{
+    name: string;
+    streamUrl: string;
+    subtitleUrl?: string | null;
+    subtitleVtt?: string | null;
+  }>;
+}): Promise<{ added: number; skipped: Array<{ name: string; reason: string }> }> {
+  const db = await getDb();
+  if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
+  const [source] = await db.select().from(movieSources).where(eq(movieSources.id, input.sourceId));
+  if (!source) throw new Error("Không tìm thấy nguồn cần thêm tập");
+
+  const existing = await db
+    .select()
+    .from(movieSourceEpisodes)
+    .where(eq(movieSourceEpisodes.sourceId, input.sourceId));
+  const seenNames = new Set(existing.map((row) => row.name.trim().toLowerCase()));
+  const seenUrls = new Set(existing.map((row) => row.streamUrl.trim().toLowerCase()));
+
+  let added = 0;
+  let order = existing.length;
+  const skipped: Array<{ name: string; reason: string }> = [];
+
+  for (const item of input.episodes) {
+    const name = item.name.trim();
+    const streamUrl = item.streamUrl.trim();
+    if (!name || !streamUrl) {
+      skipped.push({ name: name || "(không tên)", reason: "Thiếu tên tập hoặc link M3U8" });
+      continue;
+    }
+    const nameKey = name.toLowerCase();
+    const urlKey = streamUrl.toLowerCase();
+    if (seenNames.has(nameKey)) {
+      skipped.push({ name, reason: "Trùng tên tập đã có trong nguồn" });
+      continue;
+    }
+    if (seenUrls.has(urlKey)) {
+      skipped.push({ name, reason: "Trùng link M3U8 đã có trong nguồn" });
+      continue;
+    }
+    const subtitleLink = item.subtitleUrl?.trim() ? item.subtitleUrl.trim() : null;
+    const subtitleVtt =
+      item.subtitleVtt ?? (subtitleLink ? await fetchSubtitleAsVtt(subtitleLink) : null);
+    await db.insert(movieSourceEpisodes).values({
+      sourceId: input.sourceId,
+      name,
+      streamUrl,
+      subtitleUrl: subtitleLink,
+      subtitleVtt,
+      qualities: null,
+      sortOrder: order,
+    });
+    order += 1;
+    added += 1;
+    seenNames.add(nameKey);
+    seenUrls.add(urlKey);
+  }
+
+  if (added > 0) await touchMovie(source.movieSlug);
+  return { added, skipped };
 }
 
 /** Sửa thông tin một tập. */

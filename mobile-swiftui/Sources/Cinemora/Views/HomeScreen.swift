@@ -239,6 +239,12 @@ struct SectionListScreen: View {
         // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
         .modifier(EdgeBackDrag { dismiss() })
         .task { await load(reset: true) }
+        // Quay về từ trang chi tiết có thể dựng lại màn này với danh sách rỗng.
+        // Nạp lại một lần nữa để không bao giờ còn màn trắng.
+        .onAppear {
+            guard movies.isEmpty, !loading else { return }
+            Task { await load(reset: true) }
+        }
     }
 
     private func load(reset: Bool) async {

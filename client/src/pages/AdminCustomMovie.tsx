@@ -3,6 +3,8 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileText,
   Link2,
@@ -13,6 +15,7 @@ import {
   Save,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserRound,
   X,
@@ -22,6 +25,7 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import BulkEpisodesInput from "@/components/BulkEpisodesInput";
 import ImagePicker from "@/components/ImagePicker";
 
 /* ------------------------------------------------------------------ */
@@ -144,19 +148,119 @@ const nowLocal = () => {
 };
 const today = () => nowLocal().slice(0, 10);
 
+/** Bốn lựa chọn nhanh cho mục Ngôn ngữ của phim thủ công. */
+const LANG_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "Vietsub", label: "Vietsub" },
+  { value: "Thuyết minh", label: "Thuyết minh" },
+  { value: "Lồng tiếng", label: "Lồng tiếng" },
+];
+
+/** So khớp ngôn ngữ đã lưu với lựa chọn nhanh (bỏ dấu, không phân biệt hoa thường). */
+function langPresetOf(value: string): string {
+  const folded = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .trim()
+    .toLocaleLowerCase("vi-VN");
+  if (!folded) return "";
+  const preset = LANG_PRESETS.find(item =>
+    item.value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D")
+      .toLocaleLowerCase("vi-VN") === folded,
+  );
+  return preset ? preset.value : "other";
+}
+
+const MONTH_LABELS = [
+  "Tháng 1", "Tháng 2", "Tháng 3", "Tháng 4", "Tháng 5", "Tháng 6",
+  "Tháng 7", "Tháng 8", "Tháng 9", "Tháng 10", "Tháng 11", "Tháng 12",
+];
+const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+
+type MonthCursor = { year: number; month: number };
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function cursorFromIso(iso: string): MonthCursor {
+  const match = /^(\d{4})-(\d{2})/.exec(iso.trim());
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    if (year >= 1900 && year <= 2100 && month >= 0 && month <= 11) return { year, month };
+  }
+  const now = new Date();
+  return { year: now.getFullYear(), month: now.getMonth() };
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+/** Thứ Hai là cột đầu tiên, giống lịch Việt Nam. */
+function firstWeekdayMonday(year: number, month: number): number {
+  return (new Date(year, month, 1).getDay() + 6) % 7;
+}
+
+function isoOf(year: number, month: number, day: number): string {
+  return `${year}-${pad2(month + 1)}-${pad2(day)}`;
+}
+
+function todayIso(): string {
+  const now = new Date();
+  return isoOf(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
 /**
- * Ô nhập ngày theo dd/mm/yyyy.
+ * Ô nhập ngày theo dd/mm/yyyy kèm lịch chọn ngày riêng.
  *
- * Ô chữ cho phép gõ nhanh và tự chèn dấu "/", kèm nút lịch phủ một input date
- * gốc để mở lịch của hệ điều hành. Giá trị lưu trong form vẫn là yyyy-mm-dd nên
- * phần gửi lên máy chủ không đổi.
+ * Admin vừa gõ nhanh được (tự chèn dấu "/"), vừa mở được lịch để chọn: lịch có
+ * nút lùi/tiến tháng, ô chọn tháng và ô nhập năm nên nhảy nhanh tới bất kỳ mốc nào.
+ * Giá trị lưu trong form vẫn là yyyy-mm-dd nên phần gửi lên máy chủ không đổi.
  */
 function DateField({ value, onChange }: { value: string; onChange: (iso: string) => void }) {
   const [text, setText] = useState(() => isoToDisplay(value));
+  const [open, setOpen] = useState(false);
+  const [monthOpen, setMonthOpen] = useState(false);
+  const [cursor, setCursor] = useState<MonthCursor>(() => cursorFromIso(value));
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setText(isoToDisplay(value));
   }, [value]);
+
+  useEffect(() => {
+    if (open) setCursor(cursorFromIso(value));
+  }, [open, value]);
+
+  // Mỗi lần mở/đóng lịch thì trả bảng tháng về trạng thái xem ngày.
+  useEffect(() => {
+    if (!open) setMonthOpen(false);
+  }, [open]);
+
+  // Bấm ra ngoài hoặc ấn Esc là đóng lịch.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      const node = wrapRef.current;
+      if (node && event.target instanceof Node && !node.contains(event.target)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   function type(raw: string) {
     const digits = raw.replace(/\D/g, "").slice(0, 8);
@@ -168,8 +272,38 @@ function DateField({ value, onChange }: { value: string; onChange: (iso: string)
     }
   }
 
+  function pick(iso: string) {
+    onChange(iso);
+    setText(isoToDisplay(iso));
+    setOpen(false);
+    setMonthOpen(false);
+  }
+
+  function shiftMonth(step: number) {
+    setCursor(current => {
+      const next = new Date(current.year, current.month + step, 1);
+      return { year: next.getFullYear(), month: next.getMonth() };
+    });
+  }
+
+  function setYear(raw: string) {
+    const digits = raw.replace(/\D/g, "").slice(0, 4);
+    if (!digits) return;
+    const year = Math.min(Math.max(Number(digits), 1900), 2100);
+    setCursor(current => ({ ...current, year }));
+  }
+
+  const cells: Array<number | null> = [];
+  if (open) {
+    const lead = firstWeekdayMonday(cursor.year, cursor.month);
+    for (let blank = 0; blank < lead; blank += 1) cells.push(null);
+    for (let day = 1; day <= daysInMonth(cursor.year, cursor.month); day += 1) cells.push(day);
+  }
+
+  const currentToday = todayIso();
+
   return (
-    <div className="custom-date-field">
+    <div className="custom-date-field" ref={wrapRef}>
       <input
         value={text}
         onChange={event => type(event.target.value)}
@@ -178,22 +312,107 @@ function DateField({ value, onChange }: { value: string; onChange: (iso: string)
         inputMode="numeric"
         autoComplete="off"
       />
-      <span className="custom-date-pick" title="Chọn ngày từ lịch">
+      <button
+        type="button"
+        className={open ? "custom-date-pick is-open" : "custom-date-pick"}
+        onClick={() => setOpen(current => !current)}
+        title="Chọn ngày từ lịch"
+        aria-label="Chọn ngày từ lịch"
+        aria-expanded={open}
+      >
         <CalendarDays size={15} />
-        <input
-          type="date"
-          className="custom-date-native"
-          value={value}
-          onChange={event => {
-            onChange(event.target.value);
-            setText(isoToDisplay(event.target.value));
-          }}
-          aria-label="Chọn ngày từ lịch"
-        />
-      </span>
+      </button>
+
+      {open && (
+        <div className="custom-date-pop" role="dialog" aria-label="Lịch chọn ngày">
+          <div className="custom-date-pop-head">
+            <button type="button" className="custom-date-nav" onClick={() => shiftMonth(-1)} aria-label="Tháng trước">
+              <ChevronLeft size={15} />
+            </button>
+            <button
+              type="button"
+              className={monthOpen ? "custom-date-month-btn is-open" : "custom-date-month-btn"}
+              onClick={() => setMonthOpen(current => !current)}
+              aria-expanded={monthOpen}
+            >
+              {MONTH_LABELS[cursor.month]}
+              <ChevronDown size={14} />
+            </button>
+            <input
+              className="custom-date-year"
+              value={String(cursor.year)}
+              onChange={event => setYear(event.target.value)}
+              inputMode="numeric"
+              aria-label="Chọn năm"
+            />
+            <button type="button" className="custom-date-nav" onClick={() => shiftMonth(1)} aria-label="Tháng sau">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+
+          {monthOpen ? (
+            <div className="custom-date-month-grid">
+              {MONTH_LABELS.map((label, index) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={index === cursor.month ? "custom-date-month-cell is-selected" : "custom-date-month-cell"}
+                  onClick={() => {
+                    setCursor(current => ({ ...current, month: index }));
+                    setMonthOpen(false);
+                  }}
+                >
+                  {label.replace("Tháng ", "T")}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="custom-date-week">
+                {WEEKDAY_LABELS.map(label => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
+
+              <div className="custom-date-grid">
+                {cells.map((day, index) => {
+                  if (day === null) return <span key={`blank-${index}`} className="custom-date-blank" />;
+                  const iso = isoOf(cursor.year, cursor.month, day);
+                  const classes = ["custom-date-day"];
+                  if (iso === value) classes.push("is-selected");
+                  if (iso === currentToday) classes.push("is-today");
+                  return (
+                    <button key={iso} type="button" className={classes.join(" ")} onClick={() => pick(iso)}>
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <div className="custom-date-pop-foot">
+            <button type="button" className="custom-date-quick" onClick={() => pick(currentToday)}>
+              Hôm nay
+            </button>
+            <button
+              type="button"
+              className="custom-date-quick"
+              onClick={() => {
+                onChange("");
+                setText("");
+                setOpen(false);
+              }}
+            >
+              Xoá ngày
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 const emptyForm = (): FormState => ({
   name: "",
@@ -476,12 +695,19 @@ type BrowserActor = {
   source: "tmdb" | "wikidata";
 };
 
+/**
+ * Chuẩn hoá tên để so trùng: bỏ dấu, bỏ khoảng trắng và dấu câu nhưng GIỮ chữ của
+ * mọi hệ chữ. Bản cũ chỉ giữ [a-z0-9] nên tên chữ Hán/Hàn/Nhật bị rút thành chuỗi
+ * rỗng và bị coi là trùng với nhau, khiến TMDB trả về diễn viên mà không thêm được ai.
+ */
 function normalizeActorName(value: string) {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
     .toLocaleLowerCase("vi-VN")
-    .replace(/[^a-z0-9]/g, "");
+    .replace(/[\s.,'’"“”\-–—_:;!?()\[\]{}·•/\\|@#$%^&*+=~`<>]+/g, "");
 }
 
 function isLatinActorName(value: string) {
@@ -581,6 +807,165 @@ async function browserSearchWikidata(query: string): Promise<BrowserActor[]> {
     }),
   );
   return items.filter(item => item.name.length > 0);
+}
+
+/**
+ * Lấy diễn viên + đạo diễn từ trình duyệt khi máy chủ hosting không gọi được TMDB.
+ *
+ * TMDB ID dùng thẳng; IMDB ID được đổi sang TMDB ID qua endpoint find.
+ */
+async function browserFetchMovieCredits(
+  tmdbId: string,
+  imdbId: string,
+  key: string,
+  movieType: "series" | "single" | null,
+  wantedTitle: string,
+  limit = 30,
+): Promise<{ title: string; directors: string[]; actors: Array<{ name: string; image: string }> }> {
+  const authHeaders: Record<string, string> = key.length > 40 ? { authorization: `Bearer ${key}` } : {};
+  const build = (path: string, extra: Record<string, string> = {}) => {
+    const params = new URLSearchParams(extra);
+    if (key.length <= 40) params.set("api_key", key);
+    return `https://api.themoviedb.org/3${path}?${params.toString()}`;
+  };
+  const getJson = async (url: string): Promise<any> => {
+    const response = await fetch(url, { headers: authHeaders });
+    if (!response.ok) throw new Error(`TMDB trả về mã ${response.status}`);
+    return response.json();
+  };
+
+  let id = tmdbId.replace(/[^0-9]/g, "");
+  let preferred: "movie" | "tv" | null = null;
+  if (!id && imdbId) {
+    const found = await getJson(build(`/find/${encodeURIComponent(imdbId)}`, { external_source: "imdb_id" }));
+    const movieId = found?.movie_results?.[0]?.id;
+    const tvId = found?.tv_results?.[0]?.id;
+    if (movieId) {
+      id = String(movieId);
+      preferred = "movie";
+    } else if (tvId) {
+      id = String(tvId);
+      preferred = "tv";
+    }
+  }
+  if (!id) throw new Error("Không tìm thấy phim trên TMDB");
+
+  // Phim bộ của form thì ưu tiên nhánh TV: mã số có thể trùng nhau giữa hai nhánh TMDB.
+  if (!preferred && movieType) preferred = movieType === "series" ? "tv" : "movie";
+  const order: Array<"movie" | "tv"> = preferred
+    ? [preferred, preferred === "movie" ? "tv" : "movie"]
+    : ["movie", "tv"];
+
+  const loaded: Array<{ title: string; directors: string[]; actors: Array<{ name: string; image: string }> }> = [];
+  for (const mediaType of order) {
+    try {
+      // Phim bộ: /credits chỉ trả vài người, danh sách đầy đủ nằm ở /aggregate_credits.
+      const creditPaths =
+        mediaType === "tv"
+          ? [`/${mediaType}/${id}/aggregate_credits`, `/${mediaType}/${id}/credits`]
+          : [`/${mediaType}/${id}/credits`];
+      let credits: any = null;
+      for (const path of creditPaths) {
+        try {
+          // en-US để tên diễn viên ở dạng Latin, dễ đọc và dễ tra lại.
+          const payload = await getJson(build(path, { language: "en-US" }));
+          if (!payload) continue;
+          if (!credits || (payload?.cast ?? []).length > (credits?.cast ?? []).length) credits = payload;
+        } catch {
+          /* thử đường còn lại */
+        }
+      }
+      if (!credits) continue;
+      // Phim bộ gom đạo diễn mọi tập: cân theo số tập rồi chỉ giữ nhóm chính.
+      const rankedDirectors: Array<{ name: string; weight: number }> = [];
+      for (const person of credits?.crew ?? []) {
+        const jobs: string[] = (person?.jobs ?? []).map((item: any) => String(item?.job ?? ""));
+        const isCreator = person?.job === "Creator" || jobs.includes("Creator");
+        const isDirector = person?.job === "Director" || jobs.includes("Director") || isCreator;
+        if (!isDirector) continue;
+        const name = String(person?.name ?? "").trim();
+        if (!name) continue;
+        const episodes = Number(person?.total_episode_count ?? 0) || 0;
+        const weight = isCreator ? episodes + 1000 : episodes;
+        const existing = rankedDirectors.find(item => item.name === name);
+        if (existing) existing.weight = Math.max(existing.weight, weight);
+        else rankedDirectors.push({ name, weight });
+      }
+      const directors: string[] = rankedDirectors
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, 6)
+        .map(item => item.name);
+      const actors = (credits?.cast ?? [])
+        .slice(0, limit)
+        .map((person: any) => ({
+          name: String(person?.name ?? person?.original_name ?? "").trim(),
+          image: person?.profile_path ? `https://image.tmdb.org/t/p/w185${person.profile_path}` : "",
+        }))
+        .filter((person: { name: string }) => person.name.length > 0);
+      let title = "";
+      try {
+        // Tiêu đề đối chiếu dùng bản tiếng Anh cho khớp tên quốc tế nhập ở ô Tên phim.
+        const detail = await getJson(build(`/${mediaType}/${id}`, { language: "en-US" }));
+        title = String(detail?.title ?? detail?.name ?? "");
+        for (const person of detail?.created_by ?? []) {
+          const name = String(person?.name ?? "").trim();
+          if (name && !directors.includes(name)) directors.unshift(name);
+        }
+        directors.splice(6);
+      } catch {
+        /* chỉ cần credits */
+      }
+      if (actors.length > 0 || directors.length > 0) loaded.push({ title, directors, actors });
+    } catch {
+      /* thử nhánh còn lại */
+    }
+  }
+  if (loaded.length === 0) throw new Error("TMDB không có dữ liệu diễn viên cho phim này");
+
+  // Mã số trùng nhau giữa phim lẻ và phim bộ: chọn bản khớp tên phim nhất.
+  const wanted = normalizeTitle(wantedTitle);
+  if (wanted) {
+    let best = loaded[0];
+    let bestScore = titleScore(best.title, wantedTitle);
+    for (const item of loaded.slice(1)) {
+      const score = titleScore(item.title, wantedTitle);
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    }
+    if (bestScore > 0) return best;
+  }
+
+  // Không đối chiếu được tên thì chọn nhánh đầy đủ dữ liệu hơn hẳn: mã số TMDB có thể
+  // trùng giữa phim lẻ và phim bộ, nhánh ưu tiên có khi chỉ là phim khác cùng số.
+  const preferredFirst = loaded[0];
+  const richest = [...loaded].sort((a, b) => b.actors.length - a.actors.length)[0];
+  if (richest !== preferredFirst && richest.actors.length >= Math.max(5, preferredFirst.actors.length * 3)) {
+    return richest;
+  }
+  return preferredFirst;
+}
+
+/** Rút gọn tiêu đề để so khớp (bỏ dấu, khoảng trắng và dấu câu, giữ mọi hệ chữ). */
+function normalizeTitle(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLocaleLowerCase("vi-VN")
+    .replace(/[\s.,'’"“”\-–—_:;!?()\[\]{}·•/\\|@#$%^&*+=~`<>]+/g, "");
+}
+
+/** Điểm khớp tiêu đề: trùng hẳn 3, chứa nhau 2, không khớp 0. */
+function titleScore(candidate: string, wanted: string): number {
+  const a = normalizeTitle(candidate);
+  const b = normalizeTitle(wanted);
+  if (!a || !b) return 0;
+  if (a === b) return 3;
+  if (a.includes(b) || b.includes(a)) return 2;
+  return 0;
 }
 
 /** Tìm diễn viên từ trình duyệt: TMDB trước, không có kết quả thì sang Wikidata. */
@@ -1006,12 +1391,22 @@ function SourceEpisodeEditor({
 /* Quản lý nguồn & tập của phim                                        */
 /* ------------------------------------------------------------------ */
 
+/** Cuộn tới đúng tập vừa mở form sửa để không bị khuất trong danh sách có thanh cuộn. */
+function scrollEpisodeIntoView(id: number) {
+  window.requestAnimationFrame(() => {
+    const node = document.querySelector(`[data-episode-id="${id}"]`);
+    node?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
+
 function SourcesManager({ slug }: { slug: string }) {
   const [sourceName, setSourceName] = useState("");
   const [addingSource, setAddingSource] = useState(false);
   const [editingSource, setEditingSource] = useState<number | null>(null);
   const [sourceDraft, setSourceDraft] = useState("");
   const [editingEpisode, setEditingEpisode] = useState<number | null>(null);
+  // Nguồn đang mở ô "dán danh sách nhiều tập".
+  const [bulkSourceId, setBulkSourceId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1049,6 +1444,7 @@ function SourcesManager({ slug }: { slug: string }) {
     },
     onError: item => setError(item.message),
   });
+  const addEpisodes = trpc.movieSources.addEpisodes.useMutation({ onError: item => setError(item.message) });
   const updateEpisode = trpc.movieSources.updateEpisode.useMutation({
     onSuccess: async () => {
       setEditingEpisode(null);
@@ -1070,6 +1466,7 @@ function SourcesManager({ slug }: { slug: string }) {
     renameSource.isPending ||
     removeSource.isPending ||
     addEpisode.isPending ||
+    addEpisodes.isPending ||
     updateEpisode.isPending ||
     removeEpisode.isPending;
 
@@ -1194,7 +1591,7 @@ function SourcesManager({ slug }: { slug: string }) {
 
               <div className="admin-episode-list">
                 {source.episodes.map(episode => (
-                  <div className="admin-manual-episode-wrap" key={episode.id}>
+                  <div className="admin-manual-episode-wrap" key={episode.id} data-episode-id={episode.id}>
                     <article className="admin-manual-episode">
                       <div className="admin-manual-episode-copy">
                         <strong>{episode.name}</strong>
@@ -1219,7 +1616,7 @@ function SourcesManager({ slug }: { slug: string }) {
                           type="button"
                           className="admin-movies-action"
                           disabled={pending}
-                          onClick={() => setEditingEpisode(editingEpisode === episode.id ? null : episode.id)}
+                          onClick={() => { const next = editingEpisode === episode.id ? null : episode.id; setEditingEpisode(next); if (next) scrollEpisodeIntoView(episode.id); }}
                         >
                           <Pencil size={13} /> Sửa
                         </button>
@@ -1247,12 +1644,36 @@ function SourcesManager({ slug }: { slug: string }) {
                 ))}
               </div>
 
-              <SourceEpisodeEditor
-                pending={addEpisode.isPending}
-                onSubmit={async payload => {
-                  await addEpisode.mutateAsync({ sourceId: source.id, ...payload });
-                }}
-              />
+              {bulkSourceId === source.id ? (
+                <BulkEpisodesInput
+                  existingEpisodes={source.episodes.map(episode => ({ name: episode.name, streamUrl: episode.streamUrl }))}
+                  pending={addEpisodes.isPending}
+                  onClose={() => setBulkSourceId(null)}
+                  onSubmit={async items => {
+                    const result = await addEpisodes.mutateAsync({
+                      sourceId: source.id,
+                      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl, subtitleVtt: null })),
+                    });
+                    await sourcesQuery.refetch();
+                    setMessage(`Đã thêm ${result.added} tập.`);
+                    return { added: result.added, skipped: result.skipped.length };
+                  }}
+                />
+              ) : (
+                <>
+                  <div className="custom-bulk-toggle">
+                    <button type="button" className="admin-source-mode-switch" onClick={() => setBulkSourceId(source.id)} disabled={pending}>
+                      Dán danh sách nhiều tập
+                    </button>
+                  </div>
+                  <SourceEpisodeEditor
+                    pending={addEpisode.isPending}
+                    onSubmit={async payload => {
+                      await addEpisode.mutateAsync({ sourceId: source.id, ...payload });
+                    }}
+                  />
+                </>
+              )}
             </article>
           ))}
         </div>
@@ -1283,6 +1704,12 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   const [actorNotice, setActorNotice] = useState<string | null>(null);
   const actorSearch = trpc.customMovies.searchActors.useMutation();
   const actorCredentials = trpc.customMovies.actorSearchCredentials.useMutation();
+  const creditsMutation = trpc.customMovies.fetchCredits.useMutation();
+  const [langOther, setLangOther] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
+  const langWrapRef = useRef<HTMLDivElement>(null);
+  const [creditsLoading, setCreditsLoading] = useState(false);
+  const [creditsFromBrowser, setCreditsFromBrowser] = useState(false);
   const [actorFromBrowser, setActorFromBrowser] = useState(false);
   const actorServerDisabled = useRef(false);
   const actorBrowserCache = useRef(new Map<string, BrowserActor[]>());
@@ -1291,6 +1718,46 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   useEffect(() => {
     actorServerDisabled.current = readActorServerFlag();
   }, []);
+
+  // Mở phim đã lưu mà ngôn ngữ không khớp lựa chọn nhanh thì hiện luôn ô nhập tự do.
+  useEffect(() => {
+    if (langPresetOf(form.lang) === "other") setLangOther(true);
+  }, [form.lang]);
+
+  // Bấm ra ngoài hoặc Esc thì đóng danh sách Ngôn ngữ.
+  useEffect(() => {
+    if (!langOpen) return;
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      if (!langWrapRef.current?.contains(event.target as Node)) setLangOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setLangOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [langOpen]);
+
+  const langValue = langOther ? "other" : langPresetOf(form.lang);
+  const langLabel = langValue === "" ? "Chưa chọn" : langValue === "other" ? "Khác…" : langValue;
+
+  /** Chọn ngôn ngữ từ danh sách tự vẽ. */
+  function chooseLang(next: string) {
+    setLangOpen(false);
+    if (next === "other") {
+      setLangOther(true);
+      // Giữ nguyên chữ đã gõ nếu đang là ngôn ngữ tự do.
+      if (langPresetOf(form.lang) !== "other") setField("lang", "");
+      return;
+    }
+    setLangOther(false);
+    setField("lang", next);
+  }
 
   function markActorServerDisabled() {
     actorServerDisabled.current = true;
@@ -1445,6 +1912,130 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
     setActorSearched(false);
     setActorNotice(null);
     setActorFromBrowser(false);
+  }
+
+  /**
+   * Lấy diễn viên và đạo diễn theo TMDB ID / IMDB ID rồi ghép vào danh sách.
+   *
+   * Ưu tiên gọi qua máy chủ; nếu hosting không ra được Internet thì lấy thẳng từ
+   * trình duyệt (TMDB mở CORS) để nút vẫn dùng được.
+   */
+  async function handleFetchCredits() {
+    const tmdbId = form.tmdbId.trim();
+    const imdbId = form.imdbId.trim();
+    if (!tmdbId && !imdbId) {
+      setStatus("Nhập TMDB ID hoặc IMDB ID ở mục Thông tin phim trước khi lấy diễn viên và đạo diễn.");
+      return;
+    }
+
+    setCreditsLoading(true);
+    setStatus("Đang lấy diễn viên và đạo diễn từ TMDB…");
+    try {
+      // Luôn thử máy chủ trước: chỉ khi máy chủ lỗi mới nhờ trình duyệt.
+      let serverError: unknown = null;
+      try {
+        const result = await creditsMutation.mutateAsync({
+          tmdbId: tmdbId || null,
+          imdbId: imdbId || null,
+          limit: 30,
+          movieType: form.movieType,
+          title: form.name.trim() || null,
+        });
+        applyCredits(result, false);
+        return;
+      } catch (error) {
+        serverError = error;
+      }
+
+      let browserError: unknown = null;
+      try {
+        const credentials = await actorCredentials.mutateAsync();
+        const key = (credentials?.tmdbKey ?? "").trim();
+        if (!key) throw new Error("Máy chủ chưa có khoá TMDB nên không lấy được từ trình duyệt");
+        const result = await browserFetchMovieCredits(tmdbId, imdbId, key, form.movieType, form.name);
+        applyCredits(result, true);
+        return;
+      } catch (error) {
+        browserError = error;
+      }
+
+      const first = message(errorText(serverError));
+      const second = message(errorText(browserError));
+      setStatus(`Không lấy được diễn viên và đạo diễn. Máy chủ: ${first} · Trình duyệt: ${second}`);
+    } catch (error) {
+      setStatus(`Không lấy được diễn viên và đạo diễn: ${errorText(error)}.`);
+    } finally {
+      setCreditsLoading(false);
+    }
+  }
+
+  /** Lấy câu thông báo ngắn gọn từ lỗi (tRPC trả về object nên phải đọc .message). */
+function errorText(error: unknown): string {
+  if (!error) return "không rõ lỗi";
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object") {
+    const shape = error as { message?: unknown; data?: { message?: unknown } };
+    const direct = typeof shape.message === "string" ? shape.message : "";
+    const nested = typeof shape.data?.message === "string" ? shape.data.message : "";
+    const text = direct || nested;
+    if (text) return text;
+  }
+  return String(error);
+}
+
+/** Rút gọn thông báo lỗi cho vừa một dòng trạng thái. */
+function message(text: string): string {
+  const trimmed = text.replace(/^\s+|\s+$/g, "");
+  return trimmed.length > 110 ? `${trimmed.slice(0, 107)}…` : trimmed;
+}
+
+/** Ghép kết quả TMDB vào form, bỏ qua người đã có sẵn trong danh sách. */
+  function applyCredits(
+    result: { title: string; directors: string[]; actors: Array<{ name: string; image: string }> },
+    fromBrowser: boolean,
+  ) {
+    const seen = new Set(form.actors.map(actor => normalizeActorName(actor.name)).filter(Boolean));
+    const nextActors = [...form.actors];
+    let addedActors = 0;
+    for (const actor of result.actors) {
+      const raw = actor.name.trim();
+      if (!raw) continue;
+      // Tên không rút gọn được (chữ tượng hình…) vẫn dùng chính tên gốc làm khoá.
+      const key = normalizeActorName(raw) || raw.toLocaleLowerCase("vi-VN");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nextActors.push({ name: actor.name, role: "", image: actor.image });
+      addedActors += 1;
+      if (nextActors.length >= 60) break;
+    }
+
+    const nextDirectors = [...form.directors];
+    let addedDirectors = 0;
+    for (const name of result.directors) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      if (nextDirectors.some(item => normalizeActorName(item) === normalizeActorName(trimmed))) continue;
+      nextDirectors.push(trimmed);
+      addedDirectors += 1;
+    }
+
+    setField("actors", nextActors);
+    setField("directors", nextDirectors);
+    setCreditsFromBrowser(fromBrowser);
+
+    const found = `TMDB trả về ${result.actors.length} diễn viên và ${result.directors.length} đạo diễn`;
+    const parts: string[] = [];
+    if (addedActors) parts.push(`${addedActors} diễn viên`);
+    if (addedDirectors) parts.push(`${addedDirectors} đạo diễn`);
+    if (parts.length === 0) {
+      if (result.actors.length === 0 && result.directors.length === 0) {
+        setStatus(`TMDB không trả về diễn viên hay đạo diễn nào cho mã đã nhập. Kiểm tra lại TMDB ID / IMDB ID.`);
+        return;
+      }
+      setStatus(`${found}, nhưng tất cả đã có trong danh sách nên không thêm gì.`);
+      return;
+    }
+    setStatus(`Đã thêm ${parts.join(" và ")} từ TMDB${result.title ? ` cho phim “${result.title}”` : ""} (${found.toLowerCase()}).`);
   }
 
   function addChip(kind: "alternativeNames" | "directors", value: string) {
@@ -1787,13 +2378,72 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
                 </label>
                 <label>
                   Ngôn ngữ
-                  <input value={form.lang} onChange={event => setField("lang", event.target.value)} placeholder="Vietsub" />
+                  <div className="custom-lang-select" ref={langWrapRef}>
+                    <button
+                      type="button"
+                      className={langOpen ? "custom-lang-trigger is-open" : "custom-lang-trigger"}
+                      onClick={() => setLangOpen(current => !current)}
+                      aria-expanded={langOpen}
+                      aria-haspopup="listbox"
+                    >
+                      <span>{langLabel}</span>
+                      <ChevronDown size={15} />
+                    </button>
+                    {langOpen && (
+                      <div className="custom-lang-pop" role="listbox">
+                        <button
+                          type="button"
+                          className={langValue === "" ? "custom-lang-option is-selected" : "custom-lang-option"}
+                          onClick={() => chooseLang("")}
+                          role="option"
+                          aria-selected={langValue === ""}
+                        >
+                          Chưa chọn
+                        </button>
+                        {LANG_PRESETS.map(item => (
+                          <button
+                            key={item.value}
+                            type="button"
+                            className={langValue === item.value ? "custom-lang-option is-selected" : "custom-lang-option"}
+                            onClick={() => chooseLang(item.value)}
+                            role="option"
+                            aria-selected={langValue === item.value}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={langValue === "other" ? "custom-lang-option is-selected" : "custom-lang-option"}
+                          onClick={() => chooseLang("other")}
+                          role="option"
+                          aria-selected={langValue === "other"}
+                        >
+                          Khác…
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </label>
                 <label>
                   Thời lượng
                   <input value={form.time} onChange={event => setField("time", event.target.value)} placeholder="120 phút" />
                 </label>
               </div>
+
+              {(langOther || langPresetOf(form.lang) === "other") && (
+                <label className="custom-lang-custom">
+                  Ngôn ngữ khác
+                  <input
+                    value={form.lang}
+                    onChange={event => setField("lang", event.target.value)}
+                    placeholder="Ví dụ: Vietsub AI, Thuyết minh AI…"
+                  />
+                  <span className="custom-lang-hint">
+                    Ghi rõ kiểu ngôn ngữ để phim vẫn nằm đúng danh sách lọc — “Vietsub AI” được tính là Vietsub.
+                  </span>
+                </label>
+              )}
 
               <label>
                 Trạng thái
@@ -1901,13 +2551,24 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
                   <strong>Diễn viên &amp; đạo diễn</strong>
                   <small>Chỉ cần tên và ảnh (nếu có) cho mỗi diễn viên.</small>
                 </div>
-                <button
-                  type="button"
-                  className="button button-ghost"
-                  onClick={() => setField("actors", [...form.actors, { name: "", role: "", image: "" }])}
-                >
-                  <Plus size={14} /> Thêm diễn viên
-                </button>
+                <div className="custom-section-actions">
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => void handleFetchCredits()}
+                    disabled={creditsLoading}
+                    title="Điền TMDB ID hoặc IMDB ID ở mục Thông tin phim rồi bấm để lấy diễn viên và đạo diễn"
+                  >
+                    {creditsLoading ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />} Lấy từ TMDB/IMDB
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => setField("actors", [...form.actors, { name: "", role: "", image: "" }])}
+                  >
+                    <Plus size={14} /> Thêm diễn viên
+                  </button>
+                </div>
               </div>
 
               <ChipField
@@ -1932,6 +2593,11 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
                     {actorSearching && <LoaderCircle size={14} className="spin" />}
                   </div>
                 </label>
+                {creditsFromBrowser && (
+                  <p className="custom-muted actor-search-notice">
+                    Danh sách diễn viên được lấy trực tiếp từ trình duyệt của bạn vì máy chủ hosting không gọi được TMDB.
+                  </p>
+                )}
                 {actorNotice && <p className="custom-muted actor-search-notice">{actorNotice}</p>}
                 {actorFromBrowser && (
                   <p className="custom-muted actor-search-notice">

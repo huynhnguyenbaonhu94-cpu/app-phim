@@ -5,6 +5,7 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import { BadgeChipList, NameText, accountBadges, parseNameStyle } from "@/lib/cinemaBadges";
 
 type MovieSummary = {
   slug: string;
@@ -24,6 +25,10 @@ type CommentItem = {
   userName: string;
   userRole: string | null;
   badge: string | null;
+  /** Danh sách nhãn dạng JSON (nhiều nhãn cho một tài khoản). */
+  badges?: string | null;
+  /** Kiểu tên người dùng dạng JSON (màu, hiệu ứng). */
+  nameStyle?: string | null;
   userAvatar: string | null;
   userId: string;
   isMine: boolean;
@@ -147,7 +152,7 @@ export default function AdminMovies() {
     return <article className={`admin-movies-comment${comment.isPinned ? " is-pinned" : ""}${isReply ? " is-reply" : ""}`} key={comment.id}>
       <div className="admin-movies-comment-avatar">{avatar ? <img src={avatar} alt="" /> : <span>{initialOf(comment.userName)}</span>}</div>
       <div className="admin-movies-comment-body">
-        <div className="admin-movies-comment-head"><strong>{comment.userName}</strong>{comment.badge && <span className="admin-movies-badge">{comment.badge}</span>}{comment.userRole === "admin" && <span className="admin-movies-verified" title="Quản trị viên"><Check size={11} /></span>}<time>{formatCommentDate(comment.createdAt)}</time>{comment.isPinned && <span className="admin-movies-pinned-label"><Pin size={11} /> Đã ghim</span>}</div>
+        <div className="admin-movies-comment-head"><strong><NameText name={comment.userName} style={parseNameStyle(comment.nameStyle)} /></strong><BadgeChipList badges={accountBadges(comment.badges, comment.badge)} />{comment.userRole === "admin" && <span className="admin-movies-verified" title="Quản trị viên"><Check size={11} /></span>}<time>{formatCommentDate(comment.createdAt)}</time>{comment.isPinned && <span className="admin-movies-pinned-label"><Pin size={11} /> Đã ghim</span>}</div>
         <p>{comment.content}</p>
         <div className="admin-movies-comment-actions">{!isReply && <button type="button" className="admin-movies-action" disabled={pinComment.isPending} onClick={() => togglePin(comment)}><Pin size={13} /> {comment.isPinned ? "Bỏ ghim" : "Ghim lên đầu"}</button>}{comment.canDelete && <button type="button" className="admin-movies-action is-danger" disabled={deleteComment.isPending} onClick={() => removeComment(comment)}><Trash2 size={13} /> Xoá</button>}</div>
         {!isReply && comment.replies?.map(reply => renderComment(reply, true))}

@@ -277,7 +277,10 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
     };
     const videoURL = absolute(read(req.query.video));
     const subtitleURL = absolute(read(req.query.sub));
-    if (!videoURL || !subtitleURL || !/\.m3u8/i.test(videoURL)) {
+    // Chấp nhận cả link .m3u8 gốc lẫn link proxy của Cinemora: app ưu tiên phát qua proxy
+    // (máy chủ tự gắn header cho CDN), mà link proxy không có đuôi .m3u8.
+    const isPlaylist = /\.m3u8/i.test(videoURL) || /\/api\/cinema\/stream\//i.test(videoURL);
+    if (!videoURL || !subtitleURL || !isPlaylist) {
       return res.status(400).send("Thiếu link M3U8 hoặc link phụ đề");
     }
     const playlist = [

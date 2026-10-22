@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, pinMovieComment, recordWatchHistory, removeFavorite, removeWatchHistory, setUserAvatar, setUserBadge, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
+import { setUserBadges, setUserNameStyle, addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, pinMovieComment, recordWatchHistory, removeFavorite, removeWatchHistory, setUserAvatar, setUserBadge, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -11,6 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { sendMovieRequestToTelegram } from "./_core/telegram";
 import {
   addMovieEpisode,
+  addMovieEpisodes,
   addMovieSource,
   listMovieSources,
   removeMovieEpisode,
@@ -31,16 +32,56 @@ import {
   updateCustomMovie,
 } from "./customMovies";
 import { actorSearchStatus, searchActors } from "./actorSearch";
+import { fetchMovieCredits } from "./movieCredits";
 import { createTvStream, deleteTvStream, listTvStreams, saveTvPoster, saveTvSubtitle, updateTvStream } from "./tvStreams";
 import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvVideos";
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
 import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
-import { commentRevision, publishComments, waitForComments } from "./commentFeed";
+import { commentRevision, publishAllComments, publishComments, waitForComments } from "./commentFeed";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
 // Id bình luận đến từ app dưới dạng chuỗi, nhưng vẫn nhận cả số cho tiện thử nghiệm.
 const commentIdInput = z.union([z.string(), z.number()]);
+
+/** Nhãn hiển thị: chữ có màu/hiệu ứng, hoặc ảnh/GIF nhỏ. */
+const badgeInput = z.object({
+  id: z.string().trim().max(40).optional().default(""),
+  type: z.enum(["text", "image"]).optional().default("text"),
+  text: z.string().trim().max(24).optional().default(""),
+  imageUrl: z.string().trim().max(600).optional().default(""),
+  color: z.string().trim().max(24).optional().default(""),
+  background: z.string().trim().max(60).optional().default(""),
+  style: z.enum(["solid", "gradient", "outline", "glow", "shine", "pulse"]).optional().default("solid"),
+  font: z.enum(["sans", "serif", "mono", "script"]).optional().default("sans"),
+  size: z.enum(["sm", "md", "lg"]).optional().default("md"),
+  animation: z.enum(["none", "pulse", "shine", "float"]).optional().default("none"),
+});
+
+/** Kiểu chữ tên người dùng: màu và hiệu ứng làm nổi bật. */
+const nameStyleInput = z.object({
+  color: z.string().trim().max(24).optional().default(""),
+  effect: z.enum(["none", "glow", "gradient", "shine", "rainbow", "outline"]).optional().default("none"),
+});
+
+/** Chuẩn hoá danh sách nhãn trước khi lưu: bỏ nhãn rỗng, giới hạn số lượng. */
+function normalizeBadges(badges: Array<z.infer<typeof badgeInput>>) {
+  return badges
+    .map((badge, index) => ({
+      id: badge.id && badge.id.length > 0 ? badge.id : `b${index + 1}`,
+      type: badge.type,
+      text: badge.text.trim(),
+      imageUrl: badge.imageUrl.trim(),
+      color: badge.color.trim(),
+      background: badge.background.trim(),
+      style: badge.style,
+      font: badge.font,
+      size: badge.size,
+      animation: badge.animation,
+    }))
+    .filter((badge) => (badge.type === "image" ? badge.imageUrl.length > 0 : badge.text.length > 0))
+    .slice(0, 6);
+}
 /** Rút gọn người đang xem thành thông tin cần cho danh sách bình luận. */
 function viewerOf(user: { id: number; role?: string | null } | null | undefined) {
   if (!user) return null;
@@ -467,6 +508,16 @@ export const appRouter = router({
         limit: z.number().int().min(1).max(20).optional(),
       }))
       .mutation(({ input }) => searchActors(input)),
+    // Lấy diễn viên + đạo diễn theo TMDB ID hoặc IMDB ID của phim.
+    fetchCredits: adminProcedure
+      .input(z.object({
+        tmdbId: z.string().trim().max(40).nullable().optional(),
+        imdbId: z.string().trim().max(40).nullable().optional(),
+        limit: z.number().int().min(1).max(60).optional(),
+        movieType: z.enum(["series", "single"]).nullable().optional(),
+        title: z.string().trim().max(200).nullable().optional(),
+      }))
+      .mutation(({ input }) => fetchMovieCredits(input)),
     // Kiểm tra khoá TMDB và kết nối ra ngoài của máy chủ (admin).
     actorSearchStatus: adminProcedure.mutation(() => actorSearchStatus()),
     // Khoá TMDB cho trang quản trị (chỉ admin): dùng khi máy chủ hosting không gọi được TMDB.
@@ -499,6 +550,22 @@ export const appRouter = router({
         qualities: movieEpisodeQualities,
       }))
       .mutation(({ input }) => addMovieEpisode(input)),
+    addEpisodes: adminProcedure
+      .input(z.object({
+        sourceId: z.number().int().positive(),
+        episodes: z
+          .array(
+            z.object({
+              name: z.string().trim().min(1).max(180),
+              streamUrl: z.string().trim().url().max(2000),
+              subtitleUrl: z.string().trim().max(2000).nullable().optional(),
+              subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+            }),
+          )
+          .min(1)
+          .max(2000),
+      }))
+      .mutation(({ input }) => addMovieEpisodes(input)),
     updateEpisode: adminProcedure
       .input(z.object({
         id: z.number().int().positive(),
@@ -530,6 +597,53 @@ export const appRouter = router({
       .input(z.object({ userId: z.number().int().positive(), badge: z.string().trim().max(24).optional().default("") }))
       .mutation(async ({ input }) => {
         await setUserBadge(input.userId, input.badge.length > 0 ? input.badge : null);
+        publishAllComments();
+        return { success: true } as const;
+      }),
+
+    // Nhiều nhãn cho một tài khoản: chữ có màu/hiệu ứng hoặc ảnh, GIF nhỏ.
+    setBadges: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), badges: z.array(badgeInput).max(6).default([]) }))
+      .mutation(async ({ input }) => {
+        const badges = normalizeBadges(input.badges);
+        // Giữ cột `badge` cũ đồng bộ để bản app chưa cập nhật vẫn hiện được nhãn đầu tiên.
+        const legacy = badges.find((badge) => badge.type === "text" && badge.text.length > 0)?.text ?? null;
+        await setUserBadges(input.userId, badges.length > 0 ? JSON.stringify(badges) : null, legacy);
+        publishAllComments();
+        return { success: true, badges } as const;
+      }),
+
+    // Màu và hiệu ứng làm nổi bật tên người dùng khi bình luận.
+    setNameStyle: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), nameStyle: nameStyleInput }))
+      .mutation(async ({ input }) => {
+        const style = {
+          color: input.nameStyle.color.trim(),
+          effect: input.nameStyle.effect,
+        };
+        const isEmpty = style.color.length === 0 && style.effect === "none";
+        await setUserNameStyle(input.userId, isEmpty ? null : JSON.stringify(style));
+        publishAllComments();
+        return { success: true } as const;
+      }),
+
+    // Quản trị viên xem, đổi hoặc xoá ảnh đại diện của một tài khoản.
+    setAvatar: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), avatar: z.string().trim().min(16).max(2_800_000) }))
+      .mutation(async ({ input }) => {
+        if (!input.avatar.startsWith("data:image/") && !input.avatar.startsWith("/uploads/") && !/^https?:\/\//i.test(input.avatar)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ảnh đại diện không hợp lệ." });
+        }
+        await setUserAvatar(input.userId, input.avatar);
+        publishAllComments();
+        return { success: true } as const;
+      }),
+
+    clearAvatar: adminProcedure
+      .input(z.object({ userId: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        await setUserAvatar(input.userId, null);
+        publishAllComments();
         return { success: true } as const;
       }),
     devices: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => listAccountDevices(input.userId)),

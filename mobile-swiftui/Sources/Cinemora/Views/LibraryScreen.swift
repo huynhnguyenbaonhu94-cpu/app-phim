@@ -270,11 +270,12 @@ struct LibraryScreen: View {
     /// switch, so re-appearance now reuses what is already loaded unless the
     /// filters changed, the grid is empty, or the data went stale.
     private func loadIfNeeded() {
-        if loadedSignature == filterSignature,
-           !store.catalogMovies.isEmpty,
-           let lastLoadAt,
-           Date().timeIntervalSince(lastLoadAt) < 180 {
-            return
+        if loadedSignature == filterSignature, !store.catalogMovies.isEmpty {
+            // Người dùng đang xem ở trang sâu (đã bấm "Tiếp tục" nhiều lần) thì không
+            // tự nạp lại: nạp lại sẽ xoá lưới và kéo họ về trang 1, mất đúng vị trí
+            // vừa xem. Họ quay lại từ trang chi tiết phim nên cần giữ nguyên chỗ cũ.
+            if store.catalogPage > 1 { return }
+            if let lastLoadAt, Date().timeIntervalSince(lastLoadAt) < 180 { return }
         }
         load()
     }

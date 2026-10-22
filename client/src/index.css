@@ -3651,3 +3651,516 @@ body {
   color: var(--cinema-muted, #8b8f98);
 }
 
+
+/* --- Ngôn ngữ "Khác" + lịch chọn ngày + nút lấy diễn viên từ TMDB --- */
+.custom-lang-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.custom-lang-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #8b93a7);
+}
+
+.custom-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.custom-date-field {
+  position: relative;
+}
+
+.custom-date-field .custom-date-pick {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted, #8b93a7);
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.custom-date-field .custom-date-pick:hover,
+.custom-date-field .custom-date-pick.is-open {
+  color: var(--accent, #e5c15a);
+  background: rgba(229, 193, 90, 0.12);
+  border-color: rgba(229, 193, 90, 0.35);
+}
+
+.custom-date-field .custom-date-pick:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+.custom-date-field .custom-date-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.custom-date-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 286px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: #14161c;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  animation: customDateIn 0.16s ease-out;
+}
+
+@keyframes customDateIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.custom-date-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.custom-date-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #e8ecf4);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.custom-date-nav:hover {
+  border-color: rgba(229, 193, 90, 0.4);
+  color: var(--accent, #e5c15a);
+}
+
+.custom-date-month {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+}
+
+.custom-date-year {
+  width: 62px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+  text-align: center;
+}
+
+.custom-date-month:focus,
+.custom-date-year:focus {
+  outline: none;
+  border-color: rgba(229, 193, 90, 0.5);
+}
+
+.custom-date-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.custom-date-week span {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #8b93a7);
+}
+
+.custom-date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.custom-date-blank {
+  height: 30px;
+}
+
+.custom-date-day {
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.custom-date-day:hover {
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
+}
+
+.custom-date-day.is-today {
+  border-color: rgba(229, 193, 90, 0.45);
+}
+
+.custom-date-day.is-selected {
+  background: var(--accent, #e5c15a);
+  border-color: var(--accent, #e5c15a);
+  color: #14161c;
+  font-weight: 600;
+}
+
+.custom-date-pop-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.custom-date-quick {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text, #e8ecf4);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.custom-date-quick:hover {
+  border-color: rgba(229, 193, 90, 0.4);
+  color: var(--accent, #e5c15a);
+}
+
+/* Lưới chọn tháng trong lịch (thay select của hệ điều hành cho gọn và đẹp) */
+.custom-date-month-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+
+.custom-date-month-btn:hover,
+.custom-date-month-btn.is-open {
+  border-color: rgba(229, 193, 90, 0.45);
+  color: var(--accent, #e5c15a);
+  background: rgba(229, 193, 90, 0.1);
+}
+
+.custom-date-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  animation: customDateIn 0.14s ease-out;
+}
+
+.custom-date-month-cell {
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+
+.custom-date-month-cell:hover {
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
+}
+
+.custom-date-month-cell.is-selected {
+  background: var(--accent, #e5c15a);
+  border-color: var(--accent, #e5c15a);
+  color: #14161c;
+  font-weight: 600;
+}
+
+/* Danh sách Ngôn ngữ tự vẽ (thay select của hệ điều hành cho hợp giao diện) */
+.custom-lang-select {
+  position: relative;
+}
+
+.custom-lang-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text, #e8ecf4);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.custom-lang-trigger:hover,
+.custom-lang-trigger.is-open {
+  border-color: rgba(229, 193, 90, 0.45);
+  background: rgba(229, 193, 90, 0.06);
+}
+
+.custom-lang-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: #14161c;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  animation: customDateIn 0.14s ease-out;
+}
+
+.custom-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text, #e8ecf4);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.custom-lang-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.custom-lang-option.is-selected {
+  background: rgba(229, 193, 90, 0.14);
+  color: var(--accent, #e5c15a);
+  font-weight: 600;
+}
+
+.custom-lang-option.is-selected::after {
+  content: "✓";
+  font-size: 12px;
+}
+
+/* ── Dán danh sách nhiều tập (quản lý nguồn & tập phim) ───────────────── */
+.admin-source-mode-switch { padding: 7px 12px; border: 1px solid rgba(210,243,107,.32); border-radius: 999px; background: rgba(210,243,107,.08); color: var(--accent); font-size: 11px; font-weight: 700; cursor: pointer; transition: background .18s var(--ease-out), border-color .18s var(--ease-out), transform .18s var(--ease-out); }
+.admin-source-mode-switch:hover { background: rgba(210,243,107,.16); border-color: rgba(210,243,107,.5); }
+.admin-source-mode-switch:active { transform: scale(.97); }
+.admin-bulk-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.admin-bulk-hint code { padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 11px; }
+.admin-bulk-input { width: 100%; min-height: 170px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.7; resize: vertical; }
+.admin-bulk-input:focus { outline: none; border-color: rgba(210,243,107,.45); box-shadow: 0 0 0 3px rgba(210,243,107,.12); }
+.admin-bulk-list-wrap { display: grid; gap: 8px; }
+.admin-bulk-list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--muted); }
+.admin-bulk-list-head strong { color: #fff; font-size: 12px; }
+.admin-bulk-bad { color: #ff8a8a; }
+.admin-bulk-good { color: var(--accent); }
+.admin-bulk-list { display: grid; gap: 6px; max-height: 320px; overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.02); }
+.admin-bulk-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid transparent; border-radius: 8px; background: rgba(255,255,255,.03); }
+.admin-bulk-row-index { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,.06); color: var(--muted); font-size: 11px; }
+.admin-bulk-row-main { display: grid; gap: 3px; min-width: 0; }
+.admin-bulk-row-main strong { color: #fff; font-size: 12px; }
+.admin-bulk-row-url { overflow: hidden; color: rgba(255,255,255,.55); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-bulk-row-sub { color: rgba(210,243,107,.75); font-size: 10.5px; }
+.admin-bulk-row-state { font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.admin-bulk-row-state.is-ok { color: rgba(210,243,107,.75); }
+.admin-bulk-row-state.is-bad { color: #ff8a8a; }
+.admin-bulk-row.is-invalid { border-color: rgba(255,107,107,.55); background: rgba(255,107,107,.14); }
+.admin-bulk-row.is-invalid .admin-bulk-row-url { color: rgba(255,180,180,.85); }
+
+/* Nút mở ô dán danh sách tập trong khối Nguồn & tập của trang phim thủ công */
+.custom-bulk-toggle { display: flex; justify-content: flex-end; margin-top: 9px; }
+
+/* Danh sách tập của một nguồn: nguồn nhiều tập thì cuộn trong khung, không kéo dài trang */
+.admin-episode-list {
+  display: grid;
+  gap: 8px;
+  max-height: 336px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(210,243,107,.34) rgba(255,255,255,.04);
+}
+.admin-episode-list::-webkit-scrollbar { width: 8px; }
+.admin-episode-list::-webkit-scrollbar-track { border-radius: 999px; background: rgba(255,255,255,.04); }
+.admin-episode-list::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(210,243,107,.32); }
+.admin-episode-list::-webkit-scrollbar-thumb:hover { background: rgba(210,243,107,.5); }
+.admin-episode-list > * { scroll-margin: 10px 0; }
+
+/* ==== Nhãn hiển thị (badge) và kiểu tên — dùng chung trang quản trị + danh sách bình luận ==== */
+.cin-badge {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 1px 8px;
+  border-radius: 999px; font-size: 11px; font-weight: 700; line-height: 1.6; letter-spacing: .02em;
+  vertical-align: middle; border: 1px solid transparent; white-space: nowrap;
+  background-color: var(--cin-badge-bg, rgba(210, 243, 107, .16)); color: #d2f36b;
+}
+.cin-badge--sm { font-size: 10px; padding: 1px 6px; }
+.cin-badge--lg { font-size: 12.5px; padding: 2px 10px; }
+.cin-badge--image { height: 18px; width: auto; max-width: 64px; padding: 0; margin-left: 6px; border: 0; background: none; object-fit: contain; }
+.cin-badge--placeholder { background: transparent; border: 1px dashed rgba(255, 255, 255, .28); color: rgba(255, 255, 255, .6); font-weight: 500; }
+.cin-badge--gradient { background-image: linear-gradient(135deg, rgba(255, 255, 255, .5), rgba(0, 0, 0, .3)); }
+.cin-badge--outline { background: transparent; border-color: currentColor; }
+.cin-badge--glow { box-shadow: 0 0 10px currentColor; }
+.cin-badge--shine, .cin-badge--anim-shine { position: relative; overflow: hidden; }
+.cin-badge--shine::after, .cin-badge--anim-shine::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .7) 50%, transparent 80%);
+  animation: cinBadgeShine 2.4s ease-in-out infinite;
+}
+.cin-badge--pulse, .cin-badge--anim-pulse { animation: cinBadgePulse 1.9s ease-in-out infinite; }
+.cin-badge--anim-float { animation: cinBadgeFloat 2.6s ease-in-out infinite; }
+.cin-badge--font-serif { font-family: Georgia, "Times New Roman", serif; }
+.cin-badge--font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cin-badge--font-script { font-family: "Segoe Script", "Brush Script MT", "Comic Sans MS", cursive; }
+@keyframes cinBadgeShine { to { transform: translateX(120%); } }
+@keyframes cinBadgePulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .85; } }
+@keyframes cinBadgeFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+
+.cin-name { font-weight: 700; }
+.cin-name--glow { text-shadow: 0 0 10px currentColor; }
+.cin-name--gradient { background-image: linear-gradient(90deg, currentColor, rgba(255, 255, 255, .9)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.cin-name--shine { background-image: linear-gradient(100deg, currentColor 20%, #fff 50%, currentColor 80%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: cinNameShine 2.8s linear infinite; }
+.cin-name--rainbow { background-image: linear-gradient(90deg, #ff6b6b, #ffd166, #7ee787, #63b3ff, #c792ea, #ff6b6b); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: cinNameShine 4s linear infinite; }
+.cin-name--outline { -webkit-text-stroke: .6px currentColor; color: transparent; }
+@keyframes cinNameShine { to { background-position: -220% 0; } }
+
+/* ==== Trình soạn nhãn trong trang quản trị tài khoản ==== */
+.admin-style-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line, rgba(255, 255, 255, .08)); display: grid; gap: 12px; }
+.admin-style-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.admin-style-heading strong { display: block; font-size: 15px; }
+.admin-style-heading small { display: block; margin-top: 2px; color: var(--muted, #9aa0a6); font-size: 12.5px; }
+.admin-style-empty { margin: 0; color: var(--muted, #9aa0a6); font-size: 13px; }
+.admin-style-note { margin: 0; color: #d2f36b; font-size: 12.5px; }
+.admin-badge-list { display: grid; gap: 12px; }
+.admin-badge-card { border: 1px solid var(--line, rgba(255, 255, 255, .1)); border-radius: 14px; padding: 12px; background: rgba(255, 255, 255, .02); display: grid; gap: 10px; }
+.admin-badge-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.admin-badge-tabs { display: inline-flex; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, .05); }
+.admin-badge-tabs button { border: 0; background: transparent; color: inherit; padding: 5px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+.admin-badge-tabs button.is-active { background: #d2f36b; color: #10160a; font-weight: 700; }
+.admin-badge-remove { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #ff8080; font-size: 13px; cursor: pointer; }
+.admin-badge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 10px 12px; }
+.admin-badge-grid label { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-badge-grid label.is-wide, .admin-badge-suggest.is-wide { grid-column: 1 / -1; }
+.admin-badge-grid label.is-action { align-content: start; }
+.admin-badge-grid input[type="text"], .admin-badge-grid input:not([type]), .admin-badge-grid select, .admin-name-style input:not([type="color"]), .admin-name-style select, .admin-avatar-link input { background: rgba(255, 255, 255, .05); border: 1px solid var(--line, rgba(255, 255, 255, .12)); border-radius: 10px; padding: 8px 10px; color: inherit; font-size: 13px; width: 100%; }
+.admin-badge-grid input[type="color"] { width: 100%; height: 34px; padding: 2px; border-radius: 10px; border: 1px solid var(--line, rgba(255, 255, 255, .12)); background: rgba(255, 255, 255, .05); cursor: pointer; }
+.admin-badge-suggest { display: grid; gap: 6px; font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-badge-suggest span { color: var(--muted, #9aa0a6); }
+.admin-badge-suggest div { display: flex; flex-wrap: wrap; gap: 6px; }
+.admin-badge-suggest button { border: 1px solid var(--line, rgba(255, 255, 255, .14)); background: transparent; color: inherit; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.admin-badge-suggest button:hover { border-color: #d2f36b; color: #d2f36b; }
+.admin-badge-suggest p { margin: 0; line-height: 1.55; }
+.admin-badge-preview { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 2px; }
+.admin-badge-preview > span { font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-badge-preview > div { display: inline-flex; align-items: center; gap: 2px; min-height: 30px; padding: 4px 12px; border-radius: 10px; background: rgba(255, 255, 255, .04); }
+.admin-style-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-name-style { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 12px; align-items: end; }
+.admin-name-style label { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-name-style input[type="color"] { width: 100%; height: 34px; padding: 2px; border-radius: 10px; border: 1px solid var(--line, rgba(255, 255, 255, .12)); background: rgba(255, 255, 255, .05); cursor: pointer; }
+.admin-avatar-row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.admin-avatar-frame { width: 92px; height: 92px; border-radius: 22px; border: 1px solid var(--line, rgba(255, 255, 255, .14)); background: rgba(255, 255, 255, .04); display: grid; place-items: center; overflow: hidden; cursor: pointer; padding: 0; }
+.admin-avatar-frame img { width: 100%; height: 100%; object-fit: cover; }
+.admin-avatar-actions { display: grid; gap: 8px; flex: 1 1 260px; }
+.admin-avatar-actions .button { display: inline-flex; align-items: center; gap: 6px; justify-content: center; width: fit-content; }
+.admin-avatar-link { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-avatar-link input { flex: 1 1 220px; }
+.admin-account-edit-grid.is-plain { border: 0; padding: 0; background: transparent; }
+
+/* ===== Bảng chỉnh sửa tài khoản: bố cục hai cột, mỗi nhóm là một thẻ riêng ===== */
+.admin-account-edit { display: grid; gap: 14px; margin-top: 14px; padding: 16px; border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 18px; background: rgba(255,255,255,.02); }
+.admin-edit-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); }
+.admin-edit-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.admin-edit-avatar { width: 46px; height: 46px; border-radius: 14px; overflow: hidden; display: grid; place-items: center; background: rgba(255,255,255,.06); border: 1px solid var(--line, rgba(255,255,255,.12)); flex: 0 0 auto; }
+.admin-edit-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.admin-edit-identity strong { display: flex; align-items: center; gap: 6px; font-size: 15px; flex-wrap: wrap; }
+.admin-edit-identity span { display: block; margin-top: 2px; color: var(--muted, #9aa0a6); font-size: 12.5px; }
+.admin-edit-columns { display: grid; grid-template-columns: minmax(320px, 430px) minmax(360px, 1fr); gap: 14px; align-items: start; }
+.admin-edit-column { display: grid; gap: 14px; align-content: start; }
+.admin-edit-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 16px; background: rgba(255,255,255,.03); }
+.admin-edit-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.admin-edit-step { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #10160a; background: #d2f36b; }
+.admin-edit-card-head strong { display: block; font-size: 14.5px; }
+.admin-edit-card-head small { display: block; margin-top: 2px; color: var(--muted, #9aa0a6); font-size: 12.5px; }
+.admin-edit-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 12px; }
+.admin-edit-fields label { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-edit-fields label.is-wide { grid-column: 1 / -1; }
+.admin-edit-fields label small { color: var(--muted, #9aa0a6); font-size: 11.5px; }
+.admin-edit-fields input, .admin-edit-fields select { background: rgba(255,255,255,.05); border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 10px; padding: 9px 11px; color: inherit; font-size: 13.5px; width: 100%; }
+.admin-edit-fields input:focus, .admin-edit-fields select:focus { outline: none; border-color: #d2f36b; box-shadow: 0 0 0 3px rgba(210,243,107,.12); }
+.admin-edit-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-style-count { font-size: 12.5px; color: var(--muted, #9aa0a6); }
+.admin-name-style { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 12px; align-items: end; }
+@media (max-width: 1080px) { .admin-edit-columns { grid-template-columns: 1fr; } }
+
+/* Hàng ảnh đại diện trong bảng sửa tài khoản: khung ảnh cố định, phần thao tác xếp gọn. */
+.admin-edit-card .admin-avatar-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 14px; align-items: start; }
+.admin-edit-card .admin-avatar-actions { display: grid; gap: 10px; }
+.admin-edit-card .admin-avatar-actions .button { width: fit-content; }
+.admin-edit-card .admin-avatar-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.admin-edit-card .admin-avatar-link input { width: 100%; flex: none; }
+.admin-edit-card .admin-avatar-actions .admin-style-note,
+.admin-edit-card .admin-avatar-actions .admin-tv-error { font-size: 12.5px; }
+@media (max-width: 620px) { .admin-edit-card .admin-avatar-row { grid-template-columns: 1fr; } }

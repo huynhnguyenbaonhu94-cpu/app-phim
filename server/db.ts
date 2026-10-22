@@ -338,6 +338,10 @@ export type MovieCommentView = {
   userName: string;
   userRole: string | null;
   badge: string | null;
+  /** Danh sách nhãn dạng JSON để app hiển thị nhiều nhãn cùng lúc. */
+  badges: string | null;
+  /** Kiểu chữ tên người dùng dạng JSON (màu, hiệu ứng). */
+  nameStyle: string | null;
   userAvatar: string | null;
   userId: string;
   isMine: boolean;
@@ -353,6 +357,8 @@ type CommentProfile = {
   name: string | null;
   role: string | null;
   badge: string | null;
+  badges: string | null;
+  nameStyle: string | null;
   avatar: string | null;
 };
 
@@ -416,6 +422,9 @@ export async function ensureUsersProfileCompatibility(db: ReturnType<typeof driz
   const columnsToEnsure: Array<[string, string]> = [
     ["avatar", "mediumtext"],
     ["badge", "varchar(40)"],
+    // Nhiều nhãn cho một tài khoản (JSON) và kiểu chữ tên người dùng.
+    ["badges", "mediumtext"],
+    ["nameStyle", "varchar(255)"],
   ];
   for (const [column, type] of columnsToEnsure) {
     const definition = `${type} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL`;
@@ -439,7 +448,7 @@ export async function ensureUsersProfileCompatibility(db: ReturnType<typeof driz
   try {
     const [checkRows] = await db.execute(sql`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME IN ('avatar','badge')`);
     const found = new Set(((checkRows as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => row.COLUMN_NAME));
-    return found.has("avatar") && found.has("badge");
+    return found.has("avatar") && found.has("badge") && found.has("badges") && found.has("nameStyle");
   } catch {
     // Không đọc được INFORMATION_SCHEMA thì coi như đã xử lý xong để không ALTER lặp lại.
     return true;
@@ -513,6 +522,8 @@ async function loadCommentProfiles(db: ReturnType<typeof drizzle>, userIds: numb
       name: users.name,
       role: users.role,
       badge: users.badge,
+      badges: users.badges,
+      nameStyle: users.nameStyle,
       avatar: users.avatar,
     })
     .from(users)
@@ -523,14 +534,30 @@ async function loadCommentProfiles(db: ReturnType<typeof drizzle>, userIds: numb
       name: row.name,
       role: row.role ?? null,
       badge: row.badge ?? null,
+      badges: row.badges ?? null,
+      nameStyle: row.nameStyle ?? null,
       avatar: row.avatar ?? null,
     });
   }
   return profiles;
 }
 
+/**
+ * Thời điểm bình luận dạng mili giây.
+ *
+ * MySQL trả `timestamp` theo múi giờ của máy chủ nên nếu đọc thẳng ra Date, giờ có
+ * thể bị lệch khiến app hiển thị "vừa xong" hàng giờ. Vì vậy truy vấn luôn kèm
+ * `UNIX_TIMESTAMP(createdAt)` để lấy đúng thời điểm tuyệt đối, không phụ thuộc múi giờ.
+ */
+function commentCreatedAt(row: MovieCommentRow): Date {
+  const epochSeconds = (row as MovieCommentRow & { createdAtEpoch?: number | string | null }).createdAtEpoch;
+  const epoch = Number(epochSeconds);
+  if (Number.isFinite(epoch) && epoch > 0) return new Date(epoch * 1000);
+  return row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+}
+
 function toCommentView(row: MovieCommentRow, profile: CommentProfile | undefined, viewer: CommentViewer): MovieCommentView {
-  const createdAt = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+  const createdAt = commentCreatedAt(row);
   const isMine = viewer !== null && row.userId === viewer.id;
   return {
     id: String(row.id),
@@ -540,6 +567,8 @@ function toCommentView(row: MovieCommentRow, profile: CommentProfile | undefined
     userName: profile?.name?.trim() || row.userName,
     userRole: profile?.role ?? row.userRole,
     badge: profile?.badge ?? null,
+    badges: profile?.badges ?? null,
+    nameStyle: profile?.nameStyle ?? null,
     userAvatar: profile?.avatar ?? null,
     userId: String(row.userId),
     isMine,
@@ -553,7 +582,18 @@ export async function listMovieComments(movieSlug: string, viewer: CommentViewer
   if (!db) throw new Error("Database is not available");
   // Lấy mới nhất trước để phim quá đông vẫn giữ được bình luận gần đây.
   const rows = await db
-    .select()
+    .select({
+      id: movieComments.id,
+      movieSlug: movieComments.movieSlug,
+      parentId: movieComments.parentId,
+      userId: movieComments.userId,
+      userName: movieComments.userName,
+      userRole: movieComments.userRole,
+      content: movieComments.content,
+      pinnedAt: movieComments.pinnedAt,
+      createdAt: movieComments.createdAt,
+      createdAtEpoch: sql<number>`UNIX_TIMESTAMP(${movieComments.createdAt})`.as("createdAtEpoch"),
+    })
     .from(movieComments)
     .where(eq(movieComments.movieSlug, movieSlug))
     .orderBy(desc(movieComments.id))
@@ -578,7 +618,22 @@ export async function listMovieComments(movieSlug: string, viewer: CommentViewer
 export async function findMovieComment(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const rows = await db.select().from(movieComments).where(eq(movieComments.id, id)).limit(1);
+  const rows = await db
+    .select({
+      id: movieComments.id,
+      movieSlug: movieComments.movieSlug,
+      parentId: movieComments.parentId,
+      userId: movieComments.userId,
+      userName: movieComments.userName,
+      userRole: movieComments.userRole,
+      content: movieComments.content,
+      pinnedAt: movieComments.pinnedAt,
+      createdAt: movieComments.createdAt,
+      createdAtEpoch: sql<number>`UNIX_TIMESTAMP(${movieComments.createdAt})`.as("createdAtEpoch"),
+    })
+    .from(movieComments)
+    .where(eq(movieComments.id, id))
+    .limit(1);
   return rows[0] ?? null;
 }
 
@@ -622,6 +677,34 @@ export async function pinMovieComment(input: { id: number; pinned: boolean }): P
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   await db.update(movieComments).set({ pinnedAt: input.pinned ? new Date() : null }).where(eq(movieComments.id, input.id));
+}
+
+/** Đặt danh sách nhãn (JSON) và giữ cột `badge` cũ đồng bộ cho bản app cũ. */
+export async function setUserBadges(userId: number, badges: string | null, legacyBadge: string | null): Promise<void> {
+  await ensureUsersProfileReady();
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  try {
+    await db.update(users).set({ badges, badge: legacyBadge }).where(eq(users.id, userId));
+  } catch (error) {
+    if (!needsProfileRepair(error)) throw error;
+    await repairUsersProfile();
+    await db.update(users).set({ badges, badge: legacyBadge }).where(eq(users.id, userId));
+  }
+}
+
+/** Đặt kiểu chữ tên người dùng (JSON: màu, hiệu ứng) cho một tài khoản. */
+export async function setUserNameStyle(userId: number, nameStyle: string | null): Promise<void> {
+  await ensureUsersProfileReady();
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  try {
+    await db.update(users).set({ nameStyle }).where(eq(users.id, userId));
+  } catch (error) {
+    if (!needsProfileRepair(error)) throw error;
+    await repairUsersProfile();
+    await db.update(users).set({ nameStyle }).where(eq(users.id, userId));
+  }
 }
 
 /** Đặt hoặc xoá nhãn tuỳ chỉnh của một tài khoản. */

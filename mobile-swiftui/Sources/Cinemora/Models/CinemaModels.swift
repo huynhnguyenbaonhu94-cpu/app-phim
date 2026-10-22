@@ -227,8 +227,12 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var id: String { slug.isEmpty ? name : slug }
     var streamURL: URL? { CinemaAPI.absoluteURL(streamUrl) }
     var directStreamURL: URL? { CinemaAPI.absoluteURL(directStreamUrl) }
-    /// Nguồn phát nên dùng: link M3U8 gốc trước, proxy chỉ là phương án sau.
-    var playbackURL: URL? { directStreamURL ?? streamURL }
+    /// Nguồn phát nên dùng.
+    ///
+    /// Ưu tiên proxy của Cinemora vì máy chủ tự gắn header hợp lệ cho CDN và tự viết lại
+    /// playlist — đúng đường mà website đang phát được. Link CDN gốc chỉ là phương án sau:
+    /// nhiều CDN chặn client không phải trình duyệt nên app báo "không thể phát video".
+    var playbackURL: URL? { streamURL ?? directStreamURL }
     var embedURL: URL? { CinemaAPI.absoluteURL(embedUrl) }
     var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
     var bilingualSubtitleURL: URL? { CinemaAPI.absoluteURL(bilingualSubtitleUrl) }
@@ -238,8 +242,10 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     /// Dùng link này thì trình phát có nhóm phụ đề hợp lệ, nhờ đó PiP hiện được
     /// phụ đề; nếu master playlist lỗi, trình phát tự quay về link gốc.
     var subtitledPlaylistURL: URL? {
-        guard let subtitleURL, let video = directStreamURL ?? streamURL else { return nil }
-        guard video.absoluteString.contains(".m3u8") else { return nil }
+        guard let subtitleURL, let video = streamURL ?? directStreamURL else { return nil }
+        let path = video.absoluteString.lowercased()
+        // Nhận cả link .m3u8 gốc lẫn link proxy của Cinemora, vì proxy cũng trả playlist HLS.
+        guard path.contains(".m3u8") || path.contains("/api/cinema/stream/") else { return nil }
         return CinemaAPI.subtitledPlaylistURL(video: video, subtitle: subtitleURL)
     }
 

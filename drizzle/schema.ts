@@ -12,6 +12,10 @@ export const users = mysqlTable("users", {
   avatar: mediumtext("avatar"),
   /** Nhãn tuỳ chỉnh do admin đặt, hiện cạnh tên khi bình luận, ví dụ "VIP". */
   badge: varchar("badge", { length: 40 }),
+  /** Danh sách nhãn (JSON): nhiều nhãn, màu, hiệu ứng, chữ hoặc ảnh/GIF. */
+  badges: mediumtext("badges"),
+  /** Kiểu tên người dùng (JSON): màu và hiệu ứng làm nổi bật tên. */
+  nameStyle: varchar("nameStyle", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
