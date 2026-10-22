@@ -77,8 +77,27 @@ struct EdgeBackDrag: ViewModifier {
 // MARK: - Entrance reveal
 
 /// Staggered fade + rise used when a screen's content first appears.
+/// Nhớ những thẻ đã chạy hiệu ứng vào trong phiên này.
+///
+/// Lưới lười dựng lại ô khi màn hình bị che rồi hiện lại, và `@State` của ô bị đặt
+/// lại nên trước đây quay ra từ trang chi tiết là cả danh sách trượt vào lần nữa —
+/// người dùng thấy như màn hình vừa tải lại. Khoá theo id phim nên mỗi phim chỉ
+/// chạy hiệu ứng đúng một lần.
+@MainActor
+enum AuroraRevealRegistry {
+    private static var seen: Set<String> = []
+
+    static func contains(_ key: String) -> Bool { seen.contains(key) }
+
+    static func remember(_ key: String) {
+        if seen.count < 5000 { seen.insert(key) }
+    }
+}
+
 struct AuroraReveal: ViewModifier {
     let index: Int
+    /// Khoá ổn định của thẻ (ví dụ id phim) để hiệu ứng chỉ chạy một lần.
+    let key: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
 
@@ -97,10 +116,14 @@ struct AuroraReveal: ViewModifier {
             .onAppear {
                 guard !shown else { return }
                 guard !reduceMotion else { shown = true; return }
+                // Thẻ này đã chạy hiệu ứng ở lần hiện trước thì hiện ngay, không
+                // trượt lại khi người dùng quay về danh sách.
+                if let key, AuroraRevealRegistry.contains(key) { shown = true; return }
                 // Chỉ khung hình đầu chạy hiệu ứng vào; các ô dựng sau (khi cuộn
                 // lưới dài) hiện ngay để việc cuộn không phải chạy animation cho
                 // cả một hàng poster.
                 guard index <= 6 else { shown = true; return }
+                if let key { AuroraRevealRegistry.remember(key) }
                 withAnimation(Motion.enter.delay(Double(index) * 0.02)) {
                     shown = true
                 }
@@ -109,8 +132,8 @@ struct AuroraReveal: ViewModifier {
 }
 
 extension View {
-    func auroraReveal(_ index: Int = 0) -> some View {
-        modifier(AuroraReveal(index: index))
+    func auroraReveal(_ index: Int = 0, key: String? = nil) -> some View {
+        modifier(AuroraReveal(index: index, key: key))
     }
 
     /// Kept so existing screens compile. The scroll-linked scale/fade is gone on

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -148,32 +148,59 @@ const nowLocal = () => {
 };
 const today = () => nowLocal().slice(0, 10);
 
-/** Bốn lựa chọn nhanh cho mục Ngôn ngữ của phim thủ công. */
+/**
+ * Lựa chọn nhanh cho mục Ngôn ngữ của phim thủ công.
+ *
+ * "Vietsub" giữ nguyên cách viết quen dùng, hai mục còn lại viết hoa đầu từ để
+ * hiển thị đồng nhất trên web và trên app.
+ */
 const LANG_PRESETS: Array<{ value: string; label: string }> = [
   { value: "Vietsub", label: "Vietsub" },
-  { value: "Thuyết minh", label: "Thuyết minh" },
-  { value: "Lồng tiếng", label: "Lồng tiếng" },
+  { value: "Thuyết Minh", label: "Thuyết Minh" },
+  { value: "Lồng Tiếng", label: "Lồng Tiếng" },
 ];
 
-/** So khớp ngôn ngữ đã lưu với lựa chọn nhanh (bỏ dấu, không phân biệt hoa thường). */
-function langPresetOf(value: string): string {
-  const folded = value
+/** Dấu nối các kiểu âm thanh khi một phim có nhiều ngôn ngữ. */
+const LANG_JOIN = " + ";
+
+/** Bỏ dấu tiếng Việt và hạ chữ thường để so khớp ngôn ngữ đã lưu với lựa chọn nhanh. */
+function foldLang(value: string): string {
+  return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .trim()
     .toLocaleLowerCase("vi-VN");
-  if (!folded) return "";
-  const preset = LANG_PRESETS.find(item =>
-    item.value
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/đ/g, "d")
-      .replace(/Đ/g, "D")
-      .toLocaleLowerCase("vi-VN") === folded,
-  );
-  return preset ? preset.value : "other";
+}
+
+/**
+ * Tách chuỗi ngôn ngữ đã lưu thành các lựa chọn nhanh và phần ghi tự do.
+ *
+ * Phim có thể có nhiều kiểu âm thanh ("Thuyết Minh + Lồng Tiếng"), và bản cũ có thể
+ * lưu "Thuyết minh" chữ thường nên phép so khớp bỏ dấu và không phân biệt hoa thường.
+ */
+function parseLang(value: string): { presets: string[]; custom: string } {
+  const parts = value
+    .split(/\s*\+\s*|\s*,\s*|\s*\/\s*/)
+    .map(part => part.trim())
+    .filter(Boolean);
+  const presets: string[] = [];
+  const rest: string[] = [];
+  for (const part of parts) {
+    const preset = LANG_PRESETS.find(item => foldLang(item.value) === foldLang(part));
+    if (preset) {
+      if (!presets.includes(preset.value)) presets.push(preset.value);
+    } else {
+      rest.push(part);
+    }
+  }
+  return { presets, custom: rest.join(LANG_JOIN) };
+}
+
+/** Ghép các lựa chọn thành chuỗi lưu trong cơ sở dữ liệu, ví dụ "Thuyết Minh + Lồng Tiếng". */
+function composeLang(presets: string[], custom: string): string {
+  return [...presets, custom.trim()].filter(Boolean).join(LANG_JOIN);
 }
 
 const MONTH_LABELS = [
@@ -224,7 +251,8 @@ function todayIso(): string {
  * nút lùi/tiến tháng, ô chọn tháng và ô nhập năm nên nhảy nhanh tới bất kỳ mốc nào.
  * Giá trị lưu trong form vẫn là yyyy-mm-dd nên phần gửi lên máy chủ không đổi.
  */
-function DateField({ value, onChange }: { value: string; onChange: (iso: string) => void }) {
+const DateField = memo(
+  function DateField({ value, onChange }: { value: string; onChange: (iso: string) => void }) {
   const [text, setText] = useState(() => isoToDisplay(value));
   const [open, setOpen] = useState(false);
   const [monthOpen, setMonthOpen] = useState(false);
@@ -411,7 +439,9 @@ function DateField({ value, onChange }: { value: string; onChange: (iso: string)
       )}
     </div>
   );
-}
+  },
+  (prev, next) => prev.value === next.value,
+);
 
 
 const emptyForm = (): FormState => ({
@@ -1399,7 +1429,7 @@ function scrollEpisodeIntoView(id: number) {
   });
 }
 
-function SourcesManager({ slug }: { slug: string }) {
+const SourcesManager = memo(function SourcesManager({ slug }: { slug: string }) {
   const [sourceName, setSourceName] = useState("");
   const [addingSource, setAddingSource] = useState(false);
   const [editingSource, setEditingSource] = useState<number | null>(null);
@@ -1680,10 +1710,99 @@ function SourcesManager({ slug }: { slug: string }) {
       )}
     </section>
   );
-}
+});
 /* ------------------------------------------------------------------ */
 /* Trang chính: thêm / sửa phim thủ công                               */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Danh sách phim thủ công trong khung riêng.
+ *
+ * Trước đây danh sách nằm thẳng trong cột phải nên càng nhiều phim trang càng dài;
+ * nay có ô tìm nhanh và khung cuộn riêng, ảnh poster tải lười. Bộ so sánh của `memo`
+ * chỉ xét dữ liệu nên gõ trong form không dựng lại cả danh sách.
+ */
+const CustomMovieListPanel = memo(
+  function CustomMovieListPanel({
+    movies,
+    currentId,
+    removing,
+    onRemove,
+  }: {
+    movies: CustomMovieRow[];
+    currentId: number | null;
+    removing: boolean;
+    onRemove: (movie: CustomMovieRow) => void;
+  }) {
+    const [query, setQuery] = useState("");
+    const deferredQuery = useDeferredValue(query);
+    const visible = useMemo(() => {
+      const needle = foldLang(deferredQuery);
+      if (!needle) return movies;
+      return movies.filter(
+        movie => foldLang(movie.name).includes(needle) || foldLang(movie.slug).includes(needle),
+      );
+    }, [movies, deferredQuery]);
+
+    return (
+      <>
+        <label className="custom-list-search">
+          <Search size={14} />
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Tìm phim thủ công…"
+            aria-label="Tìm phim thủ công"
+          />
+          {query && (
+            <button type="button" onClick={() => setQuery("")} aria-label="Xoá tìm kiếm">
+              ×
+            </button>
+          )}
+        </label>
+        {visible.length === 0 ? (
+          <p className="custom-muted">
+            {movies.length === 0 ? "Chưa có phim thủ công." : "Không tìm thấy phim phù hợp."}
+          </p>
+        ) : (
+          <div className="custom-movie-list">
+            {visible.map(movie => (
+              <article className={currentId === movie.id ? "is-current" : ""} key={movie.id}>
+                <div className="custom-list-poster">
+                  {movie.posterUrl || movie.thumbUrl ? (
+                    <img src={movie.posterUrl || movie.thumbUrl || ""} alt="" loading="lazy" decoding="async" />
+                  ) : (
+                    <Database size={15} />
+                  )}
+                </div>
+                <div>
+                  <strong>{movie.name}</strong>
+                  <span>
+                    {movie.year || "—"} · {movie.movieType === "single" ? "Phim lẻ" : "Phim bộ"}
+                  </span>
+                </div>
+                <RouterLink href={`/admin/movies/custom/${movie.id}`} aria-label={`Sửa ${movie.name}`}>
+                  <Pencil size={14} />
+                </RouterLink>
+                <button
+                  type="button"
+                  onClick={() => onRemove(movie)}
+                  disabled={removing}
+                  aria-label={`Xoá ${movie.name}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  },
+  (prev, next) =>
+    prev.movies === next.movies && prev.currentId === next.currentId && prev.removing === next.removing,
+);
+
 
 export default function AdminCustomMovie({ params }: { params?: Record<string, string | undefined> }) {
   const id = params?.id;
@@ -1719,9 +1838,9 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
     actorServerDisabled.current = readActorServerFlag();
   }, []);
 
-  // Mở phim đã lưu mà ngôn ngữ không khớp lựa chọn nhanh thì hiện luôn ô nhập tự do.
+  // Mở phim đã lưu mà ngôn ngữ có phần ghi tự do thì hiện luôn ô nhập tương ứng.
   useEffect(() => {
-    if (langPresetOf(form.lang) === "other") setLangOther(true);
+    if (parseLang(form.lang).custom) setLangOther(true);
   }, [form.lang]);
 
   // Bấm ra ngoài hoặc Esc thì đóng danh sách Ngôn ngữ.
@@ -1743,20 +1862,26 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
     };
   }, [langOpen]);
 
-  const langValue = langOther ? "other" : langPresetOf(form.lang);
-  const langLabel = langValue === "" ? "Chưa chọn" : langValue === "other" ? "Khác…" : langValue;
+  const parsedLang = parseLang(form.lang);
+  const langLabel = form.lang.trim() || "Chưa chọn";
+  const showLangCustom = langOther || Boolean(parsedLang.custom);
 
-  /** Chọn ngôn ngữ từ danh sách tự vẽ. */
-  function chooseLang(next: string) {
-    setLangOpen(false);
-    if (next === "other") {
-      setLangOther(true);
-      // Giữ nguyên chữ đã gõ nếu đang là ngôn ngữ tự do.
-      if (langPresetOf(form.lang) !== "other") setField("lang", "");
-      return;
-    }
+  /** Bật/tắt một kiểu âm thanh; chọn được nhiều mục cùng lúc nên danh sách không tự đóng. */
+  function toggleLangPreset(value: string) {
+    const picked = parsedLang.presets.includes(value)
+      ? parsedLang.presets.filter(item => item !== value)
+      : [...parsedLang.presets, value];
+    setField("lang", composeLang(picked, parsedLang.custom));
+  }
+
+  /** Ghi tự do (ví dụ "Vietsub AI"): vẫn giữ các lựa chọn nhanh đang tick. */
+  function setLangCustom(value: string) {
+    setField("lang", composeLang(parsedLang.presets, value));
+  }
+
+  function clearLang() {
     setLangOther(false);
-    setField("lang", next);
+    setField("lang", "");
   }
 
   function markActorServerDisabled() {
@@ -1783,6 +1908,23 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
   const createMovie = trpc.customMovies.create.useMutation();
   const updateMovie = trpc.customMovies.update.useMutation();
   const removeMovie = trpc.customMovies.remove.useMutation();
+  /** Xoá phim thủ công rồi làm mới danh sách; nếu đang sửa chính phim đó thì về form trắng. */
+  const handleRemoveMovie = useCallback(
+    (movie: CustomMovieRow) => {
+      if (!window.confirm(`Xoá phim “${movie.name}”?`)) return;
+      removeMovie.mutate(
+        { id: movie.id },
+        {
+          onSuccess: async () => {
+            await listQuery.refetch();
+            if (editing && movie.id === movieId) navigate("/admin/movies/custom/new");
+          },
+        },
+      );
+    },
+    [editing, movieId, navigate, removeMovie, listQuery],
+  );
+
 
   // Thông báo tự ẩn sau ít giây nên mở lại phim để sửa sẽ không thấy thông báo cũ.
   useEffect(() => {
@@ -1813,7 +1955,7 @@ export default function AdminCustomMovie({ params }: { params?: Record<string, s
 
   const categories = (metaQuery.data?.categories || []) as Tag[];
   const countries = (metaQuery.data?.countries || []) as Tag[];
-  const customMovies = (listQuery.data || []) as CustomMovieRow[];
+  const customMovies = useMemo(() => (listQuery.data || []) as CustomMovieRow[], [listQuery.data]);
   const isAdmin = user?.role === "admin";
   const saving = createMovie.isPending || updateMovie.isPending;
 
@@ -2390,40 +2532,40 @@ function message(text: string): string {
                       <ChevronDown size={15} />
                     </button>
                     {langOpen && (
-                      <div className="custom-lang-pop" role="listbox">
+                      <div className="custom-lang-pop" role="listbox" aria-multiselectable="true">
+                        {LANG_PRESETS.map(item => {
+                          const picked = parsedLang.presets.includes(item.value);
+                          return (
+                            <button
+                              key={item.value}
+                              type="button"
+                              className={picked ? "custom-lang-option is-selected" : "custom-lang-option"}
+                              onClick={() => toggleLangPreset(item.value)}
+                              role="option"
+                              aria-selected={picked}
+                            >
+                              <span className="custom-lang-tick" aria-hidden="true">{picked ? "✓" : ""}</span>
+                              {item.label}
+                            </button>
+                          );
+                        })}
                         <button
                           type="button"
-                          className={langValue === "" ? "custom-lang-option is-selected" : "custom-lang-option"}
-                          onClick={() => chooseLang("")}
+                          className={showLangCustom ? "custom-lang-option is-selected" : "custom-lang-option"}
+                          onClick={() => setLangOther(current => !current)}
                           role="option"
-                          aria-selected={langValue === ""}
+                          aria-selected={showLangCustom}
                         >
-                          Chưa chọn
-                        </button>
-                        {LANG_PRESETS.map(item => (
-                          <button
-                            key={item.value}
-                            type="button"
-                            className={langValue === item.value ? "custom-lang-option is-selected" : "custom-lang-option"}
-                            onClick={() => chooseLang(item.value)}
-                            role="option"
-                            aria-selected={langValue === item.value}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          className={langValue === "other" ? "custom-lang-option is-selected" : "custom-lang-option"}
-                          onClick={() => chooseLang("other")}
-                          role="option"
-                          aria-selected={langValue === "other"}
-                        >
+                          <span className="custom-lang-tick" aria-hidden="true">{showLangCustom ? "✓" : ""}</span>
                           Khác…
+                        </button>
+                        <button type="button" className="custom-lang-option is-muted" onClick={clearLang}>
+                          Bỏ chọn tất cả
                         </button>
                       </div>
                     )}
                   </div>
+                  <span className="custom-lang-hint">Chọn được nhiều mục cùng lúc — ví dụ Thuyết Minh + Lồng Tiếng.</span>
                 </label>
                 <label>
                   Thời lượng
@@ -2431,13 +2573,13 @@ function message(text: string): string {
                 </label>
               </div>
 
-              {(langOther || langPresetOf(form.lang) === "other") && (
+              {showLangCustom && (
                 <label className="custom-lang-custom">
                   Ngôn ngữ khác
                   <input
-                    value={form.lang}
-                    onChange={event => setField("lang", event.target.value)}
-                    placeholder="Ví dụ: Vietsub AI, Thuyết minh AI…"
+                    value={parsedLang.custom}
+                    onChange={event => setLangCustom(event.target.value)}
+                    placeholder="Ví dụ: Vietsub AI, Thuyết Minh AI…"
                   />
                   <span className="custom-lang-hint">
                     Ghi rõ kiểu ngôn ngữ để phim vẫn nằm đúng danh sách lọc — “Vietsub AI” được tính là Vietsub.
@@ -2701,56 +2843,19 @@ function message(text: string): string {
               <div className="admin-source-panel-heading">
                 <div>
                   <strong>Phim thủ công</strong>
-                  <span>{customMovies.length} phim đã thêm</span>
+                  <span>{customMovies.length} phim đã thêm · cuộn trong khung</span>
                 </div>
                 <Database size={18} />
               </div>
               {listQuery.isLoading ? (
                 <p className="admin-movies-muted">Đang tải…</p>
-              ) : customMovies.length === 0 ? (
-                <p className="custom-muted">Chưa có phim thủ công.</p>
               ) : (
-                <div className="custom-movie-list">
-                  {customMovies.map(movie => (
-                    <article className={editing && movie.id === movieId ? "is-current" : ""} key={movie.id}>
-                      <div className="custom-list-poster">
-                        {movie.posterUrl || movie.thumbUrl ? (
-                          <img src={movie.posterUrl || movie.thumbUrl || ""} alt="" />
-                        ) : (
-                          <Database size={15} />
-                        )}
-                      </div>
-                      <div>
-                        <strong>{movie.name}</strong>
-                        <span>
-                          {movie.year || "—"} · {movie.movieType === "single" ? "Phim lẻ" : "Phim bộ"}
-                        </span>
-                      </div>
-                      <RouterLink href={`/admin/movies/custom/${movie.id}`} aria-label={`Sửa ${movie.name}`}>
-                        <Pencil size={14} />
-                      </RouterLink>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(`Xoá phim “${movie.name}”?`))
-                            removeMovie.mutate(
-                              { id: movie.id },
-                              {
-                                onSuccess: async () => {
-                                  await listQuery.refetch();
-                                  if (editing && movie.id === movieId) navigate("/admin/movies/custom/new");
-                                },
-                              },
-                            );
-                        }}
-                        disabled={removeMovie.isPending}
-                        aria-label={`Xoá ${movie.name}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </article>
-                  ))}
-                </div>
+                <CustomMovieListPanel
+                  movies={customMovies}
+                  currentId={editing ? movieId : null}
+                  removing={removeMovie.isPending}
+                  onRemove={handleRemoveMovie}
+                />
               )}
             </section>
 

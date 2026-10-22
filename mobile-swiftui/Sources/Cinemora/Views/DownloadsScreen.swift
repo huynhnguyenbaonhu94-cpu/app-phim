@@ -31,6 +31,7 @@ struct DownloadsScreen: View {
                     }
                     .padding(.top, 8)
                     header
+                    if let notice = downloads.wifiNotice { wifiBanner(notice) }
                     summaryCard
                     filterBar
                     if !shownItems.isEmpty { bulkActions }
@@ -72,6 +73,31 @@ struct DownloadsScreen: View {
         } message: {
             Text("Toàn bộ \(doneItems.count) tập đã tải sẽ bị xoá khỏi máy. Phim đang tải dở không bị ảnh hưởng.")
         }
+    }
+
+    /// Nhắc rõ vì sao bản tải đang chờ: phim chỉ tải qua Wi-Fi.
+    private func wifiBanner(_ text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.auroraAmber)
+            Text(text)
+                .font(.auroraBody(11))
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.auroraAmber.opacity(0.12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.auroraAmber.opacity(0.32), lineWidth: 0.8)
+                }
+        }
+        .transition(.opacity)
     }
 
     private var header: some View {

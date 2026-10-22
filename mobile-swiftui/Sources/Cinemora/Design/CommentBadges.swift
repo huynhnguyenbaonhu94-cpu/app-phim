@@ -125,6 +125,17 @@ struct CommentBadgeImage: View {
     @State private var entry: BadgeImageStore.Entry?
     @State private var frameIndex = 0
 
+    /// Bề rộng thật của ảnh theo tỉ lệ khung hình, chặn trên để nhãn quá dài không chiếm cả hàng.
+    ///
+    /// Trước đây khung chỉ đặt `maxWidth` nên luôn rộng 64pt trong khi ảnh vẽ nhỏ hơn, để lại
+    /// một khoảng trống lớn ngay sau tên người dùng.
+    private var displayWidth: CGFloat {
+        guard let first = entry?.frames.first, first.size.height > 0 else { return 0 }
+        let ratio = first.size.width / first.size.height
+        let scaled = CommentBadgeMetrics.imageHeight * ratio
+        return min(CommentBadgeMetrics.imageMaxWidth, max(10, scaled))
+    }
+
     var body: some View {
         Group {
             if let entry, let first = entry.frames.first {
@@ -141,8 +152,8 @@ struct CommentBadgeImage: View {
                 Color.clear
             }
         }
-        .frame(height: CommentBadgeMetrics.imageHeight)
-        .frame(maxWidth: CommentBadgeMetrics.imageMaxWidth, alignment: .leading)
+        .frame(width: displayWidth, height: CommentBadgeMetrics.imageHeight)
+        .animation(Motion.gentle, value: displayWidth)
         .task(id: urlString) {
             frameIndex = 0
             entry = await BadgeImageStore.shared.entry(for: urlString)

@@ -201,7 +201,8 @@ struct SearchScreen: View {
                     filterGroup("THỨ TỰ", options: ["Mới nhất", "Cũ nhất"], selected: newestFirst ? "Mới nhất" : "Cũ nhất") { value in
                         newestFirst = value == "Mới nhất"
                     }
-                    filterGroup("NGÔN NGỮ", options: ["Vietsub", "Thuyết minh", "Lồng tiếng"], selected: language) { value in
+                    // Nhãn viết hoa đầu từ cho khớp cách ghi trong trang quản trị.
+                    filterGroup("NGÔN NGỮ", options: ["Vietsub", "Thuyết Minh", "Lồng Tiếng"], selected: language) { value in
                         language = language == value ? "" : value
                     }
                     if !filterCategories.isEmpty {

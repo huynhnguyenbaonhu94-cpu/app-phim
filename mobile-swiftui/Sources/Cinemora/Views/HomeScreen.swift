@@ -184,12 +184,16 @@ struct SectionListScreen: View {
     let kind: String
     let title: String
 
+    @Environment(CinemaStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var movies: [Movie] = []
     @State private var page = 1
     @State private var loading = false
     @State private var reachedEnd = false
     @State private var loadError: String?
+    @State private var restored = false
+    /// Mốc của lần nạp gần nhất, để vừa quay về màn này không nạp thêm ngay.
+    @State private var lastLoadAt: Date = .distantPast
 
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -220,7 +224,7 @@ struct SectionListScreen: View {
                                 .tint(.auroraViolet)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
-                                .onAppear { Task { await load(reset: false) } }
+                                .onAppear { autoLoadNextPage() }
                         }
                     }
                 }
@@ -238,13 +242,29 @@ struct SectionListScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
         .modifier(EdgeBackDrag { dismiss() })
-        .task { await load(reset: true) }
-        // Quay về từ trang chi tiết có thể dựng lại màn này với danh sách rỗng.
-        // Nạp lại một lần nữa để không bao giờ còn màn trắng.
-        .onAppear {
-            guard movies.isEmpty, !loading else { return }
-            Task { await load(reset: true) }
+        // Danh sách đã có trong bộ nhớ đệm của cửa hàng thì hiện ra ngay, không tải
+        // lại từ đầu. Trước đây màn này bị dựng lại khi quay ra từ trang chi tiết nên
+        // người dùng thấy trắng danh sách rồi phim trượt vào như đang tải lại.
+        .task {
+            restoreFromCache()
+            guard movies.isEmpty else { return }
+            await load(reset: true)
         }
+    }
+
+    private func restoreFromCache() {
+        guard !restored else { return }
+        restored = true
+        guard let cache = store.sectionList(kind) else { return }
+        movies = cache.movies
+        page = cache.page
+        reachedEnd = cache.reachedEnd
+    }
+
+    /// Cuộn tới cuối thì nạp thêm, nhưng bỏ qua ngay sau khi màn vừa hiện lại.
+    private func autoLoadNextPage() {
+        guard Date().timeIntervalSince(lastLoadAt) > 1.5 else { return }
+        Task { await load(reset: false) }
     }
 
     private func load(reset: Bool) async {
@@ -257,6 +277,7 @@ struct SectionListScreen: View {
         }
         guard !reachedEnd else { return }
         loading = true
+        lastLoadAt = Date()
         defer { loading = false }
         do {
             let result = try await CinemaAPI.shared.list(page: page, kind: kind)
@@ -269,5 +290,7 @@ struct SectionListScreen: View {
             loadError = error.localizedDescription
             reachedEnd = true
         }
+        // Giữ lại cho lần quay về sau.
+        store.storeSectionList(kind: kind, movies: movies, page: page, reachedEnd: reachedEnd)
     }
 }

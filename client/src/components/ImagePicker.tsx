@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Crop, Image as ImageIcon, LoaderCircle, Maximize, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
@@ -168,7 +168,7 @@ function applyDrag(
   return ratio ? lockRatio(rect, handle, ratio, box) : rect;
 }
 
-export default function ImagePicker({
+function ImagePicker({
   value,
   onChange,
   label = "Ảnh",
@@ -621,3 +621,19 @@ export default function ImagePicker({
     </div>
   );
 }
+
+/**
+ * Ảnh đại diện, poster, thumbnail… là những khối nặng (khung cắt ảnh, tải lên, xem trước).
+ *
+ * Bộ so sánh chỉ xét dữ liệu hiển thị nên khi quản trị viên gõ ở ô khác trong form,
+ * các khối ảnh không dựng lại — đây là phần tốn thời gian nhất khi form dài.
+ */
+export default memo(
+  ImagePicker,
+  (prev, next) =>
+    prev.value === next.value &&
+    prev.aspect === next.aspect &&
+    prev.label === next.label &&
+    prev.hint === next.hint &&
+    prev.className === next.className,
+);

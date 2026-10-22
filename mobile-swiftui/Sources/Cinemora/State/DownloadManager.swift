@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import UIKit
 
 /// Quản lý phim tải về để xem khi không có wifi.
@@ -120,6 +121,14 @@ final class DownloadManager {
     private(set) var items: [Item] = []
     /// Thông báo cho màn cài đặt khi thư mục đổi hoặc quyền truy cập bị thu hồi.
     var folderMessage: String?
+    /// Máy đang dùng Wi-Fi hay không. Phim rất nặng nên chỉ tải qua Wi-Fi.
+    private(set) var isWiFi = true
+    /// Lời nhắc hiện trên màn Tải xuống khi cần Wi-Fi để chạy tiếp.
+    var wifiNotice: String?
+    private let pathMonitor = NWPathMonitor()
+    private var lastSaveAt: Date = .distantPast
+    private static let wifiMessage = "Cần Wi-Fi để tải phim. Khi máy bắt được Wi-Fi, bản đang chờ sẽ tự chạy tiếp."
+    private static let wifiResumeMessage = "Cần Wi-Fi để tải tiếp. Hãy bật Wi-Fi rồi bấm Tải tiếp." 
 
     private var tasks: [String: Task<Void, Never>] = [:]
     /// Số tập tải song song tối đa.
@@ -172,6 +181,12 @@ final class DownloadManager {
         configuration.timeoutIntervalForRequest = 30
         configuration.httpAdditionalHeaders = ["User-Agent": "Cinemora/1.0 (iOS)"]
         session = URLSession(configuration: configuration)
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let wifi = path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)
+            let online = path.status == .satisfied
+            Task { @MainActor in self?.applyNetwork(wifi: wifi, online: online) }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "com.cinemora.downloads.network"))
         customBookmark = UserDefaults.standard.data(forKey: Self.bookmarkKey)
         resolveCustomFolder()
         // Bản cũ lưu trong Application Support — chuyển sang thư mục mặc định mới.
@@ -343,6 +358,16 @@ final class DownloadManager {
 
     func start(_ id: String) {
         guard tasks[id] == nil, let item = item(id: id), item.phase != .finished else { return }
+        // Chỉ tải qua Wi-Fi: một tập phim có thể vài trăm MB tới vài GB.
+        guard isWiFi else {
+            mutate(id) {
+                if $0.phase == .downloading { $0.phase = .waiting }
+                $0.message = Self.wifiMessage
+            }
+            wifiNotice = Self.wifiMessage
+            save(force: true)
+            return
+        }
         // Tải cả bộ phim có thể là hàng chục tập: chỉ chạy vài tập cùng lúc để
         // không nghẽn mạng và không hao pin, phần còn lại xếp hàng chờ.
         guard tasks.count < maxConcurrent else {
@@ -388,8 +413,32 @@ final class DownloadManager {
     /// Tải tiếp đúng tiến trình đang dừng: tệp tạm đã có sẵn các phân đoạn đầu
     /// nên chỉ tải những phân đoạn còn lại.
     func retry(_ id: String) {
+        guard isWiFi else {
+            mutate(id) { $0.phase = .waiting; $0.message = Self.wifiResumeMessage }
+            wifiNotice = Self.wifiResumeMessage
+            save(force: true)
+            return
+        }
+        wifiNotice = nil
         mutate(id) { $0.phase = .waiting; $0.message = nil }
         start(id)
+    }
+
+    /// Wi-Fi bật lại thì chạy tiếp phần đang chờ; rời Wi-Fi thì dừng để không tốn
+    /// dữ liệu di động. Mục đang tạm dừng vẫn chờ người dùng bấm "Tải tiếp".
+    private func applyNetwork(wifi: Bool, online: Bool) {
+        let wasWiFi = isWiFi
+        isWiFi = wifi
+        guard online else { return }
+        if wifi, !wasWiFi {
+            wifiNotice = nil
+            pump()
+        } else if !wifi {
+            for item in items where item.phase == .downloading { pause(item.id) }
+            if items.contains(where: { $0.phase == .waiting || $0.phase == .paused }) {
+                wifiNotice = Self.wifiMessage
+            }
+        }
     }
 
     /// Xoá một bản tải xuống: **xoá luôn tệp phim trong thư mục tải xuống**,
@@ -469,7 +518,7 @@ final class DownloadManager {
             let resolved = try await Self.resolvePlaylist(playlist, base: url, fetch: { try await Self.fetch($0, session: session) })
             if resolved.encrypted {
                 mutate(id) { $0.phase = .unsupported; $0.message = "Nguồn này mã hoá AES-128 nên không tải offline được." }
-                save()
+                save(force: true)
                 return
             }
             guard !resolved.segments.isEmpty else { throw DownloadError.empty }
@@ -506,7 +555,7 @@ final class DownloadManager {
                         $0.phase = .failed
                         $0.message = "Không đủ dung lượng: tập này cần khoảng \(auroraByteText(need)) nhưng máy chỉ còn \(auroraByteText(free)). Hãy xoá bớt phim đã tải hoặc chọn lượng phim thấp hơn dung lượng còn trống."
                     }
-                    save()
+                    save(force: true)
                     return
                 }
             }
@@ -538,13 +587,14 @@ final class DownloadManager {
                         if elapsed > 1 { $0.speed = Double(bytes) / elapsed }
                     }
                 }
-                // Máy sắp hết chỗ thì dừng kèm lời báo rõ ràng.
-                if freeBytes < 300 * 1024 * 1024 {
+                // Máy sắp hết chỗ thì dừng kèm lời báo rõ ràng. Kiểm tra dung lượng
+                // cách quãng vì mỗi lần đọc là một lời gọi hệ thống.
+                if index % 30 < 3, freeBytes < 300 * 1024 * 1024 {
                     mutate(id) {
                         $0.phase = .failed
                         $0.message = "Máy đã hết dung lượng trống. Hãy xoá bớt phim đã tải rồi bấm Tiếp tục để tải tiếp."
                     }
-                    save()
+                    save(force: true)
                     return
                 }
                 save()
@@ -558,7 +608,7 @@ final class DownloadManager {
                 $0.totalBytes = bytes
                 $0.message = nil
             }
-            save()
+            save(force: true)
         } catch is CancellationError {
             // Người dùng bấm Dừng: giữ nguyên tiến trình, không phải lỗi.
             markPaused(id)
@@ -693,7 +743,15 @@ final class DownloadManager {
         }
     }
 
-    private func save() {
+    /// Ghi danh sách tải xuống xuống đĩa.
+    ///
+    /// Tiến trình tăng liên tục nên trước đây mỗi lô 3 phân đoạn lại mã hoá JSON và
+    /// ghi tệp một lần, làm giao diện giật khi tải phim dài. Nay ghi tối đa 3 giây
+    /// một lần; mọi thay đổi trạng thái quan trọng vẫn ghi ngay bằng `force`.
+    private func save(force: Bool = false) {
+        let now = Date()
+        if !force, now.timeIntervalSince(lastSaveAt) < 3 { return }
+        lastSaveAt = now
         guard let data = try? JSONEncoder().encode(items) else { return }
         try? data.write(to: storeURL, options: .atomic)
     }

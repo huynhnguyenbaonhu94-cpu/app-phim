@@ -604,6 +604,8 @@ struct CinemaPlayerScreen: View {
     @StateObject private var playback = PlaybackController()
     @StateObject private var pipCoordinator = PictureInPictureCoordinator()
     @StateObject private var subtitles = SubtitleController()
+    /// Âm lượng của máy, không phải âm lượng riêng của AVPlayer.
+    @ObservedObject private var systemVolume = SystemVolume.shared
     @State private var subtitlePreferences = SubtitlePreferences()
     @State private var serverIndex = 0
     @State private var episodeIndex = 0
@@ -730,6 +732,13 @@ struct CinemaPlayerScreen: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
+                // Neo ẩn cho MPVolumeView. iOS chỉ cho điều khiển âm lượng của máy
+                // khi view này nằm trong cây giao diện, nên nó được đặt ở đây với
+                // kích thước 2×2 và không nhận chạm.
+                SystemVolumeAnchor()
+                    .frame(width: 2, height: 2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     subtitleOverlay(bottomInset: proxy.safeAreaInsets.bottom)
@@ -839,6 +848,10 @@ struct CinemaPlayerScreen: View {
                 if episodeIndex != 0 { episodeIndex = 0 }
                 else { loadCurrentEpisode() }
             }
+            .onChange(of: systemVolume.value) { _, value in
+                // Người dùng bấm nút cứng bên hông máy thì thanh trượt trong app khớp theo.
+                if volume != value { volume = value }
+            }
             .onChange(of: playback.isPlaying) { _, isPlaying in if isPlaying { scheduleHide() } }
             .onChange(of: playback.isLoading) { _, isLoading in handleLoadingChange(isLoading) }
             .onChange(of: playback.errorMessage) { _, _ in handlePlaybackErrorChange() }
@@ -851,7 +864,13 @@ struct CinemaPlayerScreen: View {
             .onChange(of: stopAtEpisodeEnabled) { _, enabled in handleStopAtEpisodeToggle(enabled) }
             .onChange(of: stopAtEpisodeID) { _, _ in scheduleStopTimer() }
             .onChange(of: scenePhase) { _, phase in handleScenePhaseChange(phase) }
-            .onAppear { applyPlaybackDefaults(); loadCurrentEpisode(); scheduleHide() }
+            .onAppear {
+                applyPlaybackDefaults()
+                loadCurrentEpisode()
+                scheduleHide()
+                // Thanh trượt phản ánh đúng mức âm lượng đang có của máy.
+                volume = systemVolume.value
+            }
             .task {
                 await store.loadHome()
                 try? await Task.sleep(for: .milliseconds(250))
@@ -1265,10 +1284,10 @@ struct CinemaPlayerScreen: View {
     private var settingsTabContent: some View {
         switch effectiveSettingsTab {
         case .audio:
-            settingsRow(icon: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", title: "Âm lượng", detail: playback.isMuted ? "Đang tắt tiếng" : "\(Int(volume * 100))%") {
+            settingsRow(icon: systemVolume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill", title: "Âm lượng máy", detail: systemVolume.isMuted ? "Đang tắt tiếng" : "\(Int(systemVolume.value * 100))%") {
                 HStack(spacing: 7) {
-                    Slider(value: $volume, in: 0...1).tint(Color.auroraViolet).frame(width: 130).onChange(of: volume) { _, value in playback.setVolume(value) }
-                    Button { playback.toggleMute() } label: { Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(Color.auroraViolet) }.buttonStyle(.plain)
+                    Slider(value: volumeBinding, in: 0...1).tint(Color.auroraViolet).frame(width: 130)
+                    Button { systemVolume.toggleMute() } label: { Image(systemName: systemVolume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill").foregroundStyle(Color.auroraViolet) }.buttonStyle(.plain)
                 }
             }
         case .subtitle:
@@ -1555,6 +1574,11 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    /// Thanh trượt đọc/ghi trực tiếp âm lượng của máy.
+    private var volumeBinding: Binding<Double> {
+        Binding(get: { systemVolume.value }, set: { systemVolume.set($0) })
+    }
+
     private func handleAdjustmentDrag(_ value: DragGesture.Value, width: CGFloat, height: CGFloat) {
         guard !controlsLocked, picker == nil, !settingsOpen, !relatedRecommendationsVisible else { return }
         guard value.startLocation.y > height * 0.22 else { return }
@@ -1563,7 +1587,7 @@ struct CinemaPlayerScreen: View {
             isAdjustmentGestureActive = true
             let isBrightness = value.startLocation.x < width / 2
             adjustmentKind = isBrightness ? .brightness : .volume
-            gestureStartValue = isBrightness ? Double(UIScreen.main.brightness) : volume
+            gestureStartValue = isBrightness ? Double(UIScreen.main.brightness) : systemVolume.value
         }
 
         let nextValue = min(1, max(0, gestureStartValue - Double(value.translation.height / 340)))
@@ -1572,7 +1596,7 @@ struct CinemaPlayerScreen: View {
             UIScreen.main.brightness = CGFloat(nextValue)
         } else {
             volume = nextValue
-            playback.setVolume(nextValue)
+            systemVolume.set(nextValue)
         }
         withAnimation(.easeOut(duration: 0.14)) { adjustmentPulse.toggle() }
         scheduleAdjustmentHUDHide()
@@ -1620,7 +1644,7 @@ struct CinemaPlayerScreen: View {
                     withAnimation(Motion.sheet) { volumePopoverOpen.toggle() }
                     scheduleHide()
                 } label: {
-                    Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    Image(systemName: systemVolume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
@@ -1632,16 +1656,15 @@ struct CinemaPlayerScreen: View {
             .overlay(alignment: .bottomTrailing) {
                 if volumePopoverOpen {
                     HStack(spacing: 10) {
-                        Button { playback.toggleMute() } label: {
-                            Image(systemName: playback.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        Button { systemVolume.toggleMute() } label: {
+                            Image(systemName: systemVolume.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 36, height: 36)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(playback.isMuted ? "Bật âm thanh" : "Tắt âm thanh")
-                        Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
+                        .accessibilityLabel(systemVolume.isMuted ? "Bật âm thanh" : "Tắt âm thanh")
+                        Slider(value: volumeBinding, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
                             .tint(Color.auroraViolet)
                             .frame(width: 150)
-                            .onChange(of: volume) { _, value in playback.setVolume(value) }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

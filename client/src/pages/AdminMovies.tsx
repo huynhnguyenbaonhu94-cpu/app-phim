@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Check, Database, ExternalLink, MessageCircle, Pin, Plus, RefreshCw, Search, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { AuthDialog } from "@/components/AuthDialog";
@@ -87,6 +87,48 @@ function groupComments(items: CommentItem[]): GroupedComment[] {
   return roots;
 }
 
+/**
+ * Một dòng phim trong danh sách chọn phim.
+ *
+ * Tách riêng và ghi nhớ theo dữ liệu nên khi chọn phim hay gõ tìm kiếm, các dòng còn lại
+ * không dựng lại; ảnh poster tải lười để danh sách dài vẫn mượt.
+ */
+const AdminMovieRow = memo(
+  function AdminMovieRow({
+    movie,
+    isSelected,
+    onSelect,
+  }: {
+    movie: MovieSummary;
+    isSelected: boolean;
+    onSelect: (movie: MovieSummary) => void;
+  }) {
+    const poster = moviePoster(movie);
+    return (
+      <div className="admin-movies-movie-row">
+        <button
+          type="button"
+          className={`admin-movies-movie${isSelected ? " is-selected" : ""}`}
+          onClick={() => onSelect(movie)}
+        >
+          <span className="admin-movies-poster">
+            {poster ? <img src={poster} alt="" loading="lazy" decoding="async" /> : <span><UserRound size={16} /></span>}
+          </span>
+          <span className="admin-movies-movie-copy">
+            <strong>{movie.name}</strong>
+            <small>{movie.year || "—"} · {movie.quality || "Chưa rõ chất lượng"}</small>
+          </span>
+          {isSelected && <Check size={15} />}
+        </button>
+        <Link href={`/admin/movies/sources?slug=${encodeURIComponent(movie.slug)}`} className="admin-movies-sources-link">
+          <Database size={13} /> Nguồn &amp; tập
+        </Link>
+      </div>
+    );
+  },
+  (prev, next) => prev.movie === next.movie && prev.isSelected === next.isSelected,
+);
+
 export default function AdminMovies() {
   const { user, loading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
@@ -141,8 +183,14 @@ export default function AdminMovies() {
     return () => { stopped = true; };
   }, [selectedMovie?.slug, watchComments]);
 
-  const movies = ((debouncedKeyword.length >= 2 ? searchQuery.data?.items : latestQuery.data?.items) || []) as MovieSummary[];
-  const sortedComments = sortComments(groupComments(commentItems));
+  const movies = useMemo(
+    () =>
+      ((debouncedKeyword.length >= 2 ? searchQuery.data?.items : latestQuery.data?.items) || []) as MovieSummary[],
+    [debouncedKeyword, searchQuery.data, latestQuery.data],
+  );
+  // Nhóm và sắp xếp bình luận chỉ chạy lại khi danh sách thật sự đổi.
+  const sortedComments = useMemo(() => sortComments(groupComments(commentItems)), [commentItems]);
+  const selectMovie = useCallback((movie: MovieSummary) => setSelectedMovie(movie), []);
   const movieQueryError = (debouncedKeyword.length >= 2 ? searchQuery.error : latestQuery.error)?.message;
 
   if (loading) return <PageShell><main className="content-wrap inner-page"><p>Đang kiểm tra quyền truy cập…</p></main></PageShell>;
@@ -168,7 +216,7 @@ export default function AdminMovies() {
   function renderComment(comment: CommentItem, isReply = false) {
     const avatar = comment.userAvatar;
     return <article className={`admin-movies-comment${comment.isPinned ? " is-pinned" : ""}${isReply ? " is-reply" : ""}`} key={comment.id}>
-      <div className="admin-movies-comment-avatar">{avatar ? <img src={avatar} alt="" /> : <span>{initialOf(comment.userName)}</span>}</div>
+      <div className="admin-movies-comment-avatar">{avatar ? <img src={avatar} alt="" loading="lazy" decoding="async" /> : <span>{initialOf(comment.userName)}</span>}</div>
       <div className="admin-movies-comment-body">
         <div className="admin-movies-comment-head"><strong><NameText name={comment.userName} style={parseNameStyle(comment.nameStyle)} /></strong><BadgeChipList badges={accountBadges(comment.badges, comment.badge)} />{comment.userRole === "admin" && <span className="admin-movies-verified" title="Quản trị viên"><Check size={11} /></span>}<time>{formatCommentDate(comment.createdAt)}</time>{comment.isPinned && <span className="admin-movies-pinned-label"><Pin size={11} /> Đã ghim</span>}</div>
         <p>{comment.content}</p>
@@ -186,7 +234,7 @@ export default function AdminMovies() {
         <div className="admin-movies-panel-heading"><div><strong>Chọn phim</strong><span>Tìm phim để xem và điều hành bình luận.</span></div><MessageCircle size={19} /></div>
         <label className="admin-tv-search admin-movies-search"><Search size={15} /><input value={searchKeyword} onChange={event => setSearchKeyword(event.target.value)} placeholder="Tìm theo tên phim…" aria-label="Tìm phim" />{searchKeyword && <button type="button" onClick={() => setSearchKeyword("")} aria-label="Xoá tìm kiếm">×</button>}</label>
         {movieQueryError && <p className="admin-tv-error">Không thể tải danh sách phim: {movieQueryError}</p>}
-        <div className="admin-movies-list">{(latestQuery.isLoading || searchQuery.isLoading) ? <p className="admin-movies-muted">Đang tải danh sách phim…</p> : movies.length === 0 ? <div className="admin-movies-empty"><Search size={22} /><strong>{debouncedKeyword.length >= 2 ? "Không tìm thấy phim" : "Chưa có phim để hiển thị"}</strong><span>Thử một từ khoá khác hoặc tải lại trang.</span></div> : movies.map(movie => <div className="admin-movies-movie-row" key={movie.slug}><button type="button" className={`admin-movies-movie${selectedMovie?.slug === movie.slug ? " is-selected" : ""}`} onClick={() => setSelectedMovie(movie)}><span className="admin-movies-poster">{moviePoster(movie) ? <img src={moviePoster(movie)} alt="" /> : <span><UserRound size={16} /></span>}</span><span className="admin-movies-movie-copy"><strong>{movie.name}</strong><small>{movie.year || "—"} · {movie.quality || "Chưa rõ chất lượng"}</small></span>{selectedMovie?.slug === movie.slug && <Check size={15} />}</button><Link href={`/admin/movies/sources?slug=${encodeURIComponent(movie.slug)}`} className="admin-movies-sources-link"><Database size={13} /> Nguồn &amp; tập</Link></div>)}</div>
+        <div className="admin-movies-list">{(latestQuery.isLoading || searchQuery.isLoading) ? <p className="admin-movies-muted">Đang tải danh sách phim…</p> : movies.length === 0 ? <div className="admin-movies-empty"><Search size={22} /><strong>{debouncedKeyword.length >= 2 ? "Không tìm thấy phim" : "Chưa có phim để hiển thị"}</strong><span>Thử một từ khoá khác hoặc tải lại trang.</span></div> : movies.map(movie => <AdminMovieRow key={movie.slug} movie={movie} isSelected={selectedMovie?.slug === movie.slug} onSelect={selectMovie} />)}</div>
       </section>
       <section className="admin-movies-panel admin-movies-comments-panel">
         {!selectedMovie ? <div className="admin-movies-placeholder"><MessageCircle size={30} /><h3>Chọn một bộ phim</h3><p>Bình luận của phim được hiển thị tại đây và cập nhật tự động theo thời gian thực.</p></div> : <><div className="admin-movies-comments-heading"><div><strong>{selectedMovie.name}</strong><span><span className="admin-tv-live-dot" /> Đang cập nhật trực tiếp</span></div><div className="admin-movies-comment-tools"><a className="button button-ghost" href={`/movie/${selectedMovie.slug}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Xem trên web</a><button type="button" className="admin-tv-refresh" onClick={refreshComments} disabled={commentsQuery.isFetching} title="Làm mới bình luận"><RefreshCw size={15} className={commentsQuery.isFetching ? "admin-tv-refresh-spin" : ""} /></button></div></div>{liveError && <p className="admin-tv-error">{liveError}</p>}{commentsQuery.error && <p className="admin-tv-error">Không thể tải bình luận: {commentsQuery.error.message}</p>}{commentsQuery.isLoading ? <p className="admin-movies-muted">Đang tải bình luận…</p> : sortedComments.length === 0 ? <div className="admin-movies-placeholder is-compact"><MessageCircle size={25} /><h3>Phim này chưa có bình luận</h3><p>Khi khán giả bình luận, nội dung sẽ xuất hiện tại đây.</p></div> : <div className="admin-movies-comments-list">{sortedComments.map(comment => renderComment(comment))}</div>}</>}

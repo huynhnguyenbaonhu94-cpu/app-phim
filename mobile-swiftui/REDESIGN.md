@@ -2301,3 +2301,59 @@ một dòng chữ nhỏ "Đang trả lời …".
   trong luồng dài vẫn thấy mình đang trả lời bình luận nào.
 - **Web admin**: `groupComments` đi ngược lên gốc nhánh nên trả lời của trả lời không còn bị bỏ sót
   khỏi danh sách bình luận trong trang quản trị.
+
+## 87. Nhãn hiển thị bằng ảnh/GIF hết khoảng trống sau tên
+
+Khung ảnh nhãn chỉ đặt `maxWidth` nên trong hàng bình luận nó luôn chiếm 64pt trong khi ảnh chỉ vẽ
+đúng bề rộng của mình — phần dư ra thành một khoảng trống lớn giữa tên người dùng và nhãn.
+
+- `CommentBadgeImage` nay tự tính bề rộng theo tỉ lệ khung hình của khung đầu tiên
+  (`imageHeight * ratio`), chặn trên 64pt, nên khung vừa khít ảnh; nhãn quá dài vẫn bị giới hạn.
+- Trong lúc ảnh đang tải, khung rộng 0 nên không còn khoảng trống chờ, và bề rộng đổi bằng
+  `Motion.gentle` khi ảnh hiện ra.
+- Ảnh động (GIF/WebP) vẫn chạy khung hình như trước; bản web vốn đã đúng (`width: auto`).
+
+## 88. Trang quản trị: danh sách phim thủ công gọn lại, Ngôn ngữ chọn nhiều, tải mượt hơn
+
+- **Phim thủ công thành danh sách riêng**: cột phải nay có ô tìm nhanh và khung cuộn cao tối đa
+  ~430px, nên thêm bao nhiêu phim trang cũng không dài xuống; poster tải lười (`loading="lazy"`).
+- **Ngôn ngữ**: ba lựa chọn nhanh viết hoa đầu từ (Vietsub giữ nguyên, Thuyết Minh, Lồng Tiếng) và
+  chọn được **nhiều mục cùng lúc**; giá trị lưu là "Thuyết Minh + Lồng Tiếng" nên app hiển thị đúng
+  chuỗi này. Bản cũ lưu "Thuyết minh" vẫn khớp nhờ so khớp bỏ dấu, không phân biệt hoa thường, và
+  khi lưu lại sẽ tự chuẩn hoá. Ô "Ngôn ngữ khác" vẫn dùng để ghi kiểu như "Vietsub AI".
+- **Bộ lọc trong app** đổi nhãn thành "Thuyết Minh" / "Lồng Tiếng" cho khớp; phép so khớp vốn
+  không phân biệt hoa thường nên phim cũ vẫn lọc đúng.
+- **Hiệu năng trang Thêm phim thủ công**: danh sách phim và khối Nguồn & tập được ghi nhớ
+  (`memo`), danh sách chỉ dựng lại khi dữ liệu đổi, ô tìm trong danh sách dùng `useDeferredValue`,
+  nên gõ trong form không còn dựng lại toàn bộ cây giao diện.
+- **Hiệu năng trang Quản lý phim & bình luận**: bình luận chỉ nhóm/sắp xếp lại khi danh sách đổi,
+  mỗi dòng phim là component ghi nhớ riêng, ảnh poster và ảnh đại diện tải lười.
+
+## 89. Năm yêu cầu: danh sách "Xem thêm", thẻ đề xuất, tải xuống, kênh trực tiếp, âm lượng máy
+
+- **Danh sách "Xem thêm" không còn cảm giác tải lại**: `CinemaStore` giữ nội dung từng mục theo
+  `kind` (`SectionListCache`), nên khi quay ra từ trang chi tiết phim, danh sách hiện lại nguyên
+  trạng thái cũ thay vì trắng rồi tải lại. Thẻ phim dùng `auroraReveal(_, key:)` với khoá là id
+  phim — mỗi phim chỉ chạy hiệu ứng vào **một lần** trong phiên (`AuroraRevealRegistry`), không
+  trượt lại cả lưới mỗi lần quay về. Việc nạp thêm trang khi cuộn tới cuối bị chặn trong 1,5 giây
+  đầu sau khi màn hiện lại, nên không tự nhiên có thêm phim mới ngay khi vừa trở ra.
+- **Thẻ "Đề xuất hôm nay"** (`FeaturedMovieCard`) được làm lại: hai lớp mờ (một lớp giữ cho nhãn và
+  thanh trạng thái đọc được), dòng nhãn nhỏ "thể loại · năm · chất lượng", tên phim lớn hơn kèm bóng
+  đổ nhẹ, tên gốc, hai nhãn kính mờ cho ngôn ngữ và số tập, huy hiệu điểm số ở góc phải, và hai nút
+  "Xem ngay" / "Chi tiết". Không thêm hiệu ứng chạy liên tục.
+- **Tải xuống**: chỉ tải qua **Wi-Fi**. `DownloadManager` tự theo dõi mạng (`NWPathMonitor`): không có
+  Wi-Fi thì mục nằm ở trạng thái chờ kèm lời nhắc; rời Wi-Fi giữa chừng thì tự tạm dừng để không tốn
+  dữ liệu di động; Wi-Fi trở lại thì phần đang chờ tự chạy tiếp, còn mục đã tạm dừng vẫn chờ người
+  dùng bấm "Tải tiếp" (và nút đó cũng cần Wi-Fi). Màn Tải xuống có băng nhắc màu vàng.
+- **Tải mượt hơn**: trước đây mỗi lô 3 phân đoạn lại mã hoá JSON và ghi tệp một lần — nay ghi tối đa
+  3 giây một lần (mốc trạng thái quan trọng vẫn ghi ngay), và việc kiểm tra dung lượng trống được
+  giãn ra. Xem phim trong lúc tải vẫn hoạt động: tác vụ tải không bị dừng khi mở trình phát, tập nào
+  chưa tải xong thì phát từ nguồn online.
+- **Trình phát KÊNH TRUYỀN HÌNH**: thanh công cụ không tự ẩn khi nguồn phát chưa tải xong (chờ tối đa
+  30 giây rồi mới đếm 4 giây như cũ), nhờ vậy vẫn thấy dòng "Đang tải nguồn phát…" và nút Đồng bộ.
+  Thêm cơ chế tự phục hồi: nếu sau 6 giây và 11 giây nguồn vẫn ở trạng thái chờ thì hệ thống tự dựng
+  lại nguồn (tối đa 2 lần cho mỗi lần mở kênh) thay vì bắt người xem bấm Đồng bộ.
+- **Âm lượng theo máy**: thêm `SystemVolume` dùng `MPVolumeView` ẩn để chỉnh **âm lượng của thiết bị**
+  (trước đây chỉnh âm lượng riêng của AVPlayer nên máy vẫn to). Áp dụng cho trình phát phim, trình
+  phát kênh trực tiếp và trình phát video đã đăng; thanh trượt, nút tắt tiếng và thao tác vuốt dọc
+  đều đi theo âm lượng máy, và khi bấm nút cứng bên hông máy thì thanh trượt trong app cập nhật theo.

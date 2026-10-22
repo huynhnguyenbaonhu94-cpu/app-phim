@@ -4221,3 +4221,52 @@ body {
 @keyframes cinBadgeBounce { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-2.5px); } }
 @keyframes cinBadgeTilt { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg); } }
 @keyframes cinBadgeBlink { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* ==== Danh sách phim thủ công: khung cuộn riêng, không kéo dài trang ==== */
+.custom-list-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  margin-bottom: 9px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted, #8a93a6);
+}
+.custom-list-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text, #e8ecf4);
+  font-size: 12.5px;
+}
+.custom-list-search input:focus { outline: none; }
+.custom-list-search button {
+  border: 0;
+  background: transparent;
+  color: var(--muted, #8a93a6);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.custom-movie-list {
+  max-height: min(52vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+.custom-movie-list::-webkit-scrollbar { width: 7px; }
+.custom-movie-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 999px; }
+
+/* ==== Ngôn ngữ: chọn nhiều mục cùng lúc ==== */
+.custom-lang-pop { max-height: 264px; overflow-y: auto; }
+.custom-lang-option { justify-content: flex-start; gap: 8px; }
+.custom-lang-option.is-selected::after { content: none; }
+.custom-lang-tick { width: 14px; color: var(--accent, #e5c15a); font-size: 12px; font-weight: 700; }
+.custom-lang-option.is-muted { color: var(--muted, #8a93a6); font-size: 12px; }
+.custom-lang-hint { display: block; margin-top: 5px; }

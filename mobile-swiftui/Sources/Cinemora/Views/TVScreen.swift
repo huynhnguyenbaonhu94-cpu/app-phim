@@ -19,6 +19,7 @@ private final class TVPlaybackController: ObservableObject {
     private var syncTask: Task<Void, Never>?
     private var notificationTokens: [NSObjectProtocol] = []
     private var lastAudioCorrectionAt: Date = .distantPast
+    private var recoveryTask: Task<Void, Never>?
 
     init() {
         configureAudioSession()
@@ -70,6 +71,25 @@ private final class TVPlaybackController: ObservableObject {
         syncTask = Task { @MainActor [weak self] in
             await self?.startLiveItems()
         }
+        startRecoveryWatchdog()
+    }
+
+    /// Tự thử lại khi nguồn trực tiếp đứng ở trạng thái chờ quá lâu.
+    ///
+    /// Trước đây người xem phải bấm "Đồng bộ" mới xem được vì mạng chậm hoặc máy chủ
+    /// trả playlist muộn. Nay sau 6 giây và 11 giây mà vẫn chưa phát được thì hệ thống
+    /// tự dựng lại nguồn một lần nữa, tối đa hai lần cho mỗi lần mở kênh.
+    private func startRecoveryWatchdog() {
+        recoveryTask?.cancel()
+        recoveryTask = Task { @MainActor [weak self] in
+            let delays: [Double] = [6, 5]
+            for delay in delays {
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, !Task.isCancelled else { return }
+                guard self.isLoading, self.player.rate <= 0.01, !self.userPaused else { return }
+                self.syncToLiveEdge()
+            }
+        }
     }
 
     /// Dựng lại hai item HLS, đợi sẵn sàng, seek về mép phát trực tiếp rồi chạy.
@@ -107,6 +127,7 @@ private final class TVPlaybackController: ObservableObject {
         }
         seekBothToLiveEdge()
         isLoading = false
+        recoveryTask?.cancel()
         guard !userPaused else { isPlaying = false; return }
         player.playImmediately(atRate: 1)
         if hasSeparateAudio { separateAudioPlayer.playImmediately(atRate: 1) }
@@ -309,6 +330,8 @@ struct TVScreen: View {
     @State private var relatedMovieRoute: Movie?
     @State private var isMuted = false
     @State private var volume = 1.0
+    /// Âm lượng của máy: thanh trượt trong trình phát điều khiển âm lượng thiết bị.
+    @ObservedObject private var systemVolume = SystemVolume.shared
     @State private var isPlayerPresented = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -422,6 +445,16 @@ struct TVScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await tv.startLive() }
+        // Thanh trượt âm lượng trong trình phát ghi thẳng vào âm lượng của máy, và
+        // khi người dùng bấm nút cứng bên hông máy thì thanh trượt cập nhật theo.
+        .onChange(of: volume) { _, value in systemVolume.set(value) }
+        .onChange(of: isMuted) { _, muted in systemVolume.setMuted(muted) }
+        .onChange(of: systemVolume.value) { _, value in if volume != value { volume = value } }
+        .onChange(of: systemVolume.isMuted) { _, muted in if isMuted != muted { isMuted = muted } }
+        .onAppear {
+            volume = systemVolume.value
+            isMuted = systemVolume.isMuted
+        }
         .onChange(of: scenePhase) { _, phase in
             // Only backgrounding the app closes the live connection. Switching
             // tabs must not: doing so restarted the SSE stream and refetched
@@ -502,8 +535,13 @@ struct TVScreen: View {
     private func play(_ stream: TvStream) {
         guard let url = stream.streamURL else { return }
         playback.load(url, audioURL: stream.audioURL)
-        playback.setVolume(volume)
-        playback.setMuted(isMuted)
+        syncDeviceVolume()
+    }
+
+    /// Trình phát luôn ở mức đầy; độ to nhỏ do âm lượng của máy quyết định.
+    private func syncDeviceVolume() {
+        volume = systemVolume.value
+        isMuted = systemVolume.isMuted
     }
 
 }
@@ -711,8 +749,9 @@ private struct TVPlayerView: View {
             .onAppear { scheduleHide() }
             .onDisappear { hideTask?.cancel() }
         }
-        .onChange(of: volume) { _, value in playback.setVolume(value) }
-        .onChange(of: isMuted) { _, value in playback.setMuted(value) }
+        // Âm lượng đi thẳng vào thiết bị (xem SystemVolume) nên trình phát không
+        // còn giữ mức riêng; chỉ cần neo MPVolumeView để iOS cho phép điều khiển.
+        .background(SystemVolumeAnchor().frame(width: 2, height: 2).allowsHitTesting(false))
     }
 
     private var topBar: some View {
@@ -983,6 +1022,15 @@ private struct TVPlayerView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
+            // Kênh trực tiếp có lúc mất vài giây mới bắt được hình. Trong lúc đó
+            // người xem cần thấy dòng "Đang tải nguồn phát…" và nút Đồng bộ, nên
+            // chưa ẩn thanh công cụ; chỉ đếm 4 giây sau khi nguồn đã chạy.
+            var waited = 0.0
+            while playback.isLoading && waited < 30 {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                waited += 0.5
+            }
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.2)) {
@@ -1012,8 +1060,9 @@ private struct TVFullscreenPlayer: View {
         .onAppear {
             if let url = stream.streamURL {
                 playback.load(url, audioURL: stream.audioURL)
-                playback.setVolume(volume)
-                playback.setMuted(isMuted)
+                // Âm lượng hiển thị đúng mức đang có của máy.
+                volume = SystemVolume.shared.value
+                isMuted = SystemVolume.shared.isMuted
             }
             forceLandscape()
         }
@@ -1465,8 +1514,8 @@ private struct TVVideoFullscreenPlayer: View {
     private func loadCurrent() {
         guard let episode, episode.qualities.indices.contains(qualityIndex), let quality, let url = quality.streamURL else { return }
         playback.load(url)
-        playback.setVolume(volume)
-        playback.setMuted(isMuted)
+        volume = SystemVolume.shared.value
+        isMuted = SystemVolume.shared.isMuted
         subtitles.load(url: quality.subtitleURL ?? quality.languageSubtitleTracks.first?.subtitleURL ?? episode.subtitleURL, bilingualURL: quality.bilingualSubtitleURL ?? episode.bilingualSubtitleURL)
     }
 

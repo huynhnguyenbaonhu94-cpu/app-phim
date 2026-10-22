@@ -13,6 +13,24 @@ struct HomeSection: Identifiable {
 final class CinemaStore {
     private(set) var homeMovies: [Movie] = []
     private(set) var homeSections: [HomeSection] = []
+
+    /// Nội dung của từng mục "Xem thêm" ở trang chủ, giữ theo `kind`.
+    ///
+    /// Màn danh sách bị dựng lại mỗi lần quay ra từ trang chi tiết phim; giữ dữ liệu
+    /// ở đây nên người dùng thấy đúng danh sách cũ ngay lập tức, không phải chờ tải
+    /// lại và cũng không mất vị trí đang xem.
+    struct SectionListCache {
+        var movies: [Movie]
+        var page: Int
+        var reachedEnd: Bool
+    }
+    private(set) var sectionLists: [String: SectionListCache] = [:]
+
+    func sectionList(_ kind: String) -> SectionListCache? { sectionLists[kind] }
+
+    func storeSectionList(kind: String, movies: [Movie], page: Int, reachedEnd: Bool) {
+        sectionLists[kind] = SectionListCache(movies: movies, page: page, reachedEnd: reachedEnd)
+    }
     private(set) var homeLoading = false
     private(set) var homeLoadingMore = false
     private(set) var homeHasMore = false

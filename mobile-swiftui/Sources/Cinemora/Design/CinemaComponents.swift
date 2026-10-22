@@ -269,7 +269,9 @@ struct MoviePosterCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.auroraPress(scale: 0.97))
-        .auroraReveal(revealIndex)
+        // Khoá theo id phim: mỗi phim chỉ chạy hiệu ứng vào một lần trong phiên,
+        // nên quay ra từ trang chi tiết không làm cả lưới trượt lại.
+        .auroraReveal(revealIndex, key: "poster-\(movie.id)")
     }
 }
 
@@ -329,52 +331,78 @@ struct MovieShelfCard: View {
 struct FeaturedMovieCard: View {
     let movie: Movie
 
+    private var episodeText: String? {
+        if let current = movie.episodeCurrent, !current.isEmpty {
+            if let total = movie.episodeTotal, total > 0 { return "Tập \(current)/\(total)" }
+            return "Tập \(current)"
+        }
+        if let total = movie.episodeTotal, total > 0 { return "\(total) tập" }
+        return movie.time
+    }
+
+    private var genreText: String? {
+        movie.categories?.first?.name
+    }
+
+    /// Dòng nhãn nhỏ phía trên tên phim: thể loại · năm · chất lượng.
+    private var eyebrowText: String {
+        [genreText, movie.year.map(String.init), movie.quality]
+            .compactMap { $0 }
+            .joined(separator: "  ·  ")
+    }
+
     var body: some View {
         NavigationLink(value: movie) {
             ZStack(alignment: .bottomLeading) {
                 PosterArt(url: movie.backdropURL)
                     .frame(height: 430)
+
+                // Hai lớp mờ: lớp trên giữ cho nhãn và thanh trạng thái đọc được,
+                // lớp dưới mới là nền cho phần chữ.
                 LinearGradient(
-                    colors: [Color.black.opacity(0.05), Color.black.opacity(0.35), Color.black.opacity(0.94)],
+                    colors: [Color.black.opacity(0.5), .clear, .clear],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                VStack(alignment: .leading, spacing: 11) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 10, weight: .black))
-                        Text("ĐỀ XUẤT HÔM NAY")
-                            .font(.system(size: 9, weight: .black, design: .rounded))
-                            .tracking(1.8)
+                LinearGradient(
+                    colors: [.clear, Color.black.opacity(0.42), Color.black.opacity(0.95)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    if !eyebrowText.isEmpty {
+                        Text(eyebrowText.uppercased())
+                            .font(.system(size: 9.5, weight: .black, design: .rounded))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.auroraViolet)
+                            .lineLimit(1)
                     }
-                    .foregroundStyle(Color.auroraVoid)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(LinearGradient.auroraPrimary))
-                    .auroraHalo(.auroraViolet, radius: 18, opacity: 0.45)
 
                     Text(movie.name)
-                        .font(.auroraDisplay(28))
-                        .tracking(-0.8)
+                        .font(.auroraDisplay(30))
+                        .tracking(-0.9)
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
 
-                    Text(movie.originName ?? "Một lựa chọn dành riêng cho bạn")
-                        .font(.auroraBody(12))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .lineLimit(1)
+                    if let origin = movie.originName, !origin.isEmpty {
+                        Text(origin)
+                            .font(.auroraBody(12))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                    }
 
-                    HStack(spacing: 8) {
-                        if let year = movie.year { metadataPill(String(year)) }
-                        if let category = movie.categories?.first?.name { metadataPill(category) }
-                        if let quality = movie.quality { metadataPill(quality) }
+                    HStack(spacing: 7) {
+                        if let lang = movie.lang, !lang.isEmpty { infoChip(icon: "waveform", text: lang) }
+                        if let episodes = episodeText { infoChip(icon: "rectangle.stack.fill", text: episodes) }
                     }
 
                     HStack(spacing: 10) {
                         HStack(spacing: 8) {
-                            Image(systemName: "play.fill")
-                            Text("Xem phim")
+                            Image(systemName: "play.fill").font(.system(size: 12, weight: .black))
+                            Text("Xem ngay")
                             Image(systemName: "arrow.right").font(.system(size: 11, weight: .bold))
                         }
                         .font(.auroraLabel(12, weight: .black))
@@ -384,24 +412,55 @@ struct FeaturedMovieCard: View {
                         .background(Capsule().fill(LinearGradient.auroraPrimary))
                         .auroraHalo(.auroraViolet, radius: 22, opacity: 0.5)
 
-                        if let rating = movie.rating, rating > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "star.fill").foregroundStyle(Color.auroraAmber)
-                                Text(rating, format: .number.precision(.fractionLength(1)))
-                            }
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 13)
-                            .background(Capsule().fill(Color.white.opacity(0.14)))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8))
+                        HStack(spacing: 7) {
+                            Image(systemName: "info.circle.fill").font(.system(size: 12, weight: .bold))
+                            Text("Chi tiết").font(.auroraLabel(12, weight: .bold))
                         }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
+                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
                     }
-                    .padding(.top, 3)
+                    .padding(.top, 2)
                 }
                 .padding(22)
             }
             .frame(height: 430)
+            .overlay(alignment: .top) {
+                HStack(alignment: .top, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles").font(.system(size: 10, weight: .black))
+                        Text("ĐỀ XUẤT HÔM NAY")
+                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .tracking(1.6)
+                    }
+                    .foregroundStyle(Color.auroraVoid)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(LinearGradient.auroraPrimary))
+                    .auroraHalo(.auroraViolet, radius: 18, opacity: 0.45)
+
+                    Spacer(minLength: 0)
+
+                    if let rating = movie.rating, rating > 0 {
+                        HStack(spacing: 5) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundStyle(Color.auroraAmber)
+                            Text(rating, format: .number.precision(.fractionLength(1)))
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8))
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
@@ -411,14 +470,17 @@ struct FeaturedMovieCard: View {
         .buttonStyle(.auroraPress(scale: 0.985))
     }
 
-    private func metadataPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color.white.opacity(0.14)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7))
+    /// Nhãn kính mờ cho ngôn ngữ và số tập — nhẹ, không dùng hiệu ứng động.
+    private func infoChip(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 9, weight: .bold))
+            Text(text).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.white.opacity(0.13)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.7))
     }
 }
 
