@@ -13,6 +13,8 @@ type MovieSourceEpisode = {
   name: string;
   streamUrl: string;
   subtitleUrl: string | null;
+  subtitleLabel?: string | null;
+  subtitleTracks?: Array<{ language: string; subtitleUrl: string }>;
   hasUploadedSubtitle: boolean;
   sortOrder: number;
   qualities?: Array<{ label: string; streamUrl: string; subtitleUrl: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl: string }> }>;
@@ -29,9 +31,11 @@ type MovieSource = {
 type EpisodePayload = {
   name: string;
   streamUrl: string;
-  subtitleUrl: string | null;
+  subtitleUrl?: string | null;
+  subtitleLabel?: string | null;
   subtitleVtt?: string | null;
-  qualities?: Array<{ label: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }>;
+  subtitleTracks?: Array<{ language: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
+  qualities?: Array<{ label: string; streamUrl: string; subtitleUrl?: string | null; subtitleLabel?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }>;
 };
 
 type SubtitleTrackDraft = { language: string; subtitleUrl: string; subtitleVtt: string };
@@ -40,6 +44,7 @@ type EpisodeDraft = {
   name: string;
   streamUrl: string;
   subtitleUrl: string;
+  subtitleLabel: string;
   subtitleMode: "url" | "file";
   subtitleTracks: SubtitleTrackDraft[];
 };
@@ -75,9 +80,32 @@ function readFileAsBase64(file: File) {
   });
 }
 
+function subtitleURLObject(value: string) {
+  try { return new URL(value, window.location.origin); } catch { return null; }
+}
+
+function isInternalSubtitleRoute(value: string | null | undefined) {
+  if (!value) return false;
+  const url = subtitleURLObject(value);
+  return Boolean(url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/uploads/movie-subs/")));
+}
+
+function displaySubtitleURL(value: string | null | undefined) {
+  if (!value) return "";
+  return isInternalSubtitleRoute(value) ? new URL(value, window.location.origin).toString() : value;
+}
+
+function storedSubtitleURL(value: string | null | undefined) {
+  if (!value) return value || null;
+  const url = subtitleURLObject(value);
+  return url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/uploads/movie-subs/")) ? `${url.pathname}${url.search}` : value;
+}
+
 function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCancel, submitLabel }: EpisodeFormProps) {
   const subtitleModeName = useId();
-  const [draft, setDraft] = useState<EpisodeDraft>(initial || { name: "", streamUrl: "", subtitleUrl: "", subtitleMode: "url", subtitleTracks: [] });
+  const initialSubtitleRoute = isInternalSubtitleRoute(initial?.subtitleUrl) ? displaySubtitleURL(initial?.subtitleUrl) : "";
+  const [draft, setDraft] = useState<EpisodeDraft>(initial ? { ...initial, subtitleUrl: initialSubtitleRoute || displaySubtitleURL(initial.subtitleUrl), subtitleLabel: initial.subtitleLabel || "", subtitleTracks: (initial.subtitleTracks || []).map(track => ({ ...track, subtitleUrl: displaySubtitleURL(track.subtitleUrl), subtitleVtt: "" })) } : { name: "", streamUrl: "", subtitleUrl: "", subtitleLabel: "", subtitleMode: "url", subtitleTracks: [] });
+  const [preserveExistingSubtitle, setPreserveExistingSubtitle] = useState(Boolean(initial?.existingUploaded && isInternalSubtitleRoute(initial.subtitleUrl)));
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -91,7 +119,7 @@ function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCanc
     try {
       const base64 = await readFileAsBase64(selectedFile);
       const uploaded = await uploadSubtitle.mutateAsync({ base64, filename: selectedFile.name });
-      setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((track, trackIndex) => trackIndex === index ? { ...track, subtitleUrl: uploaded.url, subtitleVtt: uploaded.content } : track) }));
+      setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((track, trackIndex) => trackIndex === index ? { ...track, subtitleUrl: displaySubtitleURL(uploaded.url), subtitleVtt: uploaded.content } : track) }));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Không thể tải phụ đề lên.");
     }
@@ -127,12 +155,12 @@ function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCanc
       if (draft.subtitleMode === "file" && file) {
         const base64 = await readFileAsBase64(file);
         const uploaded = await uploadSubtitle.mutateAsync({ base64, filename: file.name });
-        await onSubmit({ name, streamUrl, subtitleUrl: uploaded.url, subtitleVtt: uploaded.content, qualities: [{ label: "Mặc định", streamUrl, subtitleUrl: uploaded.url, subtitleVtt: uploaded.content, subtitleTracks: draft.subtitleTracks }] });
+        await onSubmit({ name, streamUrl, subtitleUrl: storedSubtitleURL(uploaded.url), subtitleLabel: draft.subtitleLabel.trim() || null, subtitleVtt: uploaded.content, subtitleTracks: draft.subtitleTracks.map(track => ({ ...track, subtitleUrl: storedSubtitleURL(track.subtitleUrl) })), qualities: [] });
       } else if (draft.subtitleMode === "file" && initial?.existingUploaded) {
         // Không chọn tệp mới: giữ nguyên nội dung phụ đề đã tải lên khi sửa tập.
-        await onSubmit({ name, streamUrl, subtitleUrl: subtitleUrl || null, qualities: [{ label: "Mặc định", streamUrl, subtitleUrl: subtitleUrl || null, subtitleTracks: draft.subtitleTracks }] });
+        await onSubmit({ name, streamUrl, subtitleUrl: preserveExistingSubtitle && initialSubtitleRoute === subtitleUrl ? undefined : storedSubtitleURL(subtitleUrl), subtitleLabel: draft.subtitleLabel.trim() || null, subtitleTracks: draft.subtitleTracks.map(track => ({ ...track, subtitleUrl: storedSubtitleURL(track.subtitleUrl) })), qualities: [] });
       } else {
-        await onSubmit({ name, streamUrl, subtitleUrl: draft.subtitleMode === "url" && subtitleUrl ? subtitleUrl : null, subtitleVtt: null, qualities: [{ label: "Mặc định", streamUrl, subtitleUrl: draft.subtitleMode === "url" && subtitleUrl ? subtitleUrl : null, subtitleTracks: draft.subtitleTracks }] });
+        await onSubmit({ name, streamUrl, subtitleUrl: draft.subtitleMode === "url" && subtitleUrl ? storedSubtitleURL(subtitleUrl) : null, subtitleLabel: draft.subtitleLabel.trim() || null, subtitleVtt: null, subtitleTracks: draft.subtitleTracks.map(track => ({ ...track, subtitleUrl: storedSubtitleURL(track.subtitleUrl) })), qualities: [] });
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Không thể lưu tập phim.");
@@ -160,11 +188,12 @@ function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCanc
       <label>Link M3U8<input type="url" value={draft.streamUrl} onChange={event => setDraft({ ...draft, streamUrl: event.target.value })} placeholder="https://…/playlist.m3u8" required /></label>
     </div>
     <fieldset className="admin-source-subtitle-fieldset"><legend>Phụ đề</legend>
-      <div className="admin-source-subtitle-choice"><label><input type="radio" name={subtitleModeName} checked={draft.subtitleMode === "url"} onChange={() => setDraft({ ...draft, subtitleMode: "url" })} /> Dán link phụ đề .vtt</label><label><input type="radio" name={subtitleModeName} checked={draft.subtitleMode === "file"} onChange={() => setDraft({ ...draft, subtitleMode: "file" })} /> Upload tệp</label></div>
-      {draft.subtitleMode === "url" ? <input type="url" value={draft.subtitleUrl} onChange={event => setDraft({ ...draft, subtitleUrl: event.target.value })} placeholder="https://…/subtitle.vtt" /> : <label className="admin-source-file-input"><Upload size={14} /><span>{file ? file.name : initial?.existingUploaded ? "Giữ tệp hiện tại hoặc chọn tệp mới" : "Chọn tệp .vtt hoặc .srt"}</span><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" onChange={event => setFile(event.target.files?.[0] || null)} /></label>}
+      <div className="admin-source-subtitle-choice"><label><input type="radio" name={subtitleModeName} checked={draft.subtitleMode === "url"} onChange={() => { setPreserveExistingSubtitle(false); setDraft({ ...draft, subtitleMode: "url" }); }} /> Dán link phụ đề .vtt</label><label><input type="radio" name={subtitleModeName} checked={draft.subtitleMode === "file"} onChange={() => setDraft({ ...draft, subtitleMode: "file" })} /> Upload tệp</label></div>
+      {draft.subtitleMode === "url" ? <input type={isInternalSubtitleRoute(draft.subtitleUrl) ? "text" : "url"} value={draft.subtitleUrl} onChange={event => { setPreserveExistingSubtitle(false); setDraft({ ...draft, subtitleUrl: event.target.value }); }} placeholder="https://…/subtitle.vtt" /> : <label className="admin-source-file-input"><Upload size={14} /><span>{file ? file.name : initialSubtitleRoute ? `Đang dùng: ${initialSubtitleRoute}` : initial?.existingUploaded ? "Giữ tệp hiện tại hoặc chọn tệp mới" : "Chọn tệp .vtt hoặc .srt"}</span><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" onChange={event => { setPreserveExistingSubtitle(false); setFile(event.target.files?.[0] || null); }} /></label>}
+      <label className="admin-source-subtitle-label-field">Ngôn ngữ phụ đề<input value={draft.subtitleLabel} onChange={event => setDraft({ ...draft, subtitleLabel: event.target.value })} placeholder="Ví dụ: Tiếng Việt / English" maxLength={80} /></label>
       <small>Hỗ trợ .vtt và .srt, hệ thống tự chuyển sang WebVTT.</small>
     </fieldset>
-    <div className="admin-source-language-tracks"><div className="admin-source-language-heading"><strong>Subtitle theo ngôn ngữ</strong><button type="button" className="button button-muted" onClick={() => setDraft(current => ({ ...current, subtitleTracks: [...current.subtitleTracks, { language: "English", subtitleUrl: "", subtitleVtt: "" }] }))}><Plus size={13} /> Thêm ngôn ngữ</button></div>{draft.subtitleTracks.map((track, index) => <div className="admin-source-language-row" key={index}><input value={track.language} placeholder="Tiếng Việt / English" aria-label="Ngôn ngữ subtitle" onChange={event => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((item, itemIndex) => itemIndex === index ? { ...item, language: event.target.value } : item) }))} /><input type="url" value={track.subtitleUrl} placeholder="URL .vtt" onChange={event => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((item, itemIndex) => itemIndex === index ? { ...item, subtitleUrl: event.target.value, subtitleVtt: "" } : item) }))} /><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload subtitle" onChange={event => { void uploadTrack(index, event.target.files?.[0]); event.currentTarget.value = ""; }} /><button type="button" className="custom-icon-danger" onClick={() => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.filter((_, itemIndex) => itemIndex !== index) }))} aria-label="Xóa subtitle"><Trash2 size={14} /></button></div>)}</div>
+    <div className="admin-source-language-tracks"><div className="admin-source-language-heading"><strong>Subtitle theo ngôn ngữ</strong><button type="button" className="button button-muted" onClick={() => setDraft(current => ({ ...current, subtitleTracks: [...current.subtitleTracks, { language: "English", subtitleUrl: "", subtitleVtt: "" }] }))}><Plus size={13} /> Thêm ngôn ngữ</button></div>{draft.subtitleTracks.map((track, index) => <div className="admin-source-language-row" key={index}><input value={track.language} placeholder="Tiếng Việt / English" aria-label="Ngôn ngữ subtitle" onChange={event => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((item, itemIndex) => itemIndex === index ? { ...item, language: event.target.value } : item) }))} /><input type="url" value={track.subtitleUrl} placeholder="URL .vtt" onChange={event => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.map((item, itemIndex) => itemIndex === index ? { ...item, subtitleUrl: event.target.value, subtitleVtt: "" } : item) }))} /><label className="subtitle-track-file-picker"><span>{track.subtitleVtt ? "Đã tải file" : "Chọn .vtt/.srt"}</span><input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload subtitle" onChange={event => { void uploadTrack(index, event.target.files?.[0]); event.currentTarget.value = ""; }} /></label><button type="button" className="custom-icon-danger" onClick={() => setDraft(current => ({ ...current, subtitleTracks: current.subtitleTracks.filter((_, itemIndex) => itemIndex !== index) }))} aria-label="Xóa subtitle"><Trash2 size={14} /></button></div>)}</div>
     {error && <p className="admin-tv-error">{error}</p>}
     <div className="admin-source-form-actions"><button className="button button-primary" disabled={saving || uploadSubtitle.isPending}><Save size={14} />{saving || uploadSubtitle.isPending ? "Đang lưu…" : submitLabel}</button>{onCancel && <button type="button" className="button button-ghost" onClick={onCancel}>Huỷ</button>}</div>
   </form>;
@@ -235,8 +264,7 @@ export default function AdminMovieSources() {
   }
 
   function editDraft(episode: MovieSourceEpisode): EpisodeDraft & { existingUploaded: boolean } {
-    const defaultQuality = episode.qualities?.[0];
-    return { name: episode.name, streamUrl: episode.streamUrl, subtitleUrl: episode.subtitleUrl || defaultQuality?.subtitleUrl || "", subtitleMode: episode.hasUploadedSubtitle ? "file" : "url", subtitleTracks: (defaultQuality?.subtitleTracks || []).map(track => ({ language: track.language, subtitleUrl: track.subtitleUrl, subtitleVtt: "" })), existingUploaded: episode.hasUploadedSubtitle };
+    return { name: episode.name, streamUrl: episode.streamUrl, subtitleUrl: displaySubtitleURL(episode.subtitleUrl), subtitleLabel: episode.subtitleLabel || "", subtitleMode: episode.hasUploadedSubtitle ? "file" : "url", subtitleTracks: (episode.subtitleTracks || []).map(track => ({ language: track.language, subtitleUrl: displaySubtitleURL(track.subtitleUrl), subtitleVtt: "" })), existingUploaded: episode.hasUploadedSubtitle };
   }
 
   async function handleAddEpisode(sourceId: number, payload: EpisodePayload) {

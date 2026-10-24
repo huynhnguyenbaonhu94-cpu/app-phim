@@ -90,20 +90,22 @@ struct MovieEpisodeQuality: Decodable, Hashable, Identifiable {
     let streamUrl: String?
     let directStreamUrl: String?
     let subtitleUrl: String?
+    let subtitleLabel: String?
     let subtitleTracks: [MovieEpisodeSubtitleTrack]
     var id: String { label }
 
     enum CodingKeys: String, CodingKey {
-        case label, streamUrl, directStreamUrl, subtitleUrl, subtitleTracks
+        case label, streamUrl, directStreamUrl, subtitleUrl, subtitleLabel, subtitleTracks
         case streamUrlSnake = "stream_url", directStreamUrlSnake = "direct_stream_url", subtitleUrlSnake = "subtitle_url"
     }
 
-    init(label: String, streamUrl: String?, directStreamUrl: String?, subtitleUrl: String?, subtitleTracks: [MovieEpisodeSubtitleTrack] = []) {
+    init(label: String, streamUrl: String?, directStreamUrl: String?, subtitleUrl: String?, subtitleLabel: String? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = []) {
         self.label = label
         self.streamUrl = streamUrl
         self.directStreamUrl = directStreamUrl
-        self.subtitleUrl = subtitleUrl
-        self.subtitleTracks = subtitleTracks
+        subtitleUrl = subtitleUrl
+        subtitleLabel = subtitleLabel
+        subtitleTracks = subtitleTracks
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +120,7 @@ struct MovieEpisodeQuality: Decodable, Hashable, Identifiable {
         subtitleUrl = (try? container.decodeIfPresent(String.self, forKey: .subtitleUrl))
             ?? (try? container.decodeIfPresent(String.self, forKey: .subtitleUrlSnake))
             ?? nil
+        subtitleLabel = try? container.decodeIfPresent(String.self, forKey: .subtitleLabel)
         subtitleTracks = (try? container.decodeIfPresent([MovieEpisodeSubtitleTrack].self, forKey: .subtitleTracks)) ?? []
     }
 }
@@ -231,6 +234,7 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     /// nên phải ưu tiên link này thay vì đi qua proxy của máy chủ.
     let directStreamUrl: String?
     let subtitleUrl: String?
+    let subtitleLabel: String?
     let bilingualSubtitleUrl: String?
     let subtitleTracks: [MovieEpisodeSubtitleTrack]
     /// Chất lượng riêng của tập (1080p, 2K, 4K…) do admin khai báo.
@@ -251,7 +255,8 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
     var availableSubtitleTracks: [MovieEpisodeSubtitleTrack] {
         var result = subtitleTracks
         if let subtitleUrl, !subtitleUrl.isEmpty, !result.contains(where: { $0.subtitleUrl == subtitleUrl }) {
-            result.insert(MovieEpisodeSubtitleTrack(language: "Phụ đề", subtitleUrl: subtitleUrl), at: 0)
+            let label = subtitleLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            result.insert(MovieEpisodeSubtitleTrack(language: label.isEmpty ? "Phụ đề" : label, subtitleUrl: subtitleUrl), at: 0)
         }
         return result
     }
@@ -283,21 +288,23 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
             streamUrl: quality.streamUrl ?? streamUrl,
             directStreamUrl: quality.directStreamUrl ?? quality.streamUrl ?? directStreamUrl,
             subtitleUrl: quality.subtitleUrl ?? quality.subtitleTracks.first?.subtitleUrl ?? subtitleUrl,
+            subtitleLabel: quality.subtitleLabel ?? subtitleLabel,
             bilingualSubtitleUrl: bilingualSubtitleUrl,
             subtitleTracks: quality.subtitleTracks.isEmpty ? subtitleTracks : quality.subtitleTracks,
             qualities: qualities
         )
     }
 
-    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, directStreamUrl: String? = nil, subtitleUrl: String? = nil, bilingualSubtitleUrl: String? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = [], qualities: [MovieEpisodeQuality]? = nil) {
+    init(name: String, slug: String, filename: String, embedUrl: String?, streamUrl: String?, directStreamUrl: String? = nil, subtitleUrl: String? = nil, subtitleLabel: String? = nil, bilingualSubtitleUrl: String? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = [], qualities: [MovieEpisodeQuality]? = nil) {
         self.name = name
         self.slug = slug
         self.filename = filename
         self.embedUrl = embedUrl
         self.streamUrl = streamUrl
         self.directStreamUrl = directStreamUrl
-        self.subtitleUrl = subtitleUrl
-        self.bilingualSubtitleUrl = bilingualSubtitleUrl
+        subtitleUrl = subtitleUrl
+        subtitleLabel = subtitleLabel
+        bilingualSubtitleUrl = bilingualSubtitleUrl
         self.subtitleTracks = subtitleTracks
         self.qualities = qualities
     }
@@ -307,7 +314,7 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
         case embedUrl, embedURLSnake = "embed_url", linkEmbed = "link_embed"
         case streamUrl, streamURLSnake = "stream_url", linkM3U8 = "link_m3u8", link
         case directStreamUrl, directStreamURLSnake = "direct_stream_url"
-        case subtitleUrl, subtitleURLSnake = "subtitle_url", bilingualSubtitleUrl, bilingualSubtitleURLSnake = "bilingual_subtitle_url", subtitleTracks
+        case subtitleUrl, subtitleURLSnake = "subtitle_url", subtitleLabel, bilingualSubtitleUrl, bilingualSubtitleURLSnake = "bilingual_subtitle_url", subtitleTracks
     }
 
     init(from decoder: Decoder) throws {
@@ -326,6 +333,7 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
             ?? container.decodeIfPresent(String.self, forKey: .directStreamURLSnake)
         subtitleUrl = try container.decodeIfPresent(String.self, forKey: .subtitleUrl)
             ?? container.decodeIfPresent(String.self, forKey: .subtitleURLSnake)
+        subtitleLabel = try container.decodeIfPresent(String.self, forKey: .subtitleLabel)
         bilingualSubtitleUrl = try container.decodeIfPresent(String.self, forKey: .bilingualSubtitleUrl)
             ?? container.decodeIfPresent(String.self, forKey: .bilingualSubtitleURLSnake)
         subtitleTracks = (try? container.decodeIfPresent([MovieEpisodeSubtitleTrack].self, forKey: .subtitleTracks)) ?? []

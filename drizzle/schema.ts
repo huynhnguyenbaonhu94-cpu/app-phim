@@ -223,6 +223,9 @@ export const movieSourceEpisodes = mysqlTable("movie_source_episodes", {
   streamUrl: text("streamUrl").notNull(),
   subtitleUrl: text("subtitleUrl"),
   subtitleVtt: mediumtext("subtitleVtt"),
+  subtitleLabel: varchar("subtitleLabel", { length: 80 }),
+  /** JSON [{ language, subtitleUrl }] — subtitle theo ngôn ngữ của tập, không phải quality. */
+  subtitleTracks: text("subtitleTracks"),
   /** JSON [{ label, streamUrl, subtitleUrl }] — mỗi tập có thể có nhiều chất lượng, mỗi chất lượng phụ đề riêng. */
   qualities: text("qualities"),
   sortOrder: int("sortOrder").default(0).notNull(),
