@@ -103,9 +103,9 @@ struct MovieEpisodeQuality: Decodable, Hashable, Identifiable {
         self.label = label
         self.streamUrl = streamUrl
         self.directStreamUrl = directStreamUrl
-        subtitleUrl = subtitleUrl
-        subtitleLabel = subtitleLabel
-        subtitleTracks = subtitleTracks
+        self.subtitleUrl = subtitleUrl
+        self.subtitleLabel = subtitleLabel
+        self.subtitleTracks = subtitleTracks
     }
 
     init(from decoder: Decoder) throws {
@@ -302,9 +302,9 @@ struct MovieEpisode: Decodable, Hashable, Identifiable {
         self.embedUrl = embedUrl
         self.streamUrl = streamUrl
         self.directStreamUrl = directStreamUrl
-        subtitleUrl = subtitleUrl
-        subtitleLabel = subtitleLabel
-        bilingualSubtitleUrl = bilingualSubtitleUrl
+        self.subtitleUrl = subtitleUrl
+        self.subtitleLabel = subtitleLabel
+        self.bilingualSubtitleUrl = bilingualSubtitleUrl
         self.subtitleTracks = subtitleTracks
         self.qualities = qualities
     }
