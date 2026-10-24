@@ -406,10 +406,14 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  // Trên Passenger (cPanel Node.js Selector) cổng do máy chủ cấp qua biến PORT và phải
+  // nghe đúng cổng đó: nếu tự đổi sang cổng khác thì Passenger không nối được vào ứng
+  // dụng và tên miền sẽ báo lỗi. Chỉ tự tìm cổng trống khi chạy tại máy (không có PORT).
+  const assignedPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+  const preferredPort = assignedPort ?? 3000;
+  const port = assignedPort ?? (await findAvailablePort(preferredPort));
 
-  if (port !== preferredPort) {
+  if (!assignedPort && port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 

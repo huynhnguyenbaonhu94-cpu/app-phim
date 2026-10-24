@@ -178,6 +178,11 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     register: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(80), email: emailInput, password: passwordInput, deviceId: z.string().trim().max(160).optional(), deviceName: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      // Web đã bỏ phần đăng ký; đặt ALLOW_REGISTRATION=false trong biến môi trường để
+      // khoá hoàn toàn việc tạo tài khoản mới (kể cả qua API của ứng dụng).
+      if ((process.env.ALLOW_REGISTRATION || "true").trim().toLowerCase() === "false") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Hệ thống đang tắt đăng ký. Vui lòng liên hệ quản trị viên." });
+      }
       enforceRateLimit(ctx.req, "auth.register", SECURITY_LIMITS.registerPerIp.limit, SECURITY_LIMITS.registerPerIp.windowMs);
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Email này đã được đăng ký" });
       const user = await createLocalUser({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) });

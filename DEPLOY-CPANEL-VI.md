@@ -26,6 +26,36 @@ trên máy chủ dùng chung.
 Đúng theo cấu hình bạn đang dùng: Application root `cinemora2`, URL
 `https://cungcapicloud.id.vn`, startup file `dist/index.js`.
 
+### Điền form "Setup Node.js App"
+
+| Trường trong cPanel | Giá trị điền | Ghi chú |
+| --- | --- | --- |
+| **Node.js version** | `22` | Khớp môi trường ảo đang dùng: `/home/vfviehep/nodevenv/cinemora2/22`. Nếu máy chủ chỉ có 20 thì chọn 20, mã chạy được cả hai. |
+| **Application mode** | `Production` | cPanel tự thêm `NODE_ENV=production` — đúng thứ server cần để phục vụ bản build. |
+| **Application root** | `cinemora2` | Thư mục trong home: `/home/vfviehep/cinemora2`. Đây là nơi giải nén `Cinemora-Backend-Cpanel.zip`. |
+| **Application URL** | `cungcapicloud.id.vn` | Chọn tên miền trong danh sách. Nếu dùng cả `www.cungcapicloud.id.vn` thì tạo thêm một mục nữa cùng Application root. |
+| **Application startup file** | `dist/index.js` | Là tệp server đã build sẵn trong gói. Chỉ dùng `app.cjs` khi Passenger báo lỗi nạp ESM (xem dưới). |
+
+Thứ tự làm: giải nén gói → `npm install --omit=dev --legacy-peer-deps` → **Restart**. Tệp khởi động
+`dist/index.js` chỉ chạy được khi `node_modules` đã có; nếu thiếu, Passenger báo không tìm thấy tệp
+hoặc lỗi thiếu module.
+
+#### Nếu Passenger báo lỗi liên quan ESM
+
+`package.json` của dự án khai báo `"type": "module"` và `dist/index.js` là mã ESM. Trên Node 22 việc nạp
+này chạy bình thường; nếu máy chủ báo `Cannot use import statement outside a module`, tạo tệp `app.cjs`
+ngay trong Application root:
+
+```js
+// Tệp khởi động cho Passenger trên cPanel: nạp máy chủ đã build.
+import("./dist/index.js").catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+```
+
+rồi đổi **Application startup file** thành `app.cjs` và Restart.
+
 ```bash
 # 1. Giải nén đè vào thư mục ứng dụng
 cd /home/vfviehep/cinemora2
@@ -79,6 +109,94 @@ Migration and default admin check completed.
 
 ## 4. Sự cố thường gặp
 
+### Truy cập tên miền chỉ thấy `Index of /`
+
+Trang trắng có dòng `Proudly Served by LiteSpeed Web Server at <tên miền>` và bảng `Index of /` nghĩa là
+tên miền vẫn đang phục vụ **thư mục web trống**, chưa được nối vào ứng dụng Node — không phải lỗi mã
+nguồn. Nguyên nhân thường gặp là lúc tạo app trong *Setup Node.js App* chưa chọn **Application URL**,
+hoặc chọn tên miền khác.
+
+Cách sửa:
+
+1. cPanel → **Setup Node.js App** → mở ứng dụng → sửa **Application URL** thành đúng tên miền
+   (`cungcapicloud.id.vn`, thêm `www.cungcapicloud.id.vn` nếu dùng) → **Save**.
+2. cPanel sẽ tự ghi khối Passenger vào `.htaccess` của tên miền. Kiểm tra:
+
+   ```bash
+   ls -la /home/USER/public_html
+   grep -i passenger /home/USER/public_html/.htaccess
+   ```
+
+   Phải thấy khối có `PassengerAppRoot`, `PassengerBaseURI`, `PassengerNodejs`.
+3. Bấm **Restart** ứng dụng, rồi mở lại tên miền.
+
+Nếu `.htaccess` không có khối đó (một số máy chủ không tự ghi), dán tay vào `.htaccess` của thư mục web
+tên miền, thay `USER` cho đúng:
+
+```apache
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/USER/cinemora2"
+PassengerBaseURI "/"
+PassengerNodejs "/home/USER/nodevenv/cinemora2/22/bin/node"
+PassengerAppLogFile "/home/USER/cinemora2/passenger.log"
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+```
+
+Lưu ý: tên miền phải thuộc **cùng tài khoản cPanel** đang chạy ứng dụng Node. Nếu tên miền nằm ở tài
+khoản khác thì app phải được tạo trên tài khoản đó, hoặc phải trỏ lại DNS/thư mục web cho đúng.
+
+### `npm error enoent ... nodevenv/cinemora2/22/lib/package.json`
+
+```text
+npm error code ENOENT
+npm error path /home/USER/nodevenv/cinemora2/22/lib/package.json
+```
+
+npm đang chạy ở chế độ **global** của môi trường ảo (đường dẫn nằm trong `nodevenv/...`), nghĩa là
+nó **không tìm thấy `package.json` trong thư mục ứng dụng**. Trên cPanel, `source .../bin/activate`
+xuất biến `npm_config_prefix` trỏ vào môi trường ảo; khi thư mục ứng dụng chưa có `package.json`,
+npm lấy luôn `prefix` đó làm gốc dự án và đi đọc `<venv>/lib/package.json` — tệp không tồn tại.
+
+Kiểm tra trước:
+
+```bash
+cd /home/USER/cinemora2
+ls -la
+```
+
+Phải thấy `package.json`, `dist/`, `client/`, `server/`, `drizzle/`. Nếu thư mục còn trống thì gói
+backend chưa được giải nén vào đó — lúc này mọi cách chạy npm đều lỗi, kể cả `--prefix`, vì thật sự
+không có `package.json` để đọc (`npm run build --prefix <thư mục>` sẽ báo thiếu `<thư mục>/package.json`).
+Cách sửa là đưa mã nguồn vào trước:
+
+```bash
+cd /home/USER/cinemora2
+unzip -o /duong/dan/Cinemora-Backend-Cpanel.zip
+source /home/USER/nodevenv/cinemora2/22/bin/activate
+npm install --omit=dev --legacy-peer-deps
+```
+
+Nếu `package.json` **đã có** mà vẫn báo lỗi, chỉ cần chỉ rõ thư mục cho npm (hoặc bỏ biến của môi
+trường ảo trước khi chạy):
+
+```bash
+# Cách 1: chỉ định thư mục đích
+npm install --prefix /home/USER/cinemora2 --include=dev --legacy-peer-deps
+npm run build --prefix /home/USER/cinemora2
+
+# Cách 2: bỏ biến prefix của môi trường ảo rồi chạy như thường
+unset npm_config_prefix npm_config_global
+npm install --include=dev --legacy-peer-deps && npm run build
+```
+
+Cách chắc ăn nhất là dùng nút **Run NPM Install** trong *Setup Node.js App*: cPanel tự chạy npm
+đúng thư mục ứng dụng, không phụ thuộc biến của phiên terminal.
+
+**Đừng xoá thư mục `dist/`** nếu không build lại: gói backend đã kèm bản dựng sẵn và đó chính là
+tệp khởi động `dist/index.js`. Lệnh `rm -rf node_modules dist` chỉ nên dùng khi bạn thật sự muốn
+build lại từ đầu; nếu đã xoá thì giải nén lại gói để lấy `dist/`.
+
+
 ### `export: '=43e64c…': not a valid identifier`
 
 Dòng này xuất hiện mỗi lần chạy `npm` hoặc `node`, nghĩa là biến môi trường `TMDB_API_KEY` bị
@@ -98,6 +216,21 @@ TMDB_API_KEY=43e64c7e89ca344b6e5b540fca083afb
 Server đã nạp `.env` sẵn (`import "dotenv/config"`) nên không cần khai báo trong cPanel nữa.
 Khi biến này thiếu, trang quản trị vẫn lấy được diễn viên vì nút *Lấy từ TMDB/IMDB* tự chuyển
 sang gọi từ trình duyệt, nhưng nên sửa để máy chủ gọi được và nhanh hơn.
+
+## 5. Đăng nhập quản trị
+
+- Web chỉ còn **một** lối vào: hộp thoại đăng nhập (đã bỏ tab Đăng ký). Tài khoản người xem mới
+  được tạo trong ứng dụng Cinemora.
+- Tài khoản quản trị mặc định khi cơ sở dữ liệu còn trống: **`admin@gmail.cm`** / **`adminkkk11111@`**
+  (đổi được bằng `ADMIN_EMAIL` / `ADMIN_PASSWORD`).
+- **Biến môi trường được ưu tiên hơn giá trị mặc định.** Nếu trên hosting đã có `ADMIN_EMAIL` hoặc
+  `ADMIN_PASSWORD` với giá trị cũ, tài khoản mặc định mới sẽ **không** được tạo — hãy sửa hoặc xoá
+  hai biến đó rồi Restart.
+- Quên mật khẩu quản trị: đặt `ADMIN_FORCE_PASSWORD=true` rồi Restart, máy chủ ghi lại mật khẩu admin
+  đúng bằng `ADMIN_PASSWORD`; sau đó **xoá biến này** để không ghi đè mỗi lần Restart.
+- Bảo mật đang bật sẵn: mật khẩu băm một chiều, cookie phiên `httpOnly` + `secure`, giới hạn 8 lần
+  đăng nhập sai mỗi IP và 5 lần mỗi email trong 10 phút, thông báo lỗi không tiết lộ email có tồn tại
+  hay không. Muốn tắt hẳn việc tạo tài khoản mới qua API thì đặt `ALLOW_REGISTRATION=false`.
 
 ## 5. Environment variables
 

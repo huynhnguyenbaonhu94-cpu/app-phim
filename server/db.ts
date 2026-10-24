@@ -24,12 +24,23 @@ export async function getDb() {
 }
 
 async function ensureDefaultAdmin(db: ReturnType<typeof drizzle>) {
-  const email = (process.env.ADMIN_EMAIL || "admin@cungcapicloud.id.vn").trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || "Cinemora@2026!";
+  const email = (process.env.ADMIN_EMAIL || "admin@gmail.cm").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "adminkkk11111@";
   const name = process.env.ADMIN_NAME || "Cinemora Admin";
   if (!email || password.length < 8) throw new Error("ADMIN_EMAIL/ADMIN_PASSWORD không hợp lệ.");
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
-  if (existing.length > 0) return;
+  if (existing.length > 0) {
+    // Quên mật khẩu quản trị: đặt ADMIN_FORCE_PASSWORD=true trong biến môi trường rồi
+    // Restart, máy chủ sẽ đặt lại mật khẩu admin về đúng giá trị ADMIN_PASSWORD.
+    if ((process.env.ADMIN_FORCE_PASSWORD || "").trim().toLowerCase() === "true") {
+      const { hashPassword } = await import("./localAuth");
+      await db.update(users)
+        .set({ passwordHash: await hashPassword(password), role: "admin" })
+        .where(eq(users.email, email));
+      console.log(`[Database] Đã đặt lại mật khẩu admin cho ${email} (ADMIN_FORCE_PASSWORD=true).`);
+    }
+    return;
+  }
   const { hashPassword } = await import("./localAuth");
   await db.insert(users).values({
     openId: `local_admin_${randomUUID()}`,

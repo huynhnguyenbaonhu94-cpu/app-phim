@@ -445,9 +445,11 @@ struct TVScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await tv.startLive() }
-        // Thanh trượt âm lượng trong trình phát ghi thẳng vào âm lượng của máy, và
-        // khi người dùng bấm nút cứng bên hông máy thì thanh trượt cập nhật theo.
-        .onChange(of: volume) { _, value in systemVolume.set(value) }
+        // Thanh trượt âm lượng trong trình phát ghi thẳng vào âm lượng của máy, và khi
+        // người dùng bấm nút cứng bên hông máy thì thanh trượt cập nhật theo. Việc ghi
+        // chỉ diễn ra khi người dùng kéo thanh trượt (xem `volumeBinding`); trước đây có
+        // thêm `.onChange(of: volume)` ghi ngược lại, khiến mỗi lần bấm nút cứng vừa đổi
+        // âm lượng máy xong là bị ghi đè lại ngay nên nút cứng như không có tác dụng.
         .onChange(of: isMuted) { _, muted in systemVolume.setMuted(muted) }
         .onChange(of: systemVolume.value) { _, value in if volume != value { volume = value } }
         .onChange(of: systemVolume.isMuted) { _, muted in if isMuted != muted { isMuted = muted } }
@@ -700,6 +702,12 @@ private struct TVPlayerView: View {
     @Binding var isFullscreen: Bool
     @State private var controlsVisible = true
     @State private var volumePopoverOpen = false
+
+    /// Thanh trượt đọc mức thật của máy và chỉ ghi khi người dùng kéo, nhờ vậy nút cứng
+    /// bên hông máy không bị app ghi đè ngược lại.
+    private var volumeBinding: Binding<Double> {
+        Binding(get: { SystemVolume.shared.value }, set: { SystemVolume.shared.set($0) })
+    }
     @State private var hideTask: Task<Void, Never>?
     @State private var videoFit: TVVideoFit = .fit
     @State private var quickMenu: TVQuickMenu?
@@ -981,7 +989,7 @@ private struct TVPlayerView: View {
                                 .frame(width: 36, height: 36)
                         }
                         .buttonStyle(.plain)
-                        Slider(value: $volume, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
+                        Slider(value: volumeBinding, in: 0...1, onEditingChanged: { editing in if !editing { scheduleHide() } })
                             .tint(Color.auroraViolet)
                             .frame(width: 150)
                     }

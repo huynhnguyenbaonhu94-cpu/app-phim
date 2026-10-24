@@ -4270,3 +4270,30 @@ body {
 .custom-lang-tick { width: 14px; color: var(--accent, #e5c15a); font-size: 12px; font-weight: 700; }
 .custom-lang-option.is-muted { color: var(--muted, #8a93a6); font-size: 12px; }
 .custom-lang-hint { display: block; margin-top: 5px; }
+
+
+/* ==== Ô nhập bị trình duyệt tự điền (autofill) ====
+   Chrome phủ nền xanh xám lên ô email/mật khẩu khi có dữ liệu tự điền, trông như
+   một "lớp nền lạ" so với lúc ô còn trống. Ghi đè bằng bóng đổ inset cùng tông tối
+   của hộp đăng nhập, đồng thời cố định màu chữ và con trỏ. */
+.auth-input input:-webkit-autofill,
+.auth-input input:-webkit-autofill:hover,
+.auth-input input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f1f2f4;
+  -webkit-box-shadow: 0 0 0 1000px #191d26 inset;
+  box-shadow: 0 0 0 1000px #191d26 inset;
+  caret-color: #f1f2f4;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* Các ô nhập khác trong trang quản trị: giữ tông tối thay vì nền xanh của trình duyệt. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #f1f2f4;
+  -webkit-box-shadow: 0 0 0 1000px #14171f inset;
+  box-shadow: 0 0 0 1000px #14171f inset;
+  caret-color: #f1f2f4;
+}

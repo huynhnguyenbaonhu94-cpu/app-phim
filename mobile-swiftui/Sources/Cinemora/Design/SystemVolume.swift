@@ -6,9 +6,13 @@ import SwiftUI
 ///
 /// `AVPlayer` có mức âm lượng riêng, nên trước đây kéo thanh âm lượng chỉ làm nhỏ
 /// tiếng bên trong app còn âm lượng thiết bị vẫn nguyên. Ở đây dùng một `MPVolumeView`
-/// ẩn để đặt đúng mức âm lượng của máy, đồng thời theo dõi `outputVolume` của
+/// để đặt đúng mức âm lượng của máy, đồng thời theo dõi `outputVolume` của
 /// `AVAudioSession` nên thanh trượt luôn khớp với mức thật của thiết bị — kể cả khi
 /// người dùng bấm nút cứng bên hông máy.
+///
+/// **Quan trọng:** `MPVolumeView` chỉ được gắn vào cửa sổ trong lúc thật sự cần ghi âm
+/// lượng, rồi gỡ ra ngay sau đó. Để nó nằm thường trực trong cửa sổ sẽ khiến nút cứng
+/// tăng/giảm âm lượng của máy không còn tác dụng trên toàn bộ app.
 @MainActor
 final class SystemVolume: ObservableObject {
     static let shared = SystemVolume()
@@ -22,6 +26,11 @@ final class SystemVolume: ObservableObject {
     private var observation: NSKeyValueObservation?
     private var restoreValue: Double = 0.6
 
+    /// Cửa sổ đang dùng, chỉ ghi nhớ chứ không thêm view vào.
+    private weak var hostWindow: UIWindow?
+    private var isAttached = false
+    private var detachTask: DispatchWorkItem?
+
     private init() {
         let session = AVAudioSession.sharedInstance()
         let current = Double(session.outputVolume)
@@ -32,41 +41,21 @@ final class SystemVolume: ObservableObject {
         volumeView.showsRouteButton = false
         volumeView.showsVolumeSlider = true
         volumeView.alpha = 0.001
+        volumeView.clipsToBounds = true
         volumeView.isUserInteractionEnabled = false
 
+        // Theo dõi mức âm lượng thật của máy. Việc theo dõi này không cần `MPVolumeView`
+        // nằm trong giao diện, nên nút cứng vẫn cập nhật được thanh trượt của app.
         observation = session.observe(\.outputVolume, options: [.new, .initial]) { [weak self] session, _ in
             let level = Double(session.outputVolume)
             Task { @MainActor in self?.apply(level) }
         }
     }
 
-    /// Cửa sổ đang giữ `MPVolumeView`.
-    private weak var installedWindow: UIWindow?
-
-    /// Đưa `MPVolumeView` vào cửa sổ ứng dụng, mỗi cửa sổ chỉ một lần.
-    ///
-    /// iOS chỉ cho `MPVolumeView` điều khiển âm lượng hệ thống khi nó nằm trong cây
-    /// giao diện. Trước đây mỗi trình phát tự đặt một neo 2×2, nhưng khung nhỏ **không**
-    /// cắt được nội dung bên trong (`UIView` mặc định `clipsToBounds = false`), nên
-    /// thanh âm lượng của hệ thống lộ hẳn ra ngoài và dính lên trang chủ. Nay chỉ có
-    /// một bản nằm trong cửa sổ, kích thước 1×1, cắt nội dung và trong suốt.
+    /// Ghi nhớ cửa sổ ứng dụng. Không thêm `MPVolumeView` vào ngay — xem `attachForWriting()`.
     @MainActor
-    func attach(to window: UIWindow) {
-        guard installedWindow !== window else { return }
-        installedWindow = window
-        volumeView.removeFromSuperview()
-        volumeView.showsRouteButton = false
-        volumeView.showsVolumeSlider = true
-        volumeView.clipsToBounds = true
-        volumeView.alpha = 0.001
-        volumeView.isUserInteractionEnabled = false
-        volumeView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-        window.addSubview(volumeView)
-        window.sendSubviewToBack(volumeView)
-        // Ép bố cục ngay để thanh trượt con được tạo, nhờ vậy lần chỉnh âm lượng đầu
-        // tiên đã có tác dụng thay vì phải chờ một vòng bố cục.
-        volumeView.setNeedsLayout()
-        volumeView.layoutIfNeeded()
+    func register(window: UIWindow) {
+        hostWindow = window
     }
 
     /// Đặt âm lượng thiết bị. Dùng thanh trượt con của `MPVolumeView` vì đây là API
@@ -74,10 +63,14 @@ final class SystemVolume: ObservableObject {
     @MainActor
     func set(_ newValue: Double) {
         let clamped = min(1, max(0, newValue))
+        // Bỏ qua khi mức không đổi. Mỗi lần ghi đều phải gắn lại `MPVolumeView`, nên nếu
+        // ghi đè vô ích thì thay đổi người dùng vừa bấm bằng nút cứng sẽ bị nuốt mất.
+        if abs(clamped - value) < 0.004 { return }
         apply(clamped)
-        guard let slider = slider else { return }
+        attachForWriting()
         // Đặt trên hàng đợi kế tiếp để không ghi đè trong lúc thanh trượt đang bị kéo.
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let slider = self.slider else { return }
             slider.value = Float(clamped)
             slider.sendActions(for: .valueChanged)
         }
@@ -105,6 +98,40 @@ final class SystemVolume: ObservableObject {
         }
     }
 
+    /// Gắn `MPVolumeView` vào cửa sổ đúng lúc cần ghi, và hẹn gỡ ra sau khi người dùng thôi chỉnh.
+    ///
+    /// Khung 1×1 kèm `clipsToBounds` nên không bao giờ lộ ra giao diện; `alpha` nhỏ nhưng
+    /// khác 0 vì iOS cần view nằm trong cây giao diện mới cho phép điều khiển âm lượng.
+    @MainActor
+    private func attachForWriting() {
+        guard let window = hostWindow else { return }
+        if !isAttached {
+            volumeView.removeFromSuperview()
+            volumeView.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            window.addSubview(volumeView)
+            window.sendSubviewToBack(volumeView)
+            // Ép bố cục ngay để thanh trượt con được tạo, nhờ vậy lần chỉnh âm lượng đầu
+            // tiên đã có tác dụng thay vì phải chờ một vòng bố cục.
+            volumeView.setNeedsLayout()
+            volumeView.layoutIfNeeded()
+            isAttached = true
+        }
+        detachTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in
+            Task { @MainActor in self?.detach() }
+        }
+        detachTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: task)
+    }
+
+    /// Gỡ `MPVolumeView` khỏi cửa sổ để nút cứng của máy hoạt động bình thường trở lại.
+    @MainActor
+    private func detach() {
+        guard isAttached else { return }
+        volumeView.removeFromSuperview()
+        isAttached = false
+    }
+
     private var slider: UISlider? {
         volumeView.subviews.compactMap { $0 as? UISlider }.first
     }
@@ -119,11 +146,9 @@ final class SystemVolume: ObservableObject {
     }
 }
 
-/// Gắn `MPVolumeView` ẩn vào cửa sổ ứng dụng — đặt một lần ở gốc app.
+/// Ghi nhớ cửa sổ ứng dụng để `SystemVolume` biết chỗ gắn `MPVolumeView` khi cần — đặt một lần ở gốc app.
 ///
-/// Bản thân view này chỉ là cái móc để biết cửa sổ nào đang dùng; `MPVolumeView` được
-/// thêm trực tiếp vào cửa sổ với kích thước 1×1, cắt nội dung và gần như trong suốt,
-/// nên không bao giờ lộ ra trên giao diện.
+/// View này không thêm gì vào giao diện: nó chỉ báo lại cửa sổ đang dùng.
 struct SystemVolumeWindowInstaller: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = InstallerView(frame: .zero)
@@ -131,13 +156,13 @@ struct SystemVolumeWindowInstaller: UIViewRepresentable {
         view.backgroundColor = .clear
         view.onWindow = { [weak view] window in
             guard view != nil else { return }
-            SystemVolume.shared.attach(to: window)
+            SystemVolume.shared.register(window: window)
         }
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        if let window = uiView.window { SystemVolume.shared.attach(to: window) }
+        if let window = uiView.window { SystemVolume.shared.register(window: window) }
     }
 
     /// Báo ngay khi view vào cửa sổ, và báo lại nếu cửa sổ đổi.

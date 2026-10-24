@@ -43,6 +43,9 @@ export function getSessionCookieOptions(
     httpOnly: true,
     path: "/",
     sameSite: "none",
-    secure: isSecureRequest(req),
+    // Trên hosting production luôn chạy HTTPS. Đặt secure ngay cả khi proxy không
+    // chuyển tiếp header giao thức, nếu không trình duyệt sẽ từ chối cookie phiên và
+    // người dùng đăng nhập xong vẫn bị coi là chưa đăng nhập.
+    secure: isSecureRequest(req) || process.env.NODE_ENV === "production",
   };
 }

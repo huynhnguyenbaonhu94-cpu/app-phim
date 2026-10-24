@@ -2369,3 +2369,22 @@ Khung ảnh nhãn chỉ đặt `maxWidth` nên trong hàng bình luận nó luô
   trực tiếp đã được bỏ.
 - Sau khi gắn, bố cục được ép chạy ngay để thanh trượt con tồn tại, nên lần chỉnh âm lượng
   đầu tiên đã có tác dụng.
+
+
+## 92. Nút cứng tăng/giảm âm lượng của máy hoạt động trở lại
+
+Trước đây `MPVolumeView` ẩn được gắn **thường trực** vào cửa sổ ngay khi mở app (qua
+`SystemVolumeWindowInstaller` ở gốc app), và màn Truyền hình còn có một vòng lặp: khi
+âm lượng máy đổi, `volume` được cập nhật rồi `.onChange(of: volume)` ghi ngược lại vào
+âm lượng máy. Hai điều này cộng lại làm nút cứng bên hông máy gần như không có tác dụng
+trong app.
+
+- `SystemVolume` nay chỉ **ghi nhớ** cửa sổ (`register(window:)`), và chỉ gắn
+  `MPVolumeView` trong lúc thực sự cần ghi âm lượng (`attachForWriting()`), tự gỡ ra sau
+  2,5 giây. Bình thường không có view nào trong cửa sổ nên nút cứng hoạt động như app hệ thống.
+- Việc theo dõi `AVAudioSession.outputVolume` vẫn chạy thường trực, nên thanh trượt trong
+  app vẫn cập nhật đúng khi người dùng bấm nút cứng.
+- `set()` bỏ qua khi mức không đổi (sai lệch dưới 0,004) — mỗi lần ghi đều phải gắn lại
+  `MPVolumeView`, nên ghi đè vô ích sẽ nuốt mất thay đổi vừa bấm.
+- Màn Truyền hình: bỏ `.onChange(of: volume)` ghi ngược; thanh trượt dùng `volumeBinding`
+  chỉ ghi khi người dùng kéo. Nhánh tắt tiếng giữ nguyên vì người dùng bấm nút là hành động rõ ràng.
