@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct MovieRequestScreen: View {
+    @Environment(CinemaStore.self) private var store
     @State private var title = ""
     @State private var link = ""
     @State private var priority = "Bình thường"
@@ -36,10 +37,15 @@ struct MovieRequestScreen: View {
                     }
                     .auroraReveal(0)
 
+                    if store.accountUser != nil && !store.movieRequests.isEmpty {
+                        requestHistorySection
+                            .auroraReveal(1)
+                    }
+
                     requestField(title: "Tên phim", placeholder: "Tên phim, tên gốc, năm sản xuất, quốc gia…", text: $title, id: "title", icon: "film")
-                        .auroraReveal(1)
-                    requestField(title: "Link TMDB hoặc IMDB (nếu có)", placeholder: "https://www.imdb.com/title/…", text: $link, id: "link", icon: "link")
                         .auroraReveal(2)
+                    requestField(title: "Link TMDB hoặc IMDB (nếu có)", placeholder: "https://www.imdb.com/title/…", text: $link, id: "link", icon: "link")
+                        .auroraReveal(3)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "MỨC ĐỘ ƯU TIÊN")
@@ -51,7 +57,7 @@ struct MovieRequestScreen: View {
                             }
                         }
                     }
-                    .auroraReveal(3)
+                    .auroraReveal(4)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "GHI CHÚ THÊM (NẾU CÓ)")
@@ -69,7 +75,7 @@ struct MovieRequestScreen: View {
                             }
                             .animation(Motion.gentle, value: focusedField)
                     }
-                    .auroraReveal(4)
+                    .auroraReveal(5)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "HÌNH ẢNH (NẾU CÓ)")
@@ -128,7 +134,7 @@ struct MovieRequestScreen: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
                     }
-                    .auroraReveal(5)
+                    .auroraReveal(6)
 
                     if let message {
                         HStack(alignment: .top, spacing: 9) {
@@ -158,7 +164,7 @@ struct MovieRequestScreen: View {
                     ) {
                         submit()
                     }
-                    .auroraReveal(6)
+                    .auroraReveal(7)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -175,6 +181,92 @@ struct MovieRequestScreen: View {
             Button("Đóng", role: .cancel) { }
         } message: {
             Text("Cảm ơn bạn. Yêu cầu phim đã được gửi đến đội ngũ Cinemora.")
+        }
+        .task {
+            guard store.accountUser != nil else { return }
+            await store.refreshMovieRequests()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(8))
+                if !Task.isCancelled { await store.refreshMovieRequests() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var requestHistorySection: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                SectionEyebrow(text: "LỊCH SỬ YÊU CẦU CỦA BẠN")
+                Spacer()
+                if store.movieRequestsLoading {
+                    ProgressView().tint(Color.auroraViolet).scaleEffect(0.65)
+                }
+            }
+            if let error = store.movieRequestsError, store.movieRequests.isEmpty {
+                Text(error)
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraAmber)
+            } else if store.movieRequests.isEmpty {
+                Text("Bạn chưa gửi yêu cầu phim nào khi đăng nhập tài khoản này.")
+                    .font(.auroraBody(11))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .padding(.vertical, 5)
+            } else {
+                ForEach(store.movieRequests) { request in
+                    requestHistoryRow(request)
+                }
+            }
+        }
+        .padding(14)
+        .auroraCard(cornerRadius: 20, tint: .auroraViolet, fill: 0.62)
+    }
+
+    private func requestHistoryRow(_ request: RemoteMovieRequest) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            PosterArt(url: CinemaAPI.absoluteURL(request.posterUrl))
+                .frame(width: 48, height: 66)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.7))
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .top, spacing: 7) {
+                    Text(request.title)
+                        .font(.auroraLabel(13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    Text(request.statusTitle)
+                        .font(.auroraLabel(9, weight: .bold))
+                        .foregroundStyle(statusColor(request.statusTint))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(statusColor(request.statusTint).opacity(0.14)))
+                }
+                Text("Ưu tiên: \(request.priority)")
+                    .font(.auroraBody(10, weight: .medium))
+                    .foregroundStyle(Color.auroraTextTertiary)
+                if let message = request.adminMessage, !message.isEmpty {
+                    Text(message)
+                        .font(.auroraBody(10, weight: .medium))
+                        .foregroundStyle(Color.auroraMint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let date = request.statusUpdatedAt?.date {
+                    Text("Cập nhật \(date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.auroraBody(9))
+                        .foregroundStyle(Color.auroraTextTertiary)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func statusColor(_ key: ColorKey) -> Color {
+        switch key {
+        case .amber: return .auroraAmber
+        case .mint: return .auroraMint
+        case .violet: return .auroraViolet
+        case .sky: return .auroraSky
         }
     }
 
@@ -257,6 +349,7 @@ struct MovieRequestScreen: View {
                     imagePreview = nil
                     selectedPhoto = nil
                 }
+                if store.accountUser != nil { await store.refreshMovieRequests() }
             } catch {
                 await MainActor.run {
                     isSubmitting = false

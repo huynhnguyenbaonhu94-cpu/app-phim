@@ -38,6 +38,7 @@ import { createTvVideo, deleteTvVideo, listTvVideos, updateTvVideo } from "./tvV
 import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus } from "./qrLogin";
 import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 import { commentRevision, publishAllComments, publishComments, waitForComments } from "./commentFeed";
+import { createMovieRequest, listAllMovieRequests, listMovieRequestsForUser, updateMovieRequest, MOVIE_REQUEST_STATUSES, type MovieRequestStatus } from "./movieRequests";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -354,13 +355,55 @@ export const appRouter = router({
       }
       movieRequestCooldown.set(key, now);
       try {
-        await sendMovieRequestToTelegram(input);
-        return { success: true } as const;
+        let posterUrl: string | null = null;
+        if (input.imageBase64) {
+          posterUrl = (await saveMovieImage({
+            base64: input.imageBase64,
+            mimeType: input.imageMimeType,
+            filename: "movie-request-poster",
+          })).url;
+        }
+        const requesterName = ctx.user?.name?.trim() || (ctx.user?.email ? ctx.user.email.split("@")[0] : null);
+        const request = await createMovieRequest({
+          userId: ctx.user?.id ?? null,
+          requesterName,
+          requesterEmail: ctx.user?.email ?? null,
+          title: input.title,
+          link: input.link,
+          priority: input.priority,
+          notes: input.notes,
+          posterUrl,
+        });
+        let telegramSent = false;
+        try {
+          await sendMovieRequestToTelegram(input);
+          telegramSent = true;
+        } catch (error) {
+          // Yêu cầu đã lưu thành công trong trang quản trị; Telegram chỉ là kênh báo phụ.
+          console.warn("[MovieRequest] Telegram notification failed:", error instanceof Error ? error.message : error);
+        }
+        return { success: true, requestId: request.id, telegramSent } as const;
       } catch (error) {
         movieRequestCooldown.delete(key);
         throw error;
       }
     }),
+    myRequests: protectedProcedure.query(({ ctx }) => listMovieRequestsForUser(ctx.user.id)),
+  }),
+  movieRequests: router({
+    list: adminProcedure.query(() => listAllMovieRequests()),
+    update: adminProcedure.input(z.object({
+      id: z.number().int().positive(),
+      status: z.enum(MOVIE_REQUEST_STATUSES),
+      adminMessage: z.string().trim().max(4000).optional(),
+    }).superRefine((input, ctx) => {
+      if (input.status === "other" && !input.adminMessage?.trim()) {
+        ctx.addIssue({ code: "custom", path: ["adminMessage"], message: "Vui lòng nhập nội dung gửi đến người dùng khi chọn Khác." });
+      }
+    })).mutation(({ input }) => updateMovieRequest(input.id, {
+      status: input.status as MovieRequestStatus,
+      adminMessage: input.adminMessage,
+    })),
   }),
   tv: router({
     list: publicProcedure.query(() => listTvStreams(false)),

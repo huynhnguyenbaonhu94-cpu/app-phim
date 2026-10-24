@@ -278,19 +278,10 @@ struct AccountSettingsScreen: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(user.displayName)
+                        StyledCommentName(name: user.displayName, style: user.nameStyle, isAdmin: user.role == "admin", isMine: true)
                             .font(.auroraLabel(18, weight: .black))
-                            .foregroundStyle(.white)
-                        if let badge = user.badge, !badge.isEmpty {
-                            Text(badge.uppercased())
-                                .font(.system(size: 9, weight: .black, design: .rounded))
-                                .tracking(0.5)
-                                .foregroundStyle(Color.auroraMint)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.auroraMint.opacity(0.15)))
-                                .overlay(Capsule().strokeBorder(Color.auroraMint.opacity(0.35), lineWidth: 0.8))
-                        }
+                        CommentBadgeRow(badges: user.visibleBadges)
+                    }
                     }
                     Text(user.email ?? "")
                         .font(.auroraBody(11))

@@ -73,6 +73,27 @@ export const accountSessions = mysqlTable("account_sessions", {
   lastSeenIndex: index("account_sessions_last_seen_idx").on(table.lastSeenAt),
 }));
 
+/** Yêu cầu phim từ tài khoản đã đăng nhập hoặc khách chưa đăng nhập. */
+export const movieRequests = mysqlTable("movie_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  requesterName: varchar("requesterName", { length: 160 }),
+  requesterEmail: varchar("requesterEmail", { length: 320 }),
+  title: varchar("title", { length: 255 }).notNull(),
+  link: varchar("link", { length: 500 }),
+  priority: varchar("priority", { length: 20 }).default("Bình thường").notNull(),
+  notes: text("notes"),
+  posterUrl: text("posterUrl"),
+  status: varchar("status", { length: 20 }).default("received").notNull(),
+  adminMessage: text("adminMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  statusUpdatedAt: timestamp("statusUpdatedAt"),
+}, (table) => ({
+  userCreatedIndex: index("movie_requests_user_created_idx").on(table.userId, table.createdAt),
+  statusCreatedIndex: index("movie_requests_status_created_idx").on(table.status, table.createdAt),
+}));
+
 export const qrLoginChallenges = mysqlTable("qr_login_challenges", {
   id: int("id").autoincrement().primaryKey(),
   nonceHash: varchar("nonceHash", { length: 128 }).notNull().unique(),
@@ -161,6 +182,7 @@ export type InsertUser = typeof users.$inferInsert;
 export type MovieFavorite = typeof movieFavorites.$inferSelect;
 export type MovieWatchHistory = typeof movieWatchHistory.$inferSelect;
 export type AccountSession = typeof accountSessions.$inferSelect;
+export type MovieRequest = typeof movieRequests.$inferSelect;
 export type QrLoginChallenge = typeof qrLoginChallenges.$inferSelect;
 export type TvStream = typeof tvStreams.$inferSelect;
 export type InsertTvStream = typeof tvStreams.$inferInsert;

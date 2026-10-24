@@ -65,6 +65,9 @@ final class CinemaStore {
     private(set) var accountDevices: [RemoteAccountDevice] = []
     private(set) var accountLoading = false
     private(set) var accountError: String?
+    private(set) var movieRequests: [RemoteMovieRequest] = []
+    private(set) var movieRequestsLoading = false
+    private(set) var movieRequestsError: String?
     var playbackDefaults = PlaybackDefaults()
     private(set) var hasNewHomeContent = false
 
@@ -347,6 +350,26 @@ final class CinemaStore {
         }
     }
 
+    /// Làm mới tiến trình yêu cầu phim của tài khoản hiện tại. Khách ẩn danh không
+    /// bao giờ gọi endpoint này và không có lịch sử yêu cầu trên app.
+    func refreshMovieRequests() async {
+        guard let expectedUserID = accountUser?.id else {
+            movieRequests = []
+            movieRequestsError = nil
+            return
+        }
+        movieRequestsLoading = true
+        defer { movieRequestsLoading = false }
+        do {
+            let requests = try await api.movieRequestHistory()
+            guard accountUser?.id == expectedUserID else { return }
+            movieRequests = requests
+            movieRequestsError = nil
+        } catch {
+            if accountUser?.id == expectedUserID { movieRequestsError = error.localizedDescription }
+        }
+    }
+
     func refreshAccountDevicesAfterQrApproval() async {
         // Device B creates its session just after A receives the approval.
         // Retry briefly so A shows the new device without leaving the screen.
@@ -395,6 +418,8 @@ final class CinemaStore {
     private func clearAccountState() {
         accountUser = nil
         accountDevices = []
+        movieRequests = []
+        movieRequestsError = nil
         localFavorites = []
         localHistory = []
         accountError = nil

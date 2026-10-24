@@ -213,6 +213,11 @@ struct CinemaAPI {
         let _: MovieRequestResponse = try await mutate("cinema.submitRequest", input: input)
     }
 
+    /// Lịch sử chỉ tồn tại với tài khoản đã đăng nhập; khách không gọi endpoint này.
+    func movieRequestHistory() async throws -> [RemoteMovieRequest] {
+        try await query("cinema.myRequests", input: nil)
+    }
+
     // MARK: - Bình luận
 
     func comments(slug: String) async throws -> MovieCommentFeed {

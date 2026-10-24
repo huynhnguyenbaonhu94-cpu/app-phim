@@ -593,7 +593,7 @@ struct CommentBadge: Identifiable, Hashable, Codable {
 
     /// Giá trị lạ do bản cập nhật sau này gửi lên sẽ rơi về mặc định thay vì làm vỡ giao diện.
     private static func normalized(style value: String) -> String {
-        ["solid", "gradient", "outline", "glow", "shine", "pulse"].contains(value) ? value : "solid"
+        ["solid", "gradient", "outline", "glow", "shine", "pulse", "neon", "gold", "hologram"].contains(value) ? value : "solid"
     }
 
     private static func normalized(font value: String) -> String {
@@ -605,7 +605,7 @@ struct CommentBadge: Identifiable, Hashable, Codable {
     }
 
     private static func normalized(animation value: String) -> String {
-        ["none", "pulse", "shine", "float"].contains(value) ? value : "none"
+        ["none", "pulse", "shine", "float", "bounce", "tilt", "blink"].contains(value) ? value : "none"
     }
 }
 
@@ -625,7 +625,7 @@ struct CommentNameStyle: Hashable, Codable {
         let container = try decoder.container(keyedBy: Keys.self)
         color = (try? container.decode(String.self, forKey: .color)) ?? ""
         let raw = (try? container.decode(String.self, forKey: .effect)) ?? "none"
-        effect = ["none", "glow", "gradient", "shine", "rainbow", "outline"].contains(raw) ? raw : "none"
+        effect = ["none", "glow", "gradient", "shine", "rainbow", "outline", "neon", "gold", "ice", "fire", "shadow", "underline", "breathe"].contains(raw) ? raw : "none"
     }
 
     func encode(to encoder: Encoder) throws {

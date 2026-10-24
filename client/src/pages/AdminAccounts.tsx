@@ -175,7 +175,7 @@ export default function AdminAccounts() {
   }
 
   return <PageShell><main className="content-wrap inner-page admin-accounts-page">
-    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/movies" className="text-link">Quản lý phim</Link> · Admin · cập nhật mỗi 10 giây</span></div>
+    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/movie-requests" className="text-link">Yêu cầu phim</Link> · <Link href="/admin/movies" className="text-link">Quản lý phim</Link> · Admin · cập nhật mỗi 10 giây</span></div>
     <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý tất cả tài khoản app" action={<button className="admin-tv-refresh" onClick={() => accounts.refetch()} disabled={accounts.isFetching}><RefreshCw size={15} /></button>} />
     <p className="admin-accounts-note">Dữ liệu tài khoản, số thiết bị, yêu thích và lịch sử được lấy trực tiếp từ database. Website vẫn giữ thư viện local riêng.</p>
     <section className="admin-account-list">

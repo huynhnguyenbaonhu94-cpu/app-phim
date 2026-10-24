@@ -138,6 +138,28 @@ export async function ensureCustomMoviesCompatibility(db: ReturnType<typeof driz
   }
 }
 
+/** Bảng yêu cầu phim, hỗ trợ cả khách ẩn danh và tài khoản đã đăng nhập. */
+export async function ensureMovieRequestsCompatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS movie_requests (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    userId int NULL,
+    requesterName varchar(160) NULL,
+    requesterEmail varchar(320) NULL,
+    title varchar(255) NOT NULL,
+    link varchar(500) NULL,
+    priority varchar(20) NOT NULL DEFAULT 'Bình thường',
+    notes text NULL,
+    posterUrl text NULL,
+    status varchar(20) NOT NULL DEFAULT 'received',
+    adminMessage text NULL,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    statusUpdatedAt timestamp NULL,
+    INDEX movie_requests_user_created_idx (userId, createdAt),
+    INDEX movie_requests_status_created_idx (status, createdAt)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
 export async function initializeDatabase() {
   if (initialization) return initialization;
   initialization = (async () => {
@@ -157,6 +179,7 @@ export async function initializeDatabase() {
     await ensureMovieCommentsCompatibility(db);
     await ensureMovieSourcesCompatibility(db);
     await ensureCustomMoviesCompatibility(db);
+    await ensureMovieRequestsCompatibility(db);
     await ensureUsersProfileCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
