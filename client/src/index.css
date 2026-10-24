@@ -4331,3 +4331,23 @@ select:-webkit-autofill {
 .admin-movie-requests-empty strong { color: #fff; font-size: 14px; }
 .admin-movie-requests-empty span { font-size: 11px; }
 @media (max-width: 620px) { .admin-movie-request-card { padding: 12px; } .admin-movie-request-editor { align-items: stretch; flex-direction: column; } .admin-movie-request-editor label { min-width: 0; width: 100%; } .admin-movie-request-editor .button { align-self: flex-start; } }
+
+/* Visual status picker for movie requests */
+.admin-request-status-picker { display: grid; gap: 8px; flex: 1 1 100%; }
+.admin-request-status-picker-label { color: rgba(255,255,255,.65); font-size: 10px; font-weight: 700; }
+.admin-request-status-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.admin-request-status-option { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; color: rgba(255,255,255,.58); background: rgba(255,255,255,.035); text-align: left; transition: border-color .18s, background .18s, color .18s, transform .16s; }
+.admin-request-status-option:hover { border-color: rgba(255,255,255,.28); color: rgba(255,255,255,.9); background: rgba(255,255,255,.075); transform: translateY(-1px); }
+.admin-request-status-option:active { transform: scale(.98); }
+.admin-request-status-option > svg { flex: 0 0 auto; }
+.admin-request-status-option > span { display: grid; min-width: 0; gap: 3px; }
+.admin-request-status-option b { overflow: hidden; color: inherit; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.admin-request-status-option small { overflow: hidden; color: rgba(255,255,255,.42); font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
+.admin-request-status-option.is-selected { color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.04), 0 8px 20px rgba(0,0,0,.12); }
+.admin-request-status-option.is-selected small { color: rgba(255,255,255,.7); }
+.admin-request-status-option.is-selected--received { border-color: rgba(121,191,242,.7); background: rgba(121,191,242,.14); color: #79bff2; }
+.admin-request-status-option.is-selected--processing { border-color: rgba(240,198,116,.7); background: rgba(240,198,116,.14); color: #f0c674; }
+.admin-request-status-option.is-selected--updated { border-color: rgba(121,226,164,.7); background: rgba(121,226,164,.14); color: #79e2a4; }
+.admin-request-status-option.is-selected--other { border-color: rgba(198,160,246,.7); background: rgba(198,160,246,.14); color: #c6a0f6; }
+@media (max-width: 760px) { .admin-request-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .admin-request-status-option { min-height: 52px; padding: 8px; gap: 7px; } .admin-request-status-option b { font-size: 9px; } .admin-request-status-option small { font-size: 8px; } }

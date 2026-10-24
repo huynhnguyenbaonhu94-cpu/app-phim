@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ExternalLink, Film, RefreshCw, Save, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Clock3, ExternalLink, Film, MessageCircle, RefreshCw, Save, ShieldCheck, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { AuthDialog } from "@/components/AuthDialog";
@@ -7,10 +7,10 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 
 const STATUS_OPTIONS = [
-  ["received", "Đã Tiếp Nhận"],
-  ["processing", "Đang Xử Lý"],
-  ["updated", "Đã Cập Nhật"],
-  ["other", "Khác"],
+  ["received", "Đã Tiếp Nhận", "Tiếp nhận yêu cầu", CheckCircle2],
+  ["processing", "Đang Xử Lý", "Đang tìm và xử lý phim", Clock3],
+  ["updated", "Đã Cập Nhật", "Đã có cập nhật mới", Sparkles],
+  ["other", "Khác", "Gửi thông tin riêng", MessageCircle],
 ] as const;
 
 type RequestStatus = (typeof STATUS_OPTIONS)[number][0];
@@ -76,7 +76,15 @@ export default function AdminMovieRequests() {
             </div>
           </div>
           <div className="admin-movie-request-editor">
-            <label>Tiến trình<select value={draft.status} onChange={(event) => setDrafts({ ...drafts, [item.id]: { ...draft, status: event.target.value as RequestStatus } })}>{STATUS_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <div className="admin-request-status-picker" role="group" aria-label={`Tiến trình yêu cầu ${item.title}`}>
+              <span className="admin-request-status-picker-label">Tiến trình</span>
+              <div className="admin-request-status-options">
+                {STATUS_OPTIONS.map(([value, label, description, Icon]) => <button type="button" key={value} className={`admin-request-status-option ${draft.status === value ? `is-selected is-selected--${value}` : ""}`} aria-pressed={draft.status === value} onClick={() => setDrafts({ ...drafts, [item.id]: { ...draft, status: value } })}>
+                  <Icon size={15} strokeWidth={2.2} />
+                  <span><b>{label}</b><small>{description}</small></span>
+                </button>)}
+              </div>
+            </div>
             {draft.status === "other" && <label className="is-wide">Thông tin gửi đến người dùng<textarea value={draft.message} onChange={(event) => setDrafts({ ...drafts, [item.id]: { ...draft, message: event.target.value } })} placeholder="Nhập thông tin admin muốn gửi về yêu cầu này…" maxLength={4000} /></label>}
             <button className="button button-primary" disabled={update.isPending || (draft.status === "other" && !draft.message.trim())} onClick={() => update.mutate({ id: item.id, status: draft.status, ...(draft.message.trim() ? { adminMessage: draft.message.trim() } : {}) })}><Save size={14} /> {update.isPending ? "Đang lưu…" : "Cập nhật tiến trình"}</button>
             {update.error && <span className="admin-tv-error">{update.error.message}</span>}

@@ -37,15 +37,10 @@ struct MovieRequestScreen: View {
                     }
                     .auroraReveal(0)
 
-                    if store.accountUser != nil && !store.movieRequests.isEmpty {
-                        requestHistorySection
-                            .auroraReveal(1)
-                    }
-
                     requestField(title: "Tên phim", placeholder: "Tên phim, tên gốc, năm sản xuất, quốc gia…", text: $title, id: "title", icon: "film")
-                        .auroraReveal(2)
+                        .auroraReveal(1)
                     requestField(title: "Link TMDB hoặc IMDB (nếu có)", placeholder: "https://www.imdb.com/title/…", text: $link, id: "link", icon: "link")
-                        .auroraReveal(3)
+                        .auroraReveal(2)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "MỨC ĐỘ ƯU TIÊN")
@@ -57,7 +52,7 @@ struct MovieRequestScreen: View {
                             }
                         }
                     }
-                    .auroraReveal(4)
+                    .auroraReveal(3)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "GHI CHÚ THÊM (NẾU CÓ)")
@@ -75,7 +70,7 @@ struct MovieRequestScreen: View {
                             }
                             .animation(Motion.gentle, value: focusedField)
                     }
-                    .auroraReveal(5)
+                    .auroraReveal(4)
 
                     VStack(alignment: .leading, spacing: 10) {
                         SectionEyebrow(text: "HÌNH ẢNH (NẾU CÓ)")
@@ -134,7 +129,7 @@ struct MovieRequestScreen: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
                     }
-                    .auroraReveal(6)
+                    .auroraReveal(5)
 
                     if let message {
                         HStack(alignment: .top, spacing: 9) {
@@ -164,7 +159,12 @@ struct MovieRequestScreen: View {
                     ) {
                         submit()
                     }
-                    .auroraReveal(7)
+                    .auroraReveal(6)
+
+                    if store.accountUser != nil && !store.movieRequests.isEmpty {
+                        requestHistorySection
+                            .auroraReveal(7)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -198,9 +198,6 @@ struct MovieRequestScreen: View {
             HStack {
                 SectionEyebrow(text: "LỊCH SỬ YÊU CẦU CỦA BẠN")
                 Spacer()
-                if store.movieRequestsLoading {
-                    ProgressView().tint(Color.auroraViolet).scaleEffect(0.65)
-                }
             }
             if let error = store.movieRequestsError, store.movieRequests.isEmpty {
                 Text(error)
