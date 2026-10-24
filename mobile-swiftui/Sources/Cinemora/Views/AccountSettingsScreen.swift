@@ -279,9 +279,8 @@ struct AccountSettingsScreen: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         StyledCommentName(name: user.displayName, style: user.nameStyle, isAdmin: user.role == "admin", isMine: true)
-                            .font(.auroraLabel(18, weight: .black))
+                        .font(.auroraLabel(18, weight: .black))
                         CommentBadgeRow(badges: user.visibleBadges)
-                    }
                     }
                     Text(user.email ?? "")
                         .font(.auroraBody(11))
