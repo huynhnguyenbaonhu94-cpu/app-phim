@@ -22,7 +22,16 @@ struct CinemaAPI {
 
     private let session: URLSession
 
-    init(session: URLSession = .shared) { self.session = session }
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.default
+            configuration.httpCookieStorage = HTTPCookieStorage.shared
+            configuration.httpShouldSetCookies = true
+            self.session = URLSession(configuration: configuration)
+        }
+    }
 
     /// Cookie phiên của máy chủ chính, gửi kèm khi gọi máy chủ bình luận ở tên miền
     /// khác. Máy chủ bình luận dùng chính cookie này để biết ai đang gửi.
@@ -338,10 +347,8 @@ struct CinemaAPI {
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
-        // Máy chủ bình luận ở tên miền khác vẫn cần cookie phiên của máy chủ chính
-        // để biết ai đang xem và ai đang gửi.
-        if base != CinemaAPI.baseURL,
-           let cookie = Self.forwardedSessionCookie(for: CinemaAPI.baseURL) {
+        let cookieHost = base == CinemaAPI.baseURL ? base : CinemaAPI.baseURL
+        if let cookie = Self.forwardedSessionCookie(for: cookieHost) {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
         let (data, response) = try await session.data(for: request)
@@ -379,8 +386,8 @@ struct CinemaAPI {
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
         request.timeoutInterval = 12
-        if base != CinemaAPI.baseURL,
-           let cookie = Self.forwardedSessionCookie(for: CinemaAPI.baseURL) {
+        let cookieHost = base == CinemaAPI.baseURL ? base : CinemaAPI.baseURL
+        if let cookie = Self.forwardedSessionCookie(for: cookieHost) {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: ["json": input], options: [.sortedKeys])

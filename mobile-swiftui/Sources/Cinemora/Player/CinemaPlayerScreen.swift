@@ -350,12 +350,54 @@ final class SubtitleController: ObservableObject {
     @Published private(set) var cueCount = 0
     /// Link phụ đề tải không được (nếu có) — hiện thẳng cho người xem biết.
     @Published private(set) var failedURL: String?
+    @Published private(set) var availableTracks: [MovieEpisodeSubtitleTrack] = []
+    @Published private(set) var selectedTrackID: String?
     private var cues: [SubtitleCue] = []
     private var bilingualCues: [SubtitleCue] = []
     private var loadTask: Task<Void, Never>?
+
+    /// Nạp danh sách subtitle của tập. Đổi ngôn ngữ chỉ tải lại file VTT và giữ
+    /// nguyên AVPlayerItem/vị trí phát nên không bị giật hoặc mất buffer video.
+    func load(tracks: [MovieEpisodeSubtitleTrack]) {
+        var unique: [MovieEpisodeSubtitleTrack] = []
+        var seen = Set<String>()
+        for track in tracks where !track.language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if seen.insert(track.id).inserted { unique.append(track) }
+        }
+        availableTracks = unique
+        selectedTrackID = unique.first?.id
+        loadSelectedTrack()
+    }
+
+    func selectTrack(id: String) {
+        guard availableTracks.contains(where: { $0.id == id }), selectedTrackID != id else { return }
+        selectedTrackID = id
+        loadSelectedTrack()
+    }
+
+    private func loadSelectedTrack() {
+        loadTask?.cancel()
+        cues = []; bilingualCues = []; currentText = nil
+        cueCount = 0; failedURL = nil
+        guard let id = selectedTrackID, let track = availableTracks.first(where: { $0.id == id }), let url = track.subtitleURL else { return }
+        loadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let text = await Self.fetchText(url), !Task.isCancelled else {
+                if !Task.isCancelled { self.failedURL = url.absoluteString }
+                return
+            }
+            let parsed = Self.parse(text)
+            guard !Task.isCancelled else { return }
+            self.cues = parsed
+            self.cueCount = parsed.count
+            if parsed.isEmpty { self.failedURL = url.absoluteString }
+        }
+    }
+
     func load(url: URL?, bilingualURL: URL? = nil) {
         loadTask?.cancel(); cues = []; bilingualCues = []; currentText = nil
         cueCount = 0; failedURL = nil
+        availableTracks = []; selectedTrackID = nil
         guard url != nil || bilingualURL != nil else { return }
         loadTask = Task { @MainActor [weak self] in
             // The TV API may expose the same uploaded file at both the
@@ -1034,7 +1076,8 @@ struct CinemaPlayerScreen: View {
     /// giờ hiện. Giờ chỉ cần tập có phụ đề là hiện.
     private var subtitleAvailable: Bool {
         guard let episode else { return false }
-        return episode.subtitleURL != nil || episode.bilingualSubtitleURL != nil
+        let source = episode.withQuality(qualityIndex)
+        return !source.availableSubtitleTracks.isEmpty || source.bilingualSubtitleURL != nil
     }
     private var hasCurrentSubtitle: Bool { subtitleAvailable }
 
@@ -1277,6 +1320,39 @@ struct CinemaPlayerScreen: View {
     }
 
     @ViewBuilder
+    private var subtitleLanguagePicker: some View {
+        if subtitles.availableTracks.count > 1 {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("NGÔN NGỮ PHỤ ĐỀ")
+                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .tracking(1)
+                    .foregroundStyle(Color.auroraViolet)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 6)], spacing: 6) {
+                    ForEach(subtitles.availableTracks) { track in
+                        Button {
+                            subtitles.selectTrack(id: track.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: subtitles.selectedTrackID == track.id ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(track.language)
+                                    .font(.auroraLabel(11, weight: .bold))
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(subtitles.selectedTrackID == track.id ? Color.auroraVoid : .white.opacity(0.78))
+                            .padding(.horizontal, 9)
+                            .frame(minHeight: 38)
+                            .background(subtitles.selectedTrackID == track.id ? AnyShapeStyle(LinearGradient.auroraPrimary) : AnyShapeStyle(Color.white.opacity(0.06)), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var settingsTabContent: some View {
         switch effectiveSettingsTab {
         case .audio:
@@ -1289,6 +1365,7 @@ struct CinemaPlayerScreen: View {
         case .subtitle:
             if hasCurrentSubtitle {
                 ScrollView(.vertical, showsIndicators: false) {
+                    subtitleLanguagePicker
                     subtitleStatusLine
                     subtitlePreview
                     SubtitlePreferencesEditor(preferences: $subtitlePreferences, compact: true).padding(.vertical, 2)
@@ -1932,7 +2009,11 @@ struct CinemaPlayerScreen: View {
         if qualityIndex >= qualities.count { qualityIndex = 0 }
         let source = episode.withQuality(qualityIndex)
         let startAt = pendingResumeTime ?? (hasAppliedResumeTime ? nil : resumeTime)
-        subtitles.load(url: source.subtitleURL, bilingualURL: source.bilingualSubtitleURL)
+        if !source.availableSubtitleTracks.isEmpty {
+            subtitles.load(tracks: source.availableSubtitleTracks)
+        } else {
+            subtitles.load(url: source.subtitleURL, bilingualURL: source.bilingualSubtitleURL)
+        }
         // Ưu tiên bản đã tải về máy để xem được khi mất mạng.
         let offlineURL = downloads.localURL(
             movieSlug: movie.slug,

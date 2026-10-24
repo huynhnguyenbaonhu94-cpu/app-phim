@@ -4351,3 +4351,16 @@ select:-webkit-autofill {
 .admin-request-status-option.is-selected--other { border-color: rgba(198,160,246,.7); background: rgba(198,160,246,.14); color: #c6a0f6; }
 @media (max-width: 760px) { .admin-request-status-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 420px) { .admin-request-status-option { min-height: 52px; padding: 8px; gap: 7px; } .admin-request-status-option b { font-size: 9px; } .admin-request-status-option small { font-size: 8px; } }
+
+/* Multi-language subtitle editor */
+.custom-quality-tracks-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.78); font-size: 11px; }
+.custom-quality-track-row { display: grid; grid-template-columns: minmax(115px, .6fr) minmax(180px, 1fr) minmax(150px, .8fr) auto; align-items: center; gap: 7px; margin-top: 7px; padding: 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; background: rgba(255,255,255,.025); }
+.custom-quality-track-row input { min-width: 0; }
+.custom-quality-track-row input[type="file"] { padding: 7px; font-size: 10px; }
+@media (max-width: 760px) { .custom-quality-track-row { grid-template-columns: 1fr 1fr auto; } .custom-quality-track-row input[type="file"] { grid-column: 1 / -1; } }
+@media (max-width: 460px) { .custom-quality-track-row { grid-template-columns: 1fr auto; } .custom-quality-track-row input[type="url"] { grid-column: 1 / -1; } }
+.admin-source-language-tracks { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+.admin-source-language-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: rgba(255,255,255,.78); font-size: 11px; }
+.admin-source-language-row { display: grid; grid-template-columns: minmax(110px, .6fr) minmax(170px, 1fr) minmax(140px, .8fr) auto; gap: 7px; align-items: center; padding: 7px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; background: rgba(255,255,255,.025); }
+.admin-source-language-row input { min-width: 0; }
+@media (max-width: 760px) { .admin-source-language-row { grid-template-columns: 1fr 1fr auto; } .admin-source-language-row input[type="file"] { grid-column: 1 / -1; } }

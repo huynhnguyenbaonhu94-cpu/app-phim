@@ -35,8 +35,9 @@ import ImagePicker from "@/components/ImagePicker";
 type Tag = { name: string; slug?: string };
 /** `role` được giữ lại để không mất dữ liệu cũ; giao diện không còn nhập vai diễn. */
 type Actor = { name: string; role?: string; image: string };
-type Quality = { label: string; streamUrl: string; subtitleUrl: string; subtitleVtt: string };
-type SourceQuality = { label: string; streamUrl: string; subtitleUrl: string | null };
+type SubtitleTrackDraft = { language: string; subtitleUrl: string; subtitleVtt: string };
+type Quality = { label: string; streamUrl: string; subtitleUrl: string; subtitleVtt: string; subtitleTracks: SubtitleTrackDraft[] };
+type SourceQuality = { label: string; streamUrl: string; subtitleUrl: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl: string }> };
 type SourceEpisode = {
   id: number;
   sourceId: number;
@@ -1167,7 +1168,7 @@ type EpisodePayload = {
   streamUrl: string;
   subtitleUrl?: string | null;
   subtitleVtt?: string | null;
-  qualities: Array<{ label: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
+  qualities: Array<{ label: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }>;
 };
 
 function SourceEpisodeEditor({
@@ -1192,6 +1193,7 @@ function SourceEpisodeEditor({
       streamUrl: item.streamUrl,
       subtitleUrl: item.subtitleUrl || "",
       subtitleVtt: "",
+      subtitleTracks: (item.subtitleTracks || []).map(track => ({ language: track.language, subtitleUrl: track.subtitleUrl, subtitleVtt: "" })),
     })) || [],
   );
   const [error, setError] = useState<string | null>(null);
@@ -1220,6 +1222,21 @@ function SourceEpisodeEditor({
       const result = await uploadSubtitle.mutateAsync({ base64, filename: file.name });
       setSubtitleUrl(result.url);
       setSubtitleVtt(result.content);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Không thể tải phụ đề lên.");
+    }
+  }
+
+  async function uploadQualityTrack(index: number, trackIndex: number, file: File | undefined) {
+    if (!file) return;
+    try {
+      const base64 = await readBase64(file);
+      const result = await uploadSubtitle.mutateAsync({ base64, filename: file.name });
+      updateQuality(index, {
+        subtitleTracks: qualities[index].subtitleTracks.map((track, currentIndex) => currentIndex === trackIndex
+          ? { ...track, subtitleUrl: result.url, subtitleVtt: result.content }
+          : track),
+      });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Không thể tải phụ đề lên.");
     }
@@ -1254,6 +1271,11 @@ function SourceEpisodeEditor({
         streamUrl: item.streamUrl.trim(),
         subtitleUrl: item.subtitleUrl.trim() || null,
         subtitleVtt: item.subtitleVtt || null,
+        subtitleTracks: item.subtitleTracks.map(track => ({
+          language: track.language.trim(),
+          subtitleUrl: track.subtitleUrl.trim() || null,
+          subtitleVtt: track.subtitleVtt || null,
+        })).filter(track => track.language && (track.subtitleUrl || track.subtitleVtt)),
       })),
     });
   }
@@ -1330,7 +1352,7 @@ function SourceEpisodeEditor({
           type="button"
           className="button button-ghost"
           onClick={() =>
-            setQualities(current => [...current, { label: "1080p", streamUrl: "", subtitleUrl: "", subtitleVtt: "" }])
+            setQualities(current => [...current, { label: "1080p", streamUrl: "", subtitleUrl: "", subtitleVtt: "", subtitleTracks: [] }])
           }
           disabled={qualities.length >= 20}
         >
@@ -1397,6 +1419,16 @@ function SourceEpisodeEditor({
               placeholder="Hoặc dán VTT cho chất lượng này…"
               rows={2}
             />
+            <div className="custom-quality-tracks-heading">
+              <strong>Subtitle theo ngôn ngữ</strong>
+              <button type="button" className="button button-muted" onClick={() => updateQuality(index, { subtitleTracks: [...quality.subtitleTracks, { language: "English", subtitleUrl: "", subtitleVtt: "" }] })}><Plus size={13} /> Thêm ngôn ngữ</button>
+            </div>
+            {quality.subtitleTracks.map((track, trackIndex) => <div className="custom-quality-track-row" key={`${index}-${trackIndex}`}>
+              <input value={track.language} placeholder="Tiếng Việt / English / 한국어" aria-label="Ngôn ngữ subtitle" onChange={event => updateQuality(index, { subtitleTracks: quality.subtitleTracks.map((item, currentIndex) => currentIndex === trackIndex ? { ...item, language: event.target.value } : item) })} />
+              <input type="url" value={track.subtitleUrl} placeholder="URL .vtt của ngôn ngữ này" onChange={event => updateQuality(index, { subtitleTracks: quality.subtitleTracks.map((item, currentIndex) => currentIndex === trackIndex ? { ...item, subtitleUrl: event.target.value, subtitleVtt: "" } : item) })} />
+              <input type="file" accept=".vtt,.srt,text/vtt,application/x-subrip" aria-label="Upload subtitle" onChange={event => { void uploadQualityTrack(index, trackIndex, event.target.files?.[0]); event.currentTarget.value = ""; }} />
+              <button type="button" className="custom-icon-danger" onClick={() => updateQuality(index, { subtitleTracks: quality.subtitleTracks.filter((_, currentIndex) => currentIndex !== trackIndex) })} aria-label="Xoá subtitle"><Trash2 size={14} /></button>
+            </div>)}
           </div>
         </div>
       ))}

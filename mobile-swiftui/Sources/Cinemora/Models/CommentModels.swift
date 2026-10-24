@@ -76,7 +76,26 @@ struct FlexibleDate: Decodable {
     private static let sqlStyle: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    private static let sqlFractionalStyle: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    private static let isoWithoutZone: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
         formatter.timeZone = TimeZone(identifier: "UTC")
         return formatter
     }()
@@ -86,7 +105,9 @@ struct FlexibleDate: Decodable {
         guard !value.isEmpty else { return nil }
         if let date = isoFractional.date(from: value) { return date }
         if let date = isoPlain.date(from: value) { return date }
+        if let date = sqlFractionalStyle.date(from: value) { return date }
         if let date = sqlStyle.date(from: value) { return date }
+        if let date = isoWithoutZone.date(from: value) { return date }
         if let number = Double(value) {
             return Date(timeIntervalSince1970: number > 10_000_000_000 ? number / 1000 : number)
         }
@@ -196,6 +217,8 @@ struct MovieComment: Identifiable, Hashable, Codable {
         if seconds < 604_800 { return "\(Int(seconds / 86_400)) ngày" }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "vi_VN")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")
         formatter.dateFormat = "dd/MM/yyyy"
         return formatter.string(from: createdAt)
     }

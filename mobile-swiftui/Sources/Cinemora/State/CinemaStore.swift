@@ -80,7 +80,9 @@ final class CinemaStore {
     @ObservationIgnored private var catalogRequestID = 0
     @ObservationIgnored private var searchRequestID = 0
     @ObservationIgnored private var nextAuthAttemptAt = Date.distantPast
+    @ObservationIgnored private var sessionMissCount = 0
     @ObservationIgnored private var lastHomeRefreshAt: Date?
+    private let accountUserCacheKey = "cinemora.account.user.cache.v1"
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -101,6 +103,9 @@ final class CinemaStore {
         // Library data is account-scoped. Remove data written by older builds
         // so an anonymous device can never show a previous user's library.
         clearLegacyLocalLibrary()
+        if let data = localDefaults.data(forKey: accountUserCacheKey), let cached = try? decoder.decode(RemoteAccountUser.self, from: data) {
+            accountUser = cached
+        }
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
         }
@@ -168,11 +173,16 @@ final class CinemaStore {
     func restoreAccount() async {
         do {
             let response = try await api.me()
-            accountUser = response.value
-            if accountUser != nil { await refreshCloudLibrary() }
+            if let user = response.value {
+                setAccountUser(user)
+                sessionMissCount = 0
+                await refreshCloudLibrary()
+            } else if accountUser == nil {
+                accountError = nil
+            }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
-                clearAccountState()
+                if sessionMissCount >= 2 { clearAccountState() }
             } else { accountError = error.localizedDescription }
         }
     }
@@ -182,16 +192,19 @@ final class CinemaStore {
         do {
             let response = try await api.me()
             if let user = response.value {
+                sessionMissCount = 0
                 // This runs on a timer in the tab shell. Writing an identical
                 // value would still invalidate every tab, so compare first.
-                if user != accountUser { accountUser = user }
+                if user != accountUser { setAccountUser(user) }
             }
             else {
-                clearAccountState()
+                sessionMissCount += 1
+                if sessionMissCount >= 5 { clearAccountState() }
             }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
-                clearAccountState()
+                sessionMissCount += 1
+                if sessionMissCount >= 5 { clearAccountState() }
             } else if accountUser != nil { accountError = error.localizedDescription }
         }
     }
@@ -202,7 +215,8 @@ final class CinemaStore {
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
         do {
-            accountUser = try await api.login(email: email, password: password)
+            setAccountUser(try await api.login(email: email, password: password))
+            sessionMissCount = 0
             clearLocalCacheAfterAccountLogin()
             Task {
                 async let cloudRefresh: Void = refreshCloudLibrary()
@@ -223,7 +237,8 @@ final class CinemaStore {
         accountLoading = true; accountError = nil
         defer { accountLoading = false }
         do {
-            accountUser = try await api.register(name: name, email: email, password: password)
+            setAccountUser(try await api.register(name: name, email: email, password: password))
+            sessionMissCount = 0
             clearLocalCacheAfterAccountLogin()
             Task {
                 async let cloudRefresh: Void = refreshCloudLibrary()
@@ -276,7 +291,8 @@ final class CinemaStore {
 
     func completeQrLogin(nonce: String) async throws {
         accountError = nil
-        accountUser = try await api.completeQrLogin(nonce: nonce)
+        setAccountUser(try await api.completeQrLogin(nonce: nonce))
+        sessionMissCount = 0
         clearLocalCacheAfterAccountLogin()
         Task {
             async let cloudRefresh: Void = refreshCloudLibrary()
@@ -417,6 +433,8 @@ final class CinemaStore {
 
     private func clearAccountState() {
         accountUser = nil
+        localDefaults.removeObject(forKey: accountUserCacheKey)
+        sessionMissCount = 0
         accountDevices = []
         movieRequests = []
         movieRequestsError = nil
@@ -424,6 +442,15 @@ final class CinemaStore {
         localHistory = []
         accountError = nil
         clearLegacyLocalLibrary()
+    }
+
+    private func setAccountUser(_ user: RemoteAccountUser?) {
+        accountUser = user
+        if let user, let data = try? JSONEncoder().encode(user) {
+            localDefaults.set(data, forKey: accountUserCacheKey)
+        } else {
+            localDefaults.removeObject(forKey: accountUserCacheKey)
+        }
     }
 
     func savePlaybackDefaults() {

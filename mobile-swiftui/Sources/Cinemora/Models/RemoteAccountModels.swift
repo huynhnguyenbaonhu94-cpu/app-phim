@@ -1,6 +1,6 @@
 import Foundation
 
-struct RemoteAccountUser: Decodable, Identifiable, Hashable {
+struct RemoteAccountUser: Codable, Identifiable, Hashable {
     let id: Int
     let name: String?
     let email: String?

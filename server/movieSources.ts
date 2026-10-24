@@ -14,11 +14,16 @@ import { getDb } from "./db";
 import { movieSourceEpisodes, movieSources } from "../drizzle/schema";
 import { customDirectStreamUrl, registerCustomStreamSource } from "./cinema";
 
-/** Một chất lượng của tập: mỗi chất lượng có link M3U8 và phụ đề riêng. */
+/** Một chất lượng của tập: mỗi chất lượng có link M3U8 và nhiều phụ đề theo ngôn ngữ. */
+export type MovieSourceSubtitleTrack = {
+  language: string;
+  subtitleUrl: string;
+};
 export type MovieSourceQuality = {
   label: string;
   streamUrl: string;
   subtitleUrl: string | null;
+  subtitleTracks: MovieSourceSubtitleTrack[];
 };
 
 export type MovieSourceEpisode = {
@@ -55,6 +60,12 @@ function parseQualities(value: unknown): MovieSourceQuality[] {
         label: String(item.label ?? "Mặc định").trim().slice(0, 40) || "Mặc định",
         streamUrl: String(item.streamUrl).trim().slice(0, 2000),
         subtitleUrl: typeof item.subtitleUrl === "string" && item.subtitleUrl.trim() ? item.subtitleUrl.trim().slice(0, 2000) : null,
+        subtitleTracks: Array.isArray(item.subtitleTracks)
+          ? item.subtitleTracks
+              .filter((track: any) => track && typeof track.language === "string" && typeof track.subtitleUrl === "string" && track.subtitleUrl.trim())
+              .map((track: any) => ({ language: String(track.language).trim().slice(0, 40), subtitleUrl: String(track.subtitleUrl).trim().slice(0, 2000) }))
+              .filter((track: MovieSourceSubtitleTrack) => track.language && track.subtitleUrl)
+          : [],
       }));
   } catch {
     return [];
@@ -83,7 +94,19 @@ async function resolveSubtitleUrl(input: { subtitleUrl?: string | null; subtitle
 }
 
 /** Lưu danh sách chất lượng của tập, kèm phụ đề riêng từng chất lượng. */
-async function resolveQualities(input: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> | undefined): Promise<string | null> {
+async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> | undefined): Promise<MovieSourceSubtitleTrack[]> {
+  if (!input || input.length === 0) return [];
+  const resolved: MovieSourceSubtitleTrack[] = [];
+  for (const track of input) {
+    const language = String(track.language ?? "").trim().slice(0, 40);
+    if (!language) continue;
+    const subtitleUrl = await resolveSubtitleUrl({ subtitleUrl: track.subtitleUrl, subtitleVtt: track.subtitleVtt });
+    if (subtitleUrl) resolved.push({ language, subtitleUrl });
+  }
+  return resolved;
+}
+
+async function resolveQualities(input: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }> | undefined): Promise<string | null> {
   if (!input || input.length === 0) return null;
   const resolved: MovieSourceQuality[] = [];
   for (const item of input) {
@@ -93,6 +116,7 @@ async function resolveQualities(input: Array<{ label?: string; streamUrl: string
       label: String(item.label ?? "").trim().slice(0, 40) || "Mặc định",
       streamUrl: streamUrl.slice(0, 2000),
       subtitleUrl: await resolveSubtitleUrl({ subtitleUrl: item.subtitleUrl, subtitleVtt: item.subtitleVtt }),
+      subtitleTracks: await resolveSubtitleTracks(item.subtitleTracks),
     });
   }
   return resolved.length ? JSON.stringify(resolved) : null;
@@ -236,7 +260,7 @@ export async function addMovieEpisode(input: {
   streamUrl: string;
   subtitleUrl?: string | null;
   subtitleVtt?: string | null;
-  qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
+  qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }>;
 }): Promise<MovieSourceEpisode> {
   const db = await getDb();
   if (!db) throw new Error("Không kết nối được cơ sở dữ liệu");
@@ -351,7 +375,7 @@ export async function updateMovieEpisode(
     streamUrl?: string;
     subtitleUrl?: string | null;
     subtitleVtt?: string | null;
-    qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
+    qualities?: Array<{ label?: string; streamUrl: string; subtitleUrl?: string | null; subtitleVtt?: string | null; subtitleTracks?: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> }>;
   }
 ): Promise<void> {
   const db = await getDb();
@@ -511,6 +535,7 @@ export async function mergeCustomSources(
               streamUrl: registerCustomStreamSource(quality.streamUrl),
               directStreamUrl: customDirectStreamUrl(quality.streamUrl),
               subtitleUrl: quality.subtitleUrl,
+              subtitleTracks: quality.subtitleTracks,
             }))
           : undefined,
       })),
