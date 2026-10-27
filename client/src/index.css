@@ -795,6 +795,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 
 /* watch-card must not clip the below-player bar */
 .watch-card { overflow: visible !important; }
+#watch { scroll-margin-top: 74px; }
 .cinema-player { border-radius: 12px 12px 0 0; overflow: hidden; }
 
 /* ── Below-player meta bar ─────────────────────────────── */
@@ -3471,7 +3472,10 @@ body {
   font-size: 11px;
   pointer-events: auto;
   animation: cinemaSubtitleIn .16s ease-out;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.cinema-subtitle-panel::-webkit-scrollbar { display: none; width: 0; height: 0; }
 @keyframes cinemaSubtitleIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -3524,6 +3528,41 @@ body {
   font-weight: 600;
 }
 .cinema-subtitle-switch input { accent-color: var(--accent); width: 14px; height: 14px; }
+
+.cinema-subtitle-languages {
+  display: grid;
+  gap: 5px;
+  max-height: 128px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.cinema-subtitle-languages::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.cinema-subtitle-languages button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  color: #cfd4dd;
+  background: rgba(255,255,255,.045);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .14s, background .14s, color .14s;
+}
+.cinema-subtitle-languages button:hover,
+.cinema-subtitle-languages button.is-active {
+  border-color: rgba(210,243,107,.58);
+  color: var(--accent);
+  background: rgba(210,243,107,.11);
+}
+.cinema-subtitle-languages button svg { flex: 0 0 auto; color: var(--accent); }
 
 .cinema-subtitle-field { margin-bottom: 9px; }
 .cinema-subtitle-label {
@@ -4409,7 +4448,7 @@ select:-webkit-autofill {
 .custom-sources-panel .admin-source-panel-heading span { max-width: 680px; font-size: 12px; }
 .custom-sources-panel .custom-source-toolbar { align-items: center; margin: 18px 0; }
 .custom-sources-panel .custom-source-list { display: grid; gap: 16px; }
-.custom-sources-panel .admin-manual-source-card { padding: clamp(16px, 2vw, 24px); border-radius: 17px; background: rgba(7,10,13,.48); }
+.custom-sources-panel .admin-manual-source-card { padding: clamp(16px, 2vw, 24px); border-radius: 17px; background: rgba(7,10,13,.48); content-visibility: auto; contain-intrinsic-size: 420px; }
 .custom-sources-panel .admin-manual-source-meta { margin: 8px 0 16px; }
 .custom-sources-panel .admin-manual-episode { padding: 15px 16px; border-radius: 14px; }
 .custom-sources-panel .admin-source-episode-form { gap: 18px; margin-top: 12px; padding: clamp(18px, 2.2vw, 28px); border-radius: 17px; border-color: rgba(210,243,107,.28); background: rgba(5,8,11,.62); box-shadow: 0 16px 36px rgba(0,0,0,.18); }

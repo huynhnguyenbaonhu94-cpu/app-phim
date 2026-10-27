@@ -332,7 +332,13 @@ struct FeaturedMovieCard: View {
     let movie: Movie
 
     private var episodeText: String? {
-        if let current = movie.episodeCurrent, !current.isEmpty {
+        if let rawCurrent = movie.episodeCurrent, !rawCurrent.isEmpty {
+            let current = rawCurrent.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: #"(?i)^tập\s+"#, with: "", options: .regularExpression)
+            guard !current.isEmpty else { return nil }
+            // Một số API đã trả sẵn dạng "37/37" hoặc "Tập 37/37".
+            // Không thêm tiền tố/số tập lần nữa để tránh hiện "Tập tập 37/37".
+            if current.contains("/") { return "Tập \(current)" }
             if let total = movie.episodeTotal, total > 0 { return "Tập \(current)/\(total)" }
             return "Tập \(current)"
         }

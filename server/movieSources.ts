@@ -346,7 +346,9 @@ export async function addMovieEpisodes(input: {
     name: string;
     streamUrl: string;
     subtitleUrl?: string | null;
+    subtitleLabel?: string | null;
     subtitleVtt?: string | null;
+    subtitleTracks?: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }>;
   }>;
 }): Promise<{ added: number; skipped: Array<{ name: string; reason: string }> }> {
   const db = await getDb();
@@ -385,12 +387,15 @@ export async function addMovieEpisodes(input: {
     const subtitleLink = item.subtitleUrl?.trim() ? item.subtitleUrl.trim() : null;
     const subtitleVtt =
       item.subtitleVtt ?? (subtitleLink ? await fetchSubtitleAsVtt(subtitleLink) : null);
+    const subtitleTracks = await resolveSubtitleTracks(item.subtitleTracks);
     await db.insert(movieSourceEpisodes).values({
       sourceId: input.sourceId,
       name,
       streamUrl,
       subtitleUrl: subtitleLink,
       subtitleVtt,
+      subtitleLabel: item.subtitleLabel?.trim() || null,
+      subtitleTracks: subtitleTracks.length ? JSON.stringify(subtitleTracks) : null,
       qualities: null,
       sortOrder: order,
     });
@@ -568,6 +573,19 @@ export async function mergeCustomSources(
     if (!subtitleUrl || tracks.some(track => track.subtitleUrl === subtitleUrl)) return tracks;
     return [{ language: subtitleLabel?.trim() || "Phụ đề", subtitleUrl }, ...tracks];
   };
+  const mergeSubtitleTracks = (...groups: Array<MovieSourceSubtitleTrack[] | undefined>) => {
+    const seen = new Set<string>();
+    const merged: MovieSourceSubtitleTrack[] = [];
+    for (const group of groups) {
+      for (const track of group ?? []) {
+        const subtitleUrl = track.subtitleUrl?.trim();
+        if (!subtitleUrl || seen.has(subtitleUrl)) continue;
+        seen.add(subtitleUrl);
+        merged.push({ language: track.language?.trim() || "Phụ đề", subtitleUrl });
+      }
+    }
+    return merged;
+  };
   for (const source of custom) {
     if (source.episodes.length === 0) continue;
     merged.push({
@@ -582,10 +600,13 @@ export async function mergeCustomSources(
         directStreamUrl: customDirectStreamUrl(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
         subtitleUrl: episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
         subtitleLabel: episode.qualities[0]?.subtitleLabel ?? episode.subtitleLabel,
-        subtitleTracks: withPrimarySubtitle(
-          episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
-          episode.qualities[0]?.subtitleLabel ?? episode.subtitleLabel,
-          episode.subtitleTracks,
+        subtitleTracks: mergeSubtitleTracks(
+          withPrimarySubtitle(
+            episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
+            episode.qualities[0]?.subtitleLabel ?? episode.subtitleLabel,
+            episode.subtitleTracks,
+          ),
+          ...episode.qualities.map((quality) => withPrimarySubtitle(quality.subtitleUrl, quality.subtitleLabel, quality.subtitleTracks)),
         ),
         // Danh sách chất lượng để app cho người xem chọn 1080p / 2K / 4K…
         qualities: episode.qualities.length

@@ -5,7 +5,7 @@ import { Save, Trash2 } from "lucide-react";
  * Ô dán danh sách nhiều tập, dùng chung cho trang "Quản lý nguồn & tập phim"
  * và khối "Nguồn & tập" trong trang thêm/sửa phim thủ công.
  *
- * Định dạng mỗi dòng: `tên tập | link m3u8 | link sub (nếu có)`.
+ * Định dạng mỗi dòng: `tên tập | link m3u8 | ngôn ngữ 1 | link sub 1 | ngôn ngữ 2 | link sub 2`.
  * Bỏ trống tên tập thì tự đánh số; dòng trống và dòng bắt đầu bằng `#` được bỏ qua.
  */
 
@@ -13,6 +13,8 @@ export type BulkEpisodeItem = {
   name: string;
   streamUrl: string;
   subtitleUrl: string | null;
+  subtitleLabel?: string | null;
+  subtitleTracks?: Array<{ language: string; subtitleUrl: string }>;
 };
 
 type BulkRow = BulkEpisodeItem & {
@@ -30,7 +32,7 @@ type Props = {
   pending?: boolean;
 };
 
-const EXAMPLE = "Tập 01|https://v8.streamvsmov.com/video/…/master.m3u8|https://…/sub.vtt";
+const EXAMPLE = "Tập 01|https://v8.streamvsmov.com/video/…/master.m3u8|Tiếng Việt|https://…/sub-vi.vtt|Tiếng Anh|https://…/sub-en.vtt";
 
 /** Đọc danh sách admin dán vào và đối chiếu trùng ngay trên trình duyệt. */
 export function parseBulkEpisodes(
@@ -48,7 +50,10 @@ export function parseBulkEpisodes(
     const parts = raw.split(/\s*[|\t]\s*/);
     let name = (parts[0] || "").trim();
     let streamUrl = (parts[1] || "").trim();
-    let subtitleUrl = (parts[2] || "").trim() || null;
+    const subtitleLabel = (parts[2] || "").trim() || null;
+    let subtitleUrl = (parts[3] || "").trim() || null;
+    const subtitleLabel2 = (parts[4] || "").trim() || null;
+    const subtitleUrl2 = (parts[5] || "").trim() || null;
     // Dòng chỉ có link (admin quên điền tên) vẫn nhận: tự đánh số tập.
     if (!streamUrl && /^https?:\/\//i.test(name)) {
       streamUrl = name;
@@ -61,10 +66,24 @@ export function parseBulkEpisodes(
     let error: string | null = null;
     if (!streamUrl) error = "Thiếu link M3U8 (cột 2)";
     else if (!/^https?:\/\//i.test(streamUrl)) error = "Link M3U8 phải bắt đầu bằng http:// hoặc https://";
+    else if (subtitleLabel && !subtitleUrl) error = "Thiếu link phụ đề 1 (cột 4)";
+    else if (subtitleUrl && !subtitleLabel) error = "Thiếu ngôn ngữ phụ đề 1 (cột 3)";
+    else if (subtitleUrl && !/^https?:\/\//i.test(subtitleUrl)) error = "Link phụ đề 1 phải bắt đầu bằng http:// hoặc https://";
+    else if (subtitleLabel2 && !subtitleUrl2) error = "Thiếu link phụ đề 2 (cột 6)";
+    else if (subtitleUrl2 && !subtitleLabel2) error = "Thiếu ngôn ngữ phụ đề 2 (cột 5)";
+    else if (subtitleUrl2 && !/^https?:\/\//i.test(subtitleUrl2)) error = "Link phụ đề 2 phải bắt đầu bằng http:// hoặc https://";
     else if (seenUrls.has(streamUrl.toLowerCase())) error = "Trùng link M3U8 với tập đã có";
     else if (seenNames.has(name.toLowerCase())) error = "Trùng tên tập với tập đã có";
 
-    const row: BulkRow = { line: i + 1, name, streamUrl, subtitleUrl, error };
+    const row: BulkRow = {
+      line: i + 1,
+      name,
+      streamUrl,
+      subtitleUrl,
+      subtitleLabel,
+      subtitleTracks: subtitleUrl2 && subtitleLabel2 ? [{ language: subtitleLabel2, subtitleUrl: subtitleUrl2 }] : [],
+      error,
+    };
     if (!row.error) {
       seenNames.add(name.toLowerCase());
       seenUrls.add(streamUrl.toLowerCase());
@@ -102,13 +121,13 @@ export default function BulkEpisodesInput({ existingEpisodes, onSubmit, onClose,
     }
     setSaving(true);
     try {
-      const result = await onSubmit(valid.map(row => ({ name: row.name, streamUrl: row.streamUrl, subtitleUrl: row.subtitleUrl })));
+      const result = await onSubmit(valid.map(row => ({ name: row.name, streamUrl: row.streamUrl, subtitleUrl: row.subtitleUrl, subtitleLabel: row.subtitleLabel, subtitleTracks: row.subtitleTracks })));
       const skipped = result.skipped + (rows.length - valid.length);
       setNotice(`Đã thêm ${result.added} tập${skipped > 0 ? `, bỏ qua ${skipped} dòng trùng hoặc lỗi` : ""}.`);
       // Giữ lại những dòng chưa thêm được để admin sửa rồi gửi tiếp.
       const remaining = rows
         .filter(row => row.error)
-        .map(row => `${row.name}|${row.streamUrl}${row.subtitleUrl ? `|${row.subtitleUrl}` : ""}`)
+        .map(row => `${row.name}|${row.streamUrl}${row.subtitleLabel || row.subtitleUrl ? `|${row.subtitleLabel || ""}|${row.subtitleUrl || ""}` : ""}${row.subtitleTracks?.[0]?.subtitleUrl ? `|${row.subtitleTracks[0].language}|${row.subtitleTracks[0].subtitleUrl}` : ""}`)
         .join("\n");
       setText(remaining);
       setChecked(remaining.length > 0);
@@ -138,8 +157,8 @@ export default function BulkEpisodesInput({ existingEpisodes, onSubmit, onClose,
         )}
       </div>
       <p className="admin-bulk-hint">
-        Mỗi dòng một tập, ba cột ngăn bằng dấu <code>|</code>: <code>tập | link m3u8 | link sub (nếu có)</code>.
-        Bỏ trống tên tập thì hệ thống tự đánh số, cột phụ đề có thể bỏ qua.
+        Mỗi dòng một tập, tối đa sáu cột ngăn bằng dấu <code>|</code>: <code>tập | link m3u8 | ngôn ngữ 1 | link sub 1 | ngôn ngữ 2 | link sub 2</code>.
+        Bỏ trống tên tập thì hệ thống tự đánh số; mỗi cặp ngôn ngữ và link phụ đề có thể bỏ qua.
       </p>
       <textarea
         className="admin-bulk-input"
@@ -151,7 +170,7 @@ export default function BulkEpisodesInput({ existingEpisodes, onSubmit, onClose,
         }}
         rows={8}
         spellCheck={false}
-        placeholder={`${EXAMPLE}\nTập 02|https://…/master.m3u8|https://…/sub.vtt`}
+        placeholder={`${EXAMPLE}\nTập 02|https://…/master.m3u8|Tiếng Việt|https://…/sub-vi.vtt|English|https://…/sub-en.vtt`}
       />
       {rows.length > 0 && (
         <div className="admin-bulk-list-wrap">
@@ -174,7 +193,8 @@ export default function BulkEpisodesInput({ existingEpisodes, onSubmit, onClose,
                 <div className="admin-bulk-row-main">
                   <strong>{row.name}</strong>
                   <span className="admin-bulk-row-url">{row.streamUrl}</span>
-                  {row.subtitleUrl && <span className="admin-bulk-row-sub">Phụ đề: {row.subtitleUrl}</span>}
+                  {row.subtitleUrl && <span className="admin-bulk-row-sub">{row.subtitleLabel || "Phụ đề 1"}: {row.subtitleUrl}</span>}
+                  {row.subtitleTracks?.[0]?.subtitleUrl && <span className="admin-bulk-row-sub">{row.subtitleTracks[0].language}: {row.subtitleTracks[0].subtitleUrl}</span>}
                 </div>
                 <span className={`admin-bulk-row-state${row.error ? " is-bad" : " is-ok"}`}>{row.error || "Hợp lệ"}</span>
               </div>

@@ -276,7 +276,7 @@ export default function AdminMovieSources() {
     if (items.length === 0) return { added: 0, skipped: 0 };
     const result = await addEpisodes.mutateAsync({
       sourceId,
-      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl ?? null, subtitleVtt: item.subtitleVtt ?? null })),
+      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl ?? null, subtitleLabel: item.subtitleLabel ?? null, subtitleVtt: null, subtitleTracks: item.subtitleTracks ?? [] })),
     });
     await refreshSources(`Đã thêm ${result.added} tập${result.skipped.length > 0 ? `, bỏ qua ${result.skipped.length} dòng trùng` : ""}.`);
     return { added: result.added, skipped: result.skipped.length };

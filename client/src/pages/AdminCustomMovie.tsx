@@ -1795,7 +1795,7 @@ const SourcesManager = memo(function SourcesManager({ slug }: { slug: string }) 
                   onSubmit={async items => {
                     const result = await addEpisodes.mutateAsync({
                       sourceId: source.id,
-                      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl, subtitleVtt: null })),
+                      episodes: items.map(item => ({ name: item.name, streamUrl: item.streamUrl, subtitleUrl: item.subtitleUrl, subtitleLabel: item.subtitleLabel ?? null, subtitleVtt: null, subtitleTracks: item.subtitleTracks ?? [] })),
                     });
                     await sourcesQuery.refetch();
                     setMessage(`Đã thêm ${result.added} tập.`);

@@ -615,7 +615,9 @@ export const appRouter = router({
               name: z.string().trim().min(1).max(180),
               streamUrl: z.string().trim().url().max(2000),
               subtitleUrl: z.string().trim().max(2000).nullable().optional(),
+              subtitleLabel: z.string().trim().max(80).nullable().optional(),
               subtitleVtt: z.string().max(4_000_000).nullable().optional(),
+              subtitleTracks: z.array(z.object({ language: z.string().trim().min(1).max(40), subtitleUrl: z.string().trim().max(2000).nullable().optional(), subtitleVtt: z.string().max(4_000_000).nullable().optional() })).max(20).optional(),
             }),
           )
           .min(1)

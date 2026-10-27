@@ -6,10 +6,20 @@ import { PageShell, SkeletonCard } from "@/components/CinemaChrome";
 import { trpc } from "@/lib/trpc";
 import { isFavorite, listHistory, saveHistory, toggleFavorite } from "@/lib/localLibrary";
 
-type Episode = { name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null };
+type SubtitleTrack = { language: string; subtitleUrl: string };
+type Episode = { name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null; subtitleLabel?: string | null; subtitleTracks?: SubtitleTrack[] };
 type MovieDetail = { slug: string; name: string; originName: string; poster: string | null; backdrop: string | null; year: number | null; quality: string; episodeCurrent: string; episodeTotal: number | null; time: string; lang: string; type: string; description: string; rating: number | null; categories: Array<{ name: string; slug: string }>; countries: Array<{ name: string; slug: string }>; alternativeNames: string[]; actors: string[]; actorProfiles?: Array<{ name: string; image: string | null }>; directors: string[]; status: string; views: number | null; isCopyright: boolean; isTheatrical: boolean; trailerUrl: string | null; tmdbId: string | null; imdbId: string | null; createdAt: string | null; updatedAt: string | null; servers: Array<{ name: string; isAi: boolean; episodes: Episode[] }> };
 
 function displayDate(value: string | null) { return value ? new Date(value).toLocaleDateString("vi-VN") : "Đang cập nhật"; }
+
+function scrollToPlayer(behavior: ScrollBehavior = "smooth") {
+  const playerCard = document.getElementById("watch");
+  if (!playerCard) return;
+  const header = document.querySelector<HTMLElement>(".site-header");
+  const headerOffset = (header?.getBoundingClientRect().height || 0) + 12;
+  const top = Math.max(0, playerCard.getBoundingClientRect().top + window.scrollY - headerOffset);
+  window.scrollTo({ top, left: 0, behavior });
+}
 
 type ActorProfile = { name: string; image: string | null };
 function ActorGallery({ actors }: { actors: ActorProfile[] }) {
@@ -120,6 +130,21 @@ export default function DetailPage({ slug }: { slug: string }) {
   useEffect(() => { setServerIndex(0); setEpisodeIndex(0); }, [slug]);
   useEffect(() => { setFavorite(isFavorite(slug)); }, [slug]);
   useEffect(() => { setAdLocked(false); }, [slug]);
+  useEffect(() => {
+    // Wouter không tự reset scroll khi đổi route. Nếu người dùng vừa xem một
+    // trang dài, trang phim mới có thể mở thẳng ở khu vực danh sách tập.
+    if (window.location.hash !== "#watch") window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [slug]);
+  useEffect(() => {
+    // Khi nút "Xem ngay" điều hướng bằng #watch, phần tử player chỉ tồn tại
+    // sau khi query phim hoàn tất. Cuộn lại sau hai frame để tránh rơi xuống
+    // phần "Tất cả tập phim" trong lúc layout còn đang thay đổi.
+    if (!movie || window.location.hash !== "#watch") return;
+    const firstFrame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => scrollToPlayer("auto"));
+    });
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [movie?.slug]);
 
   const server = movie?.servers?.[serverIndex];
   const episode = server?.episodes?.[episodeIndex];
@@ -179,7 +204,9 @@ export default function DetailPage({ slug }: { slug: string }) {
     if (adLocked) return;
     setServerIndex(nextServerIndex);
     setEpisodeIndex(nextEpisodeIndex);
-    window.setTimeout(() => document.getElementById("watch")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => scrollToPlayer("smooth"));
+    });
   }
 
   // Tính tập tiếp theo trong cùng server
@@ -219,7 +246,7 @@ export default function DetailPage({ slug }: { slug: string }) {
   const totalEpisodes = movie.servers.reduce((total, item) => total + item.episodes.length, 0);
 
   return <PageShell><main className="detail-page"><section className="detail-hero"><div className="detail-backdrop" style={movie.backdrop ? { backgroundImage: `url(${movie.backdrop})` } : undefined} /><div className="detail-overlay" /><div className="detail-inner content-wrap"><Link href="/" className="back-link detail-back"><ArrowLeft size={15} /> Trở về khám phá</Link><div className="detail-copy"><div className="detail-poster">{movie.poster ? <img src={movie.poster} alt={movie.name} /> : <Film size={40} />}</div><div className="detail-info"><span className="hero-kicker">CINEMORA FEATURE</span><h1>{movie.name}</h1><p className="detail-origin">{movie.originName}</p><div className="hero-tags"><span>{movie.year || "—"}</span><span>{movie.quality}</span><span>{movie.lang}</span><span>{movie.time || "Full"}</span><span>{movie.status || "Đang cập nhật"}</span>{movie.isTheatrical && <span>Chiếu rạp</span>}</div><p className="detail-description">{movie.description}</p><div className="detail-actions">{canPlayEpisode ? <a className="button button-primary" href="#watch"><Play size={16} fill="currentColor" /> Xem ngay</a> : <span className="button button-muted"><Clock3 size={16} /> Chưa có nguồn phát</span>}<button className={`button ${favorite ? "button-favorite-active" : "button-ghost"}`} onClick={handleFavorite}><Heart size={16} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Đã yêu thích" : "Yêu thích"}</button>{movie.trailerUrl && <a className="button button-ghost" href={movie.trailerUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Trailer</a>}</div><span className="auth-hint">Yêu thích và lịch sử được lưu trên thiết bị này.</span></div></div></div></section>
-    <section className="content-wrap detail-body"><div className="detail-main"><div id="watch" className="watch-card">{canPlayEpisode ? <CinemaPlayer streamUrl={episode?.streamUrl || undefined} subtitleUrl={episode?.subtitleUrl || undefined} directStreamUrl={episode?.directStreamUrl || undefined} fallbackEmbedUrl={episode?.embedUrl || undefined} title={`${movie.name} - ${episode?.name || "Tập phim"}`} posterUrl={movie.poster || undefined} startAt={startAt} onProgress={handleProgress} onEnded={handleEnded} onAdStateChange={setAdLocked} onNextEpisode={nextEpisode ? handleNextEpisode : undefined} nextEpisodeLabel={nextEpisodeLabel} autoNextEnabled={autoNext} onAutoNextToggle={toggleAutoNext} /> : <div className="player-empty"><Play size={32} /><strong>Nguồn phim đang được cập nhật</strong><span>Hãy quay lại sau nhé.</span></div>}</div>{movie.servers.length > 0 && <div className="episode-panel"><div className="episode-head"><div><span className="eyebrow">CHỌN TẬP</span><h2>Tất cả tập phim</h2></div><span>{totalEpisodes} tập · {movie.servers.length} nguồn</span></div>{movie.servers.map((serverItem, currentServerIndex) => {
+    <section className="content-wrap detail-body"><div className="detail-main"><div id="watch" className="watch-card">{canPlayEpisode ? <CinemaPlayer streamUrl={episode?.streamUrl || undefined} subtitleUrl={episode?.subtitleUrl || undefined} subtitleLabel={episode?.subtitleLabel || undefined} subtitleTracks={episode?.subtitleTracks} directStreamUrl={episode?.directStreamUrl || undefined} fallbackEmbedUrl={episode?.embedUrl || undefined} title={`${movie.name} - ${episode?.name || "Tập phim"}`} posterUrl={movie.poster || undefined} startAt={startAt} onProgress={handleProgress} onEnded={handleEnded} onAdStateChange={setAdLocked} onNextEpisode={nextEpisode ? handleNextEpisode : undefined} nextEpisodeLabel={nextEpisodeLabel} autoNextEnabled={autoNext} onAutoNextToggle={toggleAutoNext} /> : <div className="player-empty"><Play size={32} /><strong>Nguồn phim đang được cập nhật</strong><span>Hãy quay lại sau nhé.</span></div>}</div>{movie.servers.length > 0 && <div className="episode-panel"><div className="episode-head"><div><span className="eyebrow">CHỌN TẬP</span><h2>Tất cả tập phim</h2></div><span>{totalEpisodes} tập · {movie.servers.length} nguồn</span></div>{movie.servers.map((serverItem, currentServerIndex) => {
           return <div className="episode-server" key={`${serverItem.name}-${currentServerIndex}`}>
             <div className="episode-server-heading"><strong>{serverItem.name}</strong>{serverItem.isAi && <span>AI Vietsub</span>}</div>
             <div className="episode-list">{serverItem.episodes.map((item, idx) => <button disabled={adLocked} key={`${item.slug}-${idx}`} className={`${currentServerIndex === serverIndex && idx === episodeIndex ? "active" : ""}${adLocked ? " ad-locked" : ""}`} onClick={() => selectEpisode(currentServerIndex, idx)}><span>{currentServerIndex === serverIndex && idx === episodeIndex ? <Check size={13} /> : null}</span>{item.name}</button>)}</div>

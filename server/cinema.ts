@@ -36,7 +36,7 @@ export type Movie = {
   createdAt: string | null; updatedAt: string | null;
 };
 export type MovieEpisodeQuality = { label: string; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl: string | null };
-export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null; qualities?: MovieEpisodeQuality[] }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
+export type MovieDetail = Movie & { servers: Array<{ name: string; isAi: boolean; episodes: Array<{ name: string; slug: string; filename: string; embedUrl: string | null; streamUrl: string | null; directStreamUrl: string | null; subtitleUrl?: string | null; subtitleLabel?: string | null; subtitleTracks?: Array<{ language: string; subtitleUrl: string }>; qualities?: MovieEpisodeQuality[] }> }>; actorProfiles?: Array<{ name: string; image: string | null }> };
 
 function cleanText(value: unknown, fallback = "") {
   if (typeof value !== "string") return fallback;

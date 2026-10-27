@@ -42,6 +42,7 @@ import { createPortal } from "react-dom";
 /* ─── Phụ đề rời: kiểu dáng + bộ đọc WebVTT ────────────── */
 
 interface SubtitleCue { start: number; end: number; text: string; }
+interface SubtitleTrack { language: string; subtitleUrl: string; }
 
 interface SubtitleStyle {
   enabled: boolean;
@@ -159,13 +160,16 @@ function findActiveCue(cues: SubtitleCue[], time: number): SubtitleCue | null {
 /** Bảng tùy chỉnh phụ đề — đặt trong khung trình phát nên hiện cả khi toàn màn hình. */
 interface SubtitlePanelProps {
   style: SubtitleStyle;
+  tracks: SubtitleTrack[];
+  activeSubtitleUrl?: string;
+  onSelectTrack: (track: SubtitleTrack) => void;
   onChange: (patch: Partial<SubtitleStyle>) => void;
   onReset: () => void;
   status: "none" | "loading" | "ready" | "error";
   onClose: () => void;
 }
 
-function SubtitlePanel({ style, onChange, onReset, status, onClose }: SubtitlePanelProps) {
+function SubtitlePanel({ style, tracks, activeSubtitleUrl, onSelectTrack, onChange, onReset, status, onClose }: SubtitlePanelProps) {
   const statusText =
     status === "loading"
       ? "Đang tải phụ đề…"
@@ -202,6 +206,27 @@ function SubtitlePanel({ style, onChange, onReset, status, onClose }: SubtitlePa
         />
         <span>{style.enabled ? "Đang bật phụ đề" : "Đang tắt phụ đề"}</span>
       </label>
+
+      {tracks.length > 0 && (
+        <div className="cinema-subtitle-field cinema-subtitle-language-field">
+          <span className="cinema-subtitle-label">Ngôn ngữ phụ đề</span>
+          <div className="cinema-subtitle-languages" role="listbox" aria-label="Ngôn ngữ phụ đề">
+            {tracks.map((track) => (
+              <button
+                type="button"
+                key={`${track.language}-${track.subtitleUrl}`}
+                className={track.subtitleUrl === activeSubtitleUrl ? "is-active" : ""}
+                onClick={() => onSelectTrack(track)}
+                role="option"
+                aria-selected={track.subtitleUrl === activeSubtitleUrl}
+              >
+                <span>{track.language || "Phụ đề"}</span>
+                {track.subtitleUrl === activeSubtitleUrl ? <Check size={12} /> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="cinema-subtitle-field">
         <span className="cinema-subtitle-label">Cỡ chữ <b>{style.fontSize.toFixed(1)}%</b></span>
@@ -294,6 +319,10 @@ interface CinemaPlayerProps {
   streamUrl?: string;
   /** Phụ đề rời (.vtt) của tập đang phát — nguồn admin thêm tay cũng dùng link này */
   subtitleUrl?: string;
+  /** Tên hiển thị của subtitle chính do admin đặt */
+  subtitleLabel?: string;
+  /** Các subtitle bổ sung theo ngôn ngữ của tập */
+  subtitleTracks?: SubtitleTrack[];
   /** Link M3U8 gốc, không qua proxy — thử trước nếu có */
   directStreamUrl?: string;
   fallbackEmbedUrl?: string;
@@ -459,6 +488,8 @@ function isAppleSafari() {
 export function CinemaPlayer({
   streamUrl,
   subtitleUrl,
+  subtitleLabel,
+  subtitleTracks,
   directStreamUrl,
   fallbackEmbedUrl,
   title,
@@ -508,6 +539,28 @@ export function CinemaPlayer({
   const [subtitleText, setSubtitleText] = useState("");
   const [subtitleStatus, setSubtitleStatus] = useState<"none" | "loading" | "ready" | "error">("none");
   const [subtitlePanelOpen, setSubtitlePanelOpen] = useState(false);
+  const [selectedSubtitleUrl, setSelectedSubtitleUrl] = useState(subtitleUrl || "");
+  const subtitleOptions = (() => {
+    const source = subtitleTracks?.length
+      ? subtitleTracks
+      : subtitleUrl
+        ? [{ language: subtitleLabel?.trim() || "Phụ đề", subtitleUrl }]
+        : [];
+    const seen = new Set<string>();
+    return source
+      .filter((track) => {
+        const url = track.subtitleUrl?.trim();
+        if (!url || seen.has(url)) return false;
+        seen.add(url);
+        return true;
+      })
+      .map((track) => ({
+        language: track.language?.trim() || "Phụ đề",
+        subtitleUrl: track.subtitleUrl.trim(),
+      }));
+  })();
+  const activeSubtitle = subtitleOptions.find((track) => track.subtitleUrl === selectedSubtitleUrl) || subtitleOptions[0];
+  const activeSubtitleUrl = activeSubtitle?.subtitleUrl;
   const [wrapHeight, setWrapHeight] = useState(0);
   const nativeTrackRef = useRef<HTMLTrackElement | null>(null);
   // Chỉ dùng nguồn M3U8: thử link gốc trước, rồi tới link qua proxy của máy chủ.
@@ -774,6 +827,7 @@ export function CinemaPlayer({
       onProgressRef.current?.(v.currentTime, v.duration || 0);
     };
     const onWaiting    = () => {
+      if (adActiveRef.current && !nativeFullscreenAdRef.current) return;
       if (nativeFullscreenRef.current) setAdPlaying(false);
       else {
         // HLS emits `waiting` during a normal seek. Keep the intended play
@@ -845,6 +899,9 @@ export function CinemaPlayer({
         setAdPlaying(false);
         setSpeedOpen(false);
         resumeAfterAdRef.current = true;
+        setBuffering(false);
+        setSourceReady(true);
+        setError(null);
         setAdActive(true);
         v.pause();
         onProgressRef.current?.(v.currentTime, v.duration || 0);
@@ -870,6 +927,7 @@ export function CinemaPlayer({
         (v as HTMLVideoElement & { webkitExitFullscreen?: () => void }).webkitExitFullscreen?.();
         return;
       }
+      if (adActiveRef.current) return;
       setError("Nguồn phim lỗi hoặc không khả dụng.");
       setBuffering(false);
       setSourceReady(false);
@@ -948,6 +1006,9 @@ export function CinemaPlayer({
     setAdActive(false);
     setAdPlaying(false);
     setAdError(false);
+    setBuffering(false);
+    setSourceReady(true);
+    setError(null);
     nextAdAtRef.current = resumeAt + randomAdInterval();
     if (nativeFullscreenAdRef.current) {
       restoreNativeMovie(resumeAt, resumeMovie);
@@ -1310,9 +1371,13 @@ export function CinemaPlayer({
   }, [subtitleStyle]);
 
   useEffect(() => {
+    setSelectedSubtitleUrl(subtitleUrl || subtitleTracks?.[0]?.subtitleUrl || "");
+  }, [subtitleUrl, subtitleTracks]);
+
+  useEffect(() => {
     // Đổi sang tập khác thì đóng bảng chỉnh phụ đề, tránh tự bật lại ở tập sau.
     setSubtitlePanelOpen(false);
-    if (!subtitleUrl) {
+    if (!activeSubtitleUrl) {
       setSubtitleCues([]);
       setSubtitleText("");
       setSubtitleStatus("none");
@@ -1320,7 +1385,7 @@ export function CinemaPlayer({
     }
     let cancelled = false;
     setSubtitleStatus("loading");
-    fetch(subtitleUrl, { credentials: "same-origin" })
+    fetch(activeSubtitleUrl, { credentials: "same-origin" })
       .then((response) => (response.ok ? response.text() : ""))
       .then((body) => {
         if (cancelled) return;
@@ -1332,9 +1397,9 @@ export function CinemaPlayer({
         if (cancelled) return;
         setSubtitleCues([]);
         setSubtitleStatus("error");
-      });
+    });
     return () => { cancelled = true; };
-  }, [subtitleUrl]);
+  }, [activeSubtitleUrl]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -1389,7 +1454,7 @@ export function CinemaPlayer({
       v.removeEventListener("webkitbeginfullscreen", showNative);
       v.removeEventListener("webkitendfullscreen", hideNative);
     };
-  }, [subtitleUrl, subtitleStyle.enabled]);
+  }, [activeSubtitleUrl, subtitleStyle.enabled]);
 
   /* ─── Render ──────────────────────────────────────────── */
   return (
@@ -1429,8 +1494,8 @@ export function CinemaPlayer({
         onClick={(e) => e.stopPropagation()}
         onTouchEnd={(e) => e.stopPropagation()}
       >
-        {subtitleUrl ? (
-          <track ref={nativeTrackRef} kind="subtitles" src={subtitleUrl} srcLang="vi" label="Phụ đề" default />
+        {activeSubtitleUrl ? (
+          <track ref={nativeTrackRef} kind="subtitles" src={activeSubtitleUrl} srcLang="und" label={activeSubtitle?.language || "Phụ đề"} default />
         ) : null}
       </video>
 
@@ -1512,7 +1577,7 @@ export function CinemaPlayer({
       )}
 
       {/* Buffering / Error overlay */}
-      {(buffering || error) && (
+      {(buffering || error) && !adActive && (
         <div className={`cinema-player-state${error ? " cinema-player-error" : ""}`}>
           {error ? (
             <>
@@ -1711,7 +1776,7 @@ export function CinemaPlayer({
             </div>}
 
             {/* Phụ đề rời: chỉ hiện nút khi tập này thật sự có phụ đề để chỉnh */}
-            {!adActive && subtitleUrl ? (
+            {!adActive && activeSubtitleUrl ? (
               <button
                 className={`cinema-cc-btn${subtitleStyle.enabled ? " is-on" : ""}`}
                 aria-label="Tùy chỉnh phụ đề"
@@ -1747,9 +1812,15 @@ export function CinemaPlayer({
       </div>}
 
       {/* Bảng tùy chỉnh phụ đề — chỉ dành cho tập có phụ đề rời */}
-      {subtitlePanelOpen && !adActive && subtitleUrl ? (
+      {subtitlePanelOpen && !adActive && activeSubtitleUrl ? (
         <SubtitlePanel
           style={subtitleStyle}
+          tracks={subtitleOptions}
+          activeSubtitleUrl={activeSubtitleUrl}
+          onSelectTrack={(track) => {
+            setSelectedSubtitleUrl(track.subtitleUrl);
+            setSubtitleText("");
+          }}
           onChange={(patch) => setSubtitleStyle((current) => ({ ...current, ...patch }))}
           onReset={() => setSubtitleStyle({ ...DEFAULT_SUBTITLE_STYLE })}
           status={subtitleStatus}
