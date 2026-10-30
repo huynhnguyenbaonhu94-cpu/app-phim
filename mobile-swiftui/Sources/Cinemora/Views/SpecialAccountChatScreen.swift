@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 import PhotosUI
 import SwiftUI
@@ -21,7 +22,7 @@ struct SpecialAccountChatScreen: View {
     @State private var errorNote: String?
     @State private var actionErrorVisible = false
     @State private var pendingMedia: PendingSpecialChatMedia?
-    @State private var videoPlayback: SpecialChatVideoPlayback?
+    @State private var mediaViewer: SpecialChatMediaViewerItem?
     @FocusState private var composerFocused: Bool
 
     private let api = CinemaAPI.shared
@@ -99,9 +100,12 @@ struct SpecialAccountChatScreen: View {
             guard let item else { return }
             Task { await sendPickedMedia(item) }
         }
-        .sheet(item: $videoPlayback) { playback in
-            NavigationStack {
-                SpecialChatVideoPlayerSheet(fileURL: playback.fileURL)
+        .fullScreenCover(item: $mediaViewer) { viewer in
+            Group {
+                switch viewer.content {
+                case .image(let image): SpecialChatImageViewer(image: image)
+                case .video(let fileURL): SpecialChatVideoPlayerSheet(fileURL: fileURL)
+                }
             }
             .preferredColorScheme(.dark)
         }
@@ -151,11 +155,16 @@ struct SpecialAccountChatScreen: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messages) { message in
+                            let rowWidth = max(280, geometry.size.width - 28)
+                            let bubbleWidth = min(420, rowWidth * 0.82)
                             SpecialChatMessageBubble(
                                 message: message,
-                                maxBubbleWidth: max(0, (geometry.size.width - 28) * 0.78)
+                                maxBubbleWidth: bubbleWidth,
+                                maxMediaWidth: max(140, bubbleWidth - 24)
                             ) { fileURL in
-                                videoPlayback = SpecialChatVideoPlayback(fileURL: fileURL)
+                                mediaViewer = SpecialChatMediaViewerItem(content: .video(fileURL))
+                            } onViewImage: { image in
+                                mediaViewer = SpecialChatMediaViewerItem(content: .image(image))
                             }
                             .id(message.id)
                         }
@@ -370,7 +379,7 @@ struct SpecialAccountChatScreen: View {
     private func prepareMedia(_ data: Data, contentType: UTType?) throws -> (data: Data, filename: String, mimeType: String) {
         if contentType?.conforms(to: .movie) == true || contentType?.conforms(to: .video) == true {
             let mime = contentType?.preferredMIMEType ?? "video/mp4"
-            guard ["video/mp4", "video/quicktime", "video/webm"].contains(mime) else { throw SpecialChatClientError.unsupportedVideo }
+            guard ["video/mp4", "video/quicktime"].contains(mime) else { throw SpecialChatClientError.unsupportedVideo }
             guard data.count <= 32 * 1024 * 1024 else { throw SpecialChatClientError.videoTooLarge }
             let ext = contentType?.preferredFilenameExtension ?? (mime == "video/quicktime" ? "mov" : "mp4")
             return (data, "video.\(ext)", mime)
@@ -395,7 +404,9 @@ struct SpecialAccountChatScreen: View {
 private struct SpecialChatMessageBubble: View {
     let message: RemoteSpecialChatMessage
     let maxBubbleWidth: CGFloat
+    let maxMediaWidth: CGFloat
     let onPlayVideo: (URL) -> Void
+    let onViewImage: (UIImage) -> Void
     private var outgoing: Bool { !message.isFromAdmin }
 
     var body: some View {
@@ -403,7 +414,7 @@ private struct SpecialChatMessageBubble: View {
             if outgoing { Spacer(minLength: 0) }
             VStack(alignment: .leading, spacing: 7) {
                 if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
-                    SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, onPlayVideo: onPlayVideo)
+                    SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
                 }
                 if let text = message.text, !text.isEmpty {
                     Text(text)
@@ -428,21 +439,29 @@ private struct SpecialChatMessageBubble: View {
             if !outgoing { Spacer(minLength: 0) }
         }
         .frame(maxWidth: .infinity, alignment: outgoing ? .trailing : .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(message.isFromAdmin ? "Quản trị viên" : "Bạn"): \(message.text ?? "Tệp đính kèm")")
     }
 }
 
 private struct SpecialChatMediaPreview: View {
     let path: String
     let mimeType: String
+    let maxWidth: CGFloat
     let onPlayVideo: (URL) -> Void
+    let onViewImage: (UIImage) -> Void
     @State private var image: UIImage?
     @State private var isLoading = false
     @State private var error = false
+    @State private var errorMessage: String?
     @State private var retryToken = 0
 
     private var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
+    private var imageDisplaySize: CGSize {
+        guard let image, image.size.width > 0, image.size.height > 0 else {
+            return CGSize(width: min(maxWidth, 220), height: 160)
+        }
+        let factor = min(1, min(maxWidth / image.size.width, 280 / image.size.height))
+        return CGSize(width: max(1, image.size.width * factor), height: max(1, image.size.height * factor))
+    }
 
     var body: some View {
         Group {
@@ -460,7 +479,7 @@ private struct SpecialChatMediaPreview: View {
                                 .foregroundStyle(error ? Color.auroraAmber : Color.auroraAccent)
                             VStack {
                                 Spacer()
-                                Text("Video · nhấn để phát")
+                                Text(error ? (errorMessage ?? "Không tải được video · chạm để thử lại") : "Video · chạm để mở trình phát")
                                     .font(.auroraLabel(9, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.85))
                                     .padding(.bottom, 10)
@@ -469,27 +488,42 @@ private struct SpecialChatMediaPreview: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: maxWidth)
             } else if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: 260, maxHeight: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .accessibilityLabel("Ảnh được gửi trong chat")
+                Button { onViewImage(image) } label: {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: imageDisplaySize.width, height: imageDisplaySize.height)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(7)
+                            .background(.black.opacity(0.62), in: Circle())
+                            .padding(8)
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Mở ảnh đính kèm toàn màn hình")
             } else {
                 Button {
                     guard error, !isLoading else { return }
                     error = false
+                    errorMessage = nil
                     retryToken += 1
                 } label: {
                     HStack(spacing: 8) {
                         if isLoading { ProgressView().tint(.auroraSky) }
                         else { Image(systemName: error ? "arrow.clockwise.circle" : "photo.fill").foregroundStyle(Color.auroraSky) }
-                        Text(error ? "Không tải được ảnh · chạm để thử lại" : "Đang tải ảnh…")
+                        Text(error ? (errorMessage ?? "Không tải được ảnh · chạm để thử lại") : "Đang tải ảnh…")
                             .font(.auroraBody(10))
                             .foregroundStyle(Color.auroraTextSecondary)
                     }
-                    .frame(width: 230, height: 64)
+                    .frame(maxWidth: maxWidth, minHeight: 64)
+                    .padding(.horizontal, 10)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -500,11 +534,16 @@ private struct SpecialChatMediaPreview: View {
             guard !isVideo, image == nil else { return }
             isLoading = true
             error = false
+            errorMessage = nil
             do {
                 let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
                 image = UIImage(data: data)
                 error = image == nil
-            } catch { self.error = true }
+                if error { errorMessage = "Dữ liệu ảnh không hợp lệ · chạm để thử lại" }
+            } catch {
+                self.error = true
+                errorMessage = "Không tải được ảnh · chạm để thử lại"
+            }
             isLoading = false
         }
     }
@@ -512,8 +551,14 @@ private struct SpecialChatMediaPreview: View {
     @MainActor
     private func loadVideo() async {
         guard !isLoading else { return }
+        guard mimeType.lowercased() != "video/webm" else {
+            error = true
+            errorMessage = "Video WebM chưa phát được trên app iOS. Hãy dùng MP4 hoặc MOV."
+            return
+        }
         isLoading = true
         error = false
+        errorMessage = nil
         do {
             let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
             let ext: String
@@ -527,14 +572,21 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
             onPlayVideo(fileURL)
-        } catch { self.error = true }
+        } catch {
+            self.error = true
+            errorMessage = "Không tải được video · chạm để thử lại"
+        }
         isLoading = false
     }
 }
 
-private struct SpecialChatVideoPlayback: Identifiable {
-    let fileURL: URL
-    var id: URL { fileURL }
+private struct SpecialChatMediaViewerItem: Identifiable {
+    enum Content {
+        case image(UIImage)
+        case video(URL)
+    }
+    let id = UUID()
+    let content: Content
 }
 
 private struct PendingSpecialChatMedia {
@@ -544,35 +596,246 @@ private struct PendingSpecialChatMedia {
     let clientRequestID: String
 }
 
-private struct SpecialChatVideoPlayerSheet: View {
-    let fileURL: URL
+private struct SpecialChatImageViewer: View {
+    let image: UIImage
     @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer?
+    @State private var zoom: CGFloat = 1
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let player { VideoPlayer(player: player).ignoresSafeArea() }
-            else { ProgressView().tint(.white) }
-        }
-        .navigationTitle("Video trong tin nhắn")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Đóng") { dismiss() }.foregroundStyle(Color.auroraAccent)
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .scaleEffect(zoom)
+                .gesture(MagnificationGesture().onChanged { value in
+                    zoom = min(4, max(1, value))
+                }.onEnded { _ in
+                    if zoom < 1.05 { withAnimation(.easeOut(duration: 0.18)) { zoom = 1 } }
+                })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Ảnh đính kèm, chụm hoặc tách hai ngón để phóng to")
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(.white.opacity(0.12), in: Circle())
+                    }
+                    Spacer()
+                    Text("Ảnh trong tin nhắn")
+                        .font(.auroraLabel(12, weight: .bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Image(systemName: "xmark").font(.system(size: 14)).frame(width: 40, height: 40).hidden()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                Spacer()
+                Text("Chụm hoặc tách hai ngón để thu phóng")
+                    .font(.auroraBody(9))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .padding(.bottom, 14)
             }
         }
-        .onAppear {
-            let newPlayer = AVPlayer(url: fileURL)
-            player = newPlayer
-            newPlayer.play()
+        .statusBarHidden()
+    }
+}
+
+private struct SpecialChatVideoPlayerSheet: View {
+    let fileURL: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    @State private var currentTime = 0.0
+    @State private var duration = 0.0
+    @State private var isPlaying = true
+    @State private var isSeeking = false
+    @State private var isMuted = false
+    @State private var timeObserver: Any?
+    @State private var playbackError: String?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(.white.opacity(0.12), in: Circle())
+                    }
+                    Spacer()
+                    Text("Video trong tin nhắn")
+                        .font(.auroraLabel(12, weight: .bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button { isMuted.toggle(); player?.isMuted = isMuted } label: {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                    }
+                    .accessibilityLabel(isMuted ? "Bật âm thanh" : "Tắt âm thanh")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                Spacer(minLength: 18)
+                if let player {
+                    SpecialChatPlayerSurface(player: player)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.black)
+                } else {
+                    ProgressView().tint(Color.auroraAccent).frame(maxWidth: .infinity).aspectRatio(16.0 / 9.0, contentMode: .fit)
+                }
+                Spacer(minLength: 22)
+
+                if let playbackError {
+                    Text(playbackError)
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraPink)
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 8)
+                }
+                Slider(value: $currentTime, in: 0...max(duration, 1), onEditingChanged: { editing in
+                    isSeeking = editing
+                    if !editing { seek(to: currentTime) }
+                })
+                .tint(Color.auroraAccent)
+                .disabled(duration <= 0 || playbackError != nil)
+                HStack {
+                    Text(Self.timeLabel(currentTime))
+                    Spacer()
+                    Text(Self.timeLabel(duration))
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.66))
+                .padding(.top, 1)
+
+                HStack(spacing: 34) {
+                    Button { seek(by: -10) } label: {
+                        Image(systemName: "gobackward.10")
+                            .font(.system(size: 24, weight: .regular))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityLabel("Tua lùi 10 giây")
+                    Button { togglePlayback() } label: {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Color.auroraVoid)
+                            .frame(width: 58, height: 58)
+                            .background(LinearGradient.auroraPrimary, in: Circle())
+                    }
+                    .accessibilityLabel(isPlaying ? "Tạm dừng video" : "Phát video")
+                    Button { seek(by: 10) } label: {
+                        Image(systemName: "goforward.10")
+                            .font(.system(size: 24, weight: .regular))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityLabel("Tua tới 10 giây")
+                }
+                .padding(.top, 22)
+                .padding(.bottom, 22)
+            }
+            .padding(.horizontal, 14)
         }
-        .onDisappear {
-            player?.pause()
-            player = nil
-            try? FileManager.default.removeItem(at: fileURL)
+        .statusBarHidden()
+        .onAppear(perform: startPlayback)
+        .task {
+            do {
+                let asset = AVURLAsset(url: fileURL)
+                let durationTime = try await asset.load(.duration)
+                let loadedDuration = durationTime.seconds
+                if loadedDuration.isFinite && loadedDuration > 0 { duration = loadedDuration }
+            } catch {
+                playbackError = "Không đọc được thời lượng video này."
+            }
+        }
+        .onDisappear(perform: stopPlayback)
+    }
+
+    private func startPlayback() {
+        let newPlayer = AVPlayer(url: fileURL)
+        player = newPlayer
+        newPlayer.play()
+        timeObserver = newPlayer.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { time in
+            if !isSeeking, time.seconds.isFinite, time.seconds >= 0 { currentTime = time.seconds }
+            let itemDuration = newPlayer.currentItem?.duration.seconds ?? 0
+            if itemDuration.isFinite && itemDuration > 0 { duration = itemDuration }
+            isPlaying = newPlayer.timeControlStatus == .playing
         }
     }
+
+    private func stopPlayback() {
+        player?.pause()
+        if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
+        timeObserver = nil
+        player = nil
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func togglePlayback() {
+        guard let player else { return }
+        if isPlaying {
+            player.pause()
+        } else {
+            if duration > 0, currentTime >= duration - 0.25 { seek(to: 0) }
+            player.play()
+        }
+        isPlaying.toggle()
+    }
+
+    private func seek(by offset: Double) {
+        let base = player?.currentTime().seconds ?? currentTime
+        guard base.isFinite else { return }
+        seek(to: base + offset)
+    }
+
+    private func seek(to seconds: Double) {
+        guard seconds.isFinite else { return }
+        let upperBound = duration > 0 ? duration : max(0, seconds)
+        let bounded = min(max(0, seconds), upperBound)
+        currentTime = bounded
+        player?.seek(
+            to: CMTime(seconds: bounded, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private static func timeLabel(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "00:00" }
+        let total = Int(seconds.rounded(.down))
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+}
+
+private struct SpecialChatPlayerSurface: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> SpecialChatPlayerView {
+        let view = SpecialChatPlayerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ view: SpecialChatPlayerView, context: Context) {
+        if view.playerLayer.player !== player { view.playerLayer.player = player }
+    }
+}
+
+private final class SpecialChatPlayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 private enum SpecialChatOperation {
@@ -624,7 +887,7 @@ private enum SpecialChatClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidFile: return "Không đọc được tệp đã chọn."
-        case .unsupportedVideo: return "Video phải ở định dạng MP4, MOV hoặc WebM."
+        case .unsupportedVideo: return "Trên app iOS, video cần ở định dạng MP4 hoặc MOV."
         case .imageTooLarge: return "Ảnh vượt quá giới hạn 8 MB."
         case .videoTooLarge: return "Video vượt quá giới hạn 32 MB."
         }
