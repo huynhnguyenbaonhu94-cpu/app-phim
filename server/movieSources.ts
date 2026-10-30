@@ -121,7 +121,19 @@ async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleU
   for (const track of input) {
     const language = String(track.language ?? "").trim().slice(0, 40);
     if (!language) continue;
-    const subtitleUrl = await resolveSubtitleUrl({ subtitleUrl: track.subtitleUrl, subtitleVtt: track.subtitleVtt });
+    // Giữ nguyên link ngoài trong track; web player sẽ tải qua proxy server,
+    // còn AVPlayer có thể đọc trực tiếp. Như vậy không phụ thuộc thư mục
+    // uploads có bị thay thế khi cập nhật source trên cPanel hay không.
+    const uploaded = track.subtitleVtt?.trim();
+    let subtitleUrl: string | null;
+    if (uploaded) {
+      const saved = await saveMovieSubtitle({ base64: Buffer.from(uploaded, "utf8").toString("base64"), filename: "track.vtt" });
+      subtitleUrl = saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+    } else {
+      const link = track.subtitleUrl?.trim();
+      if (!link) continue;
+      subtitleUrl = link.startsWith("uploads/") ? `/${link}` : link;
+    }
     if (subtitleUrl) resolved.push({ language, subtitleUrl });
   }
   return resolved;
@@ -543,6 +555,53 @@ export async function movieSubtitleVtt(episodeId: number): Promise<string | null
   return null;
 }
 
+/** Đọc một subtitle track theo nguồn đã lưu, không phụ thuộc CORS của máy chủ ngoài. */
+async function subtitleTrackContent(url: string | null | undefined): Promise<string | null> {
+  const link = url?.trim();
+  if (!link) return null;
+  if (link.startsWith("/uploads/") || link.startsWith("uploads/")) {
+    try {
+      const filePath = path.resolve(process.cwd(), link.replace(/^\/+/, ""));
+      const content = await fs.readFile(filePath, "utf8");
+      return toWebVTT(content);
+    } catch {
+      return null;
+    }
+  }
+  const internalMatch = link.match(/^\/?api\/movies\/subtitle\/(\d+)\.vtt(?:\?.*)?$/i);
+  if (internalMatch) return movieSubtitleVtt(Number(internalMatch[1]));
+  if (/^https?:\/\//i.test(link)) return fetchSubtitleAsVtt(link);
+  return null;
+}
+
+/**
+ * Proxy một track phụ đề đã lưu cho web player.
+ * `track=-1` là subtitle chính; các giá trị còn lại là index trong subtitleTracks.
+ */
+export async function movieSubtitleTrackVtt(
+  episodeId: number,
+  source: "episode" | "quality",
+  trackIndex: number,
+  qualityIndex = 0,
+  requestedUrl?: string,
+): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(movieSourceEpisodes).where(eq(movieSourceEpisodes.id, episodeId));
+  if (!row) return null;
+  if (source === "episode") {
+    const candidate = trackIndex === -1 ? row.subtitleUrl : parseSubtitleTracks(row.subtitleTracks)[trackIndex]?.subtitleUrl;
+    if (requestedUrl && candidate !== requestedUrl) return null;
+    if (trackIndex === -1 && !requestedUrl && row.subtitleVtt) return row.subtitleVtt;
+    return subtitleTrackContent(candidate);
+  }
+  const quality = parseQualities(row.qualities)[qualityIndex];
+  if (!quality) return null;
+  const candidate = trackIndex === -1 ? quality.subtitleUrl : quality.subtitleTracks[trackIndex]?.subtitleUrl;
+  if (requestedUrl && candidate !== requestedUrl) return null;
+  return subtitleTrackContent(candidate);
+}
+
 /**
  * Ghép nguồn thủ công vào danh sách nguồn của API.
  *
@@ -586,40 +645,61 @@ export async function mergeCustomSources(
     }
     return merged;
   };
+  const subtitleProxyUrl = (episodeId: number, source: "episode" | "quality", track: number, quality = 0, sourceUrl?: string) => {
+    const url = `/api/movies/subtitle/${episodeId}.vtt?source=${source}&quality=${quality}&track=${track}`;
+    return sourceUrl ? `${url}&url=${encodeURIComponent(sourceUrl)}` : url;
+  };
   for (const source of custom) {
     if (source.episodes.length === 0) continue;
     merged.push({
       name: source.name,
       isAi: false,
-      episodes: source.episodes.map((episode) => ({
-        name: episode.name,
-        slug: `custom-${episode.id}`,
-        filename: episode.name,
-        embedUrl: null,
-        streamUrl: registerCustomStreamSource(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
-        directStreamUrl: customDirectStreamUrl(episode.qualities[0]?.streamUrl ?? episode.streamUrl),
-        subtitleUrl: episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
-        subtitleLabel: episode.qualities[0]?.subtitleLabel ?? episode.subtitleLabel,
-        subtitleTracks: mergeSubtitleTracks(
-          withPrimarySubtitle(
-            episode.qualities[0]?.subtitleUrl ?? episode.subtitleUrl,
-            episode.qualities[0]?.subtitleLabel ?? episode.subtitleLabel,
-            episode.subtitleTracks,
+      episodes: source.episodes.map((episode) => {
+        const firstQuality = episode.qualities[0];
+        const episodePrimaryUrl = episode.subtitleUrl ? subtitleProxyUrl(episode.id, "episode", -1) : null;
+        const firstQualityPrimaryUrl = firstQuality?.subtitleUrl ? subtitleProxyUrl(episode.id, "quality", -1, 0) : null;
+        const episodeTracks = episode.subtitleTracks.map((track, trackIndex) => ({
+          ...track,
+          subtitleUrl: subtitleProxyUrl(episode.id, "episode", trackIndex, 0, track.subtitleUrl),
+        }));
+        const qualityTracks = episode.qualities.map((quality, qualityIndex) => quality.subtitleTracks.map((track, trackIndex) => ({
+          ...track,
+          subtitleUrl: subtitleProxyUrl(episode.id, "quality", trackIndex, qualityIndex, track.subtitleUrl),
+        })));
+        return {
+          name: episode.name,
+          slug: `custom-${episode.id}`,
+          filename: episode.name,
+          embedUrl: null,
+          streamUrl: registerCustomStreamSource(firstQuality?.streamUrl ?? episode.streamUrl),
+          directStreamUrl: customDirectStreamUrl(firstQuality?.streamUrl ?? episode.streamUrl),
+          subtitleUrl: firstQualityPrimaryUrl ?? episodePrimaryUrl,
+          subtitleLabel: firstQuality?.subtitleLabel ?? episode.subtitleLabel,
+          subtitleTracks: mergeSubtitleTracks(
+            withPrimarySubtitle(firstQualityPrimaryUrl ?? episodePrimaryUrl, firstQuality?.subtitleLabel ?? episode.subtitleLabel, firstQuality ? [...qualityTracks[0], ...episodeTracks] : episodeTracks),
+            ...episode.qualities.map((quality, qualityIndex) => withPrimarySubtitle(
+              quality.subtitleUrl ? subtitleProxyUrl(episode.id, "quality", -1, qualityIndex, quality.subtitleUrl) : null,
+              quality.subtitleLabel,
+              qualityTracks[qualityIndex],
+            )),
           ),
-          ...episode.qualities.map((quality) => withPrimarySubtitle(quality.subtitleUrl, quality.subtitleLabel, quality.subtitleTracks)),
-        ),
-        // Danh sách chất lượng để app cho người xem chọn 1080p / 2K / 4K…
-        qualities: episode.qualities.length
-          ? episode.qualities.map((quality) => ({
-              label: quality.label,
-              streamUrl: registerCustomStreamSource(quality.streamUrl),
-              directStreamUrl: customDirectStreamUrl(quality.streamUrl),
-              subtitleUrl: quality.subtitleUrl,
-              subtitleLabel: quality.subtitleLabel,
-              subtitleTracks: withPrimarySubtitle(quality.subtitleUrl, quality.subtitleLabel, quality.subtitleTracks),
-            }))
-          : undefined,
-      })),
+          // Danh sách chất lượng để app cho người xem chọn 1080p / 2K / 4K…
+          qualities: episode.qualities.length
+            ? episode.qualities.map((quality, qualityIndex) => ({
+                label: quality.label,
+                streamUrl: registerCustomStreamSource(quality.streamUrl),
+                directStreamUrl: customDirectStreamUrl(quality.streamUrl),
+                subtitleUrl: quality.subtitleUrl ? subtitleProxyUrl(episode.id, "quality", -1, qualityIndex, quality.subtitleUrl) : null,
+                subtitleLabel: quality.subtitleLabel,
+                subtitleTracks: withPrimarySubtitle(
+                  quality.subtitleUrl ? subtitleProxyUrl(episode.id, "quality", -1, qualityIndex, quality.subtitleUrl) : null,
+                  quality.subtitleLabel,
+                  qualityTracks[qualityIndex],
+                ),
+              }))
+            : undefined,
+        };
+      }),
     });
   }
   return merged;

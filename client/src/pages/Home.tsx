@@ -146,7 +146,7 @@ function DailyUpdates() {
         </span>
       </div>
 
-      <div className="daily-scroll-wrap">
+      <div className={`daily-scroll-wrap${canScrollLeft ? " has-left" : ""}${canScrollRight ? " has-right" : ""}`}>
         {/* Nút trái */}
         <button
           type="button"

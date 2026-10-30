@@ -5,6 +5,7 @@ struct MovieDetailScreen: View {
     private let autoPlayOnLoad: Bool
     private let onExitRelated: (() -> Void)?
     @Environment(CinemaStore.self) private var store
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
@@ -34,15 +35,31 @@ struct MovieDetailScreen: View {
                 CinemaBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
+                        if connectivity.isConnected, store.isDetailLoading(slug), movie != nil {
+                            detailRefreshIndicator
+                                .frame(width: contentWidth, alignment: .leading)
+                        }
+                        if !connectivity.isConnected, movie != nil {
+                            offlineNotice(hasCachedMovie: true) {
+                                store.loadDetail(slug: slug)
+                            }
+                            .frame(width: contentWidth)
+                        }
                         if let movie {
                             detailContent(movie, width: contentWidth)
                             // Bình luận của phim này, ngay dưới phần nội dung.
                             CommentsSection(movie: movie)
                                 .padding(.top, 4)
+                        } else if !connectivity.isConnected {
+                            offlineState {
+                                store.loadDetail(slug: slug)
+                            }
+                            .frame(width: contentWidth)
+                            .padding(.top, 100)
                         } else if store.isDetailLoading(slug) {
-                            loadingState
+                            loadingState(width: contentWidth)
                                 .frame(width: contentWidth)
-                                .padding(.top, 150)
+                                .padding(.top, 70)
                         } else {
                             StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError(for: slug), actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
                                 .frame(width: contentWidth)
@@ -76,6 +93,10 @@ struct MovieDetailScreen: View {
                 .preferredColorScheme(.dark)
         }
         .task(id: slug) { store.loadDetail(slug: slug) }
+        .onChange(of: connectivity.isConnected) { wasConnected, isConnected in
+            guard !wasConnected, isConnected, movie == nil else { return }
+            store.loadDetail(slug: slug)
+        }
         .onChange(of: store.detail(for: slug)?.id) { _, _ in selectedServer = 0; selectedEpisode = 0 }
         .onChange(of: store.detail(for: slug)?.slug) { _, loadedSlug in
             guard autoPlayOnLoad,
@@ -148,12 +169,99 @@ struct MovieDetailScreen: View {
         }
     }
 
-    private var loadingState: some View {
-        VStack(spacing: 16) {
-            SkeletonBlock(cornerRadius: 30)
-                .frame(height: 430)
-            SkeletonPosterGrid(count: 4)
+    private var detailRefreshIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.auroraAccent)
+            Text("Đang cập nhật thông tin phim")
+                .font(.auroraLabel(10, weight: .semibold))
+                .foregroundStyle(Color.auroraTextSecondary)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.auroraRaised.opacity(0.8), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.auroraHairline, lineWidth: 0.8))
+        .transition(.opacity.combined(with: .move(edge: .top)))
+        .accessibilityLabel("Đang cập nhật thông tin phim")
+    }
+
+    private func loadingState(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.auroraAccent)
+                Text("Đang tải chi tiết phim…")
+                    .font(.auroraLabel(12, weight: .bold))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+            .padding(.bottom, 2)
+
+            ZStack(alignment: .bottomLeading) {
+                SkeletonBlock(cornerRadius: 30)
+                VStack(alignment: .leading, spacing: 11) {
+                    Spacer()
+                    SkeletonBlock(cornerRadius: 6)
+                        .frame(width: 68, height: 16)
+                    SkeletonBlock(cornerRadius: 7)
+                        .frame(width: width * 0.68, height: 28)
+                    SkeletonBlock(cornerRadius: 6)
+                        .frame(width: width * 0.46, height: 14)
+                    HStack(spacing: 8) {
+                        SkeletonBlock(cornerRadius: 12).frame(width: 52, height: 24)
+                        SkeletonBlock(cornerRadius: 12).frame(width: 76, height: 24)
+                        SkeletonBlock(cornerRadius: 12).frame(width: 66, height: 24)
+                    }
+                    SkeletonBlock(cornerRadius: 18).frame(width: 124, height: 44)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+            .frame(width: width, height: 430)
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .strokeBorder(LinearGradient.auroraVeil, lineWidth: 1)
+            }
+
+            HStack(spacing: 10) {
+                ForEach(0..<3, id: \.self) { _ in
+                    SkeletonBlock(cornerRadius: 16).frame(height: 58)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 11) {
+                SkeletonBlock(cornerRadius: 6).frame(width: 115, height: 13)
+                SkeletonBlock(cornerRadius: 6).frame(height: 11)
+                SkeletonBlock(cornerRadius: 6).frame(width: width * 0.83, height: 11)
+                SkeletonBlock(cornerRadius: 6).frame(width: width * 0.59, height: 11)
+            }
+            .padding(16)
+            .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: 0.5)
+
+            HStack {
+                SkeletonBlock(cornerRadius: 6).frame(width: 145, height: 17)
+                Spacer()
+                SkeletonBlock(cornerRadius: 12).frame(width: 86, height: 30)
+            }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(0..<4, id: \.self) { _ in
+                    SkeletonBlock(cornerRadius: 16).frame(height: 52)
+                }
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Đang tải chi tiết phim")
+    }
+
+    private func offlineNotice(hasCachedMovie: Bool, retry: @escaping () -> Void) -> some View {
+        OfflineDetailConnectionCard(compact: true, hasCachedMovie: hasCachedMovie, retry: retry)
+    }
+
+    private func offlineState(retry: @escaping () -> Void) -> some View {
+        OfflineDetailConnectionCard(compact: false, hasCachedMovie: false, retry: retry)
     }
 
     // MARK: - Content
@@ -555,6 +663,138 @@ struct MovieDetailScreen: View {
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+        }
+    }
+}
+
+private struct OfflineDetailConnectionCard: View {
+    let compact: Bool
+    let hasCachedMovie: Bool
+    let retry: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    private var title: String {
+        hasCachedMovie ? "Đang ngoại tuyến" : "Không có kết nối Internet"
+    }
+
+    private var message: String {
+        hasCachedMovie
+            ? "Thông tin phim đã tải trước đó vẫn hiển thị. Cần mạng để tải nội dung mới hoặc phát video."
+            : "Hãy kiểm tra Wi‑Fi hoặc dữ liệu di động rồi thử tải lại trang phim."
+    }
+
+    var body: some View {
+        Group {
+            if compact {
+                compactContent
+            } else {
+                offlineContent
+            }
+        }
+        .padding(compact ? 13 : 22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: compact ? 18 : 28, style: .continuous)
+                .fill(Color.auroraRaised.opacity(0.94))
+                .overlay {
+                    RoundedRectangle(cornerRadius: compact ? 18 : 28, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.auroraAmber.opacity(0.10), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: compact ? 18 : 28, style: .continuous)
+                .strokeBorder(Color.auroraAmber.opacity(0.28), lineWidth: 0.9)
+        }
+        .shadow(color: Color.black.opacity(compact ? 0.08 : 0.22), radius: 18, y: 8)
+        .onAppear(perform: startPulse)
+        .onChange(of: reduceMotion) { _, shouldReduce in
+            if shouldReduce { pulse = false } else { startPulse() }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private var compactContent: some View {
+        HStack(spacing: 12) {
+            wifiIcon(size: 38)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.auroraLabel(11, weight: .black))
+                    .foregroundStyle(.white)
+                Text(hasCachedMovie ? "Đang hiển thị thông tin đã tải sẵn." : "Kiểm tra Wi‑Fi hoặc dữ liệu di động.")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 4)
+            Button(action: retry) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.auroraVoid)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(LinearGradient.auroraPrimary))
+            }
+            .buttonStyle(.auroraPress(scale: 0.9))
+            .accessibilityLabel("Thử tải lại chi tiết phim")
+        }
+    }
+
+    private var offlineContent: some View {
+        VStack(spacing: 15) {
+            wifiIcon(size: 68)
+                .padding(.top, 4)
+            VStack(spacing: 7) {
+                Text(title)
+                    .font(.auroraDisplay(20))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                Text(message)
+                    .font(.auroraBody(12))
+                    .foregroundStyle(Color.auroraTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 310)
+            }
+            Button(action: retry) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Thử lại")
+                }
+                .font(.auroraLabel(12, weight: .black))
+                .foregroundStyle(Color.auroraVoid)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .background(Capsule().fill(LinearGradient.auroraPrimary))
+            }
+            .buttonStyle(.auroraPress(scale: 0.96))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private func wifiIcon(size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.auroraAmber.opacity(pulse ? 0.04 : 0.13))
+                .frame(width: size, height: size)
+                .scaleEffect(pulse && !reduceMotion ? 1.16 : 0.92)
+            Circle()
+                .fill(Color.auroraAmber.opacity(0.10))
+                .frame(width: size * 0.78, height: size * 0.78)
+            Image(systemName: "wifi.slash")
+                .font(.system(size: size * 0.34, weight: .semibold))
+                .foregroundStyle(Color.auroraAmber)
+                .symbolEffect(.pulse, value: pulse && !reduceMotion)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private func startPulse() {
+        guard !reduceMotion, !pulse else { return }
+        withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+            pulse = true
         }
     }
 }

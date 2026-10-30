@@ -2447,6 +2447,7 @@ body {
     width: 80px;
     pointer-events: none;
     z-index: 1;
+    opacity: 0;
     transition: opacity .2s;
   }
   .daily-scroll-wrap::before {
@@ -2457,6 +2458,12 @@ body {
     right: 0;
     background: linear-gradient(to left, var(--bg, #0b0d12) 20%, transparent);
   }
+  .daily-scroll-wrap.has-left::before { opacity: 1; }
+  .daily-scroll-wrap.has-right::after { opacity: 1; }
+  /* Không phủ gradient lên poster đầu/cuối; nút điều hướng đã đủ báo hiệu
+     còn nội dung và mọi poster phải luôn nhìn rõ trọn vẹn. */
+  .daily-scroll-wrap::before,
+  .daily-scroll-wrap::after { display: none; }
 
   .daily-nav {
     display: flex;

@@ -3,7 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import path from "node:path";
-import { movieSubtitleFallbackUrl, movieSubtitleVtt } from "../movieSources";
+import { movieSubtitleFallbackUrl, movieSubtitleTrackVtt, movieSubtitleVtt } from "../movieSources";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -348,6 +348,22 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
   app.get("/api/movies/subtitle/:id.vtt", async (req, res) => {
     const id = Number.parseInt(String(req.params.id), 10);
     if (!Number.isFinite(id)) return res.status(400).send("Bad request");
+    const hasTrackQuery = req.query.track !== undefined || req.query.source !== undefined || req.query.quality !== undefined || req.query.url !== undefined;
+    if (hasTrackQuery) {
+      const trackIndex = Number.parseInt(String(req.query.track ?? "-1"), 10);
+      const qualityIndex = Number.parseInt(String(req.query.quality ?? "0"), 10);
+      const source = req.query.source === "quality" ? "quality" : "episode";
+      const requestedUrl = typeof req.query.url === "string" ? req.query.url : undefined;
+      if (!Number.isInteger(trackIndex) || !Number.isInteger(qualityIndex) || trackIndex < -1 || qualityIndex < 0) {
+        return res.status(400).send("Bad request");
+      }
+      const trackVtt = await movieSubtitleTrackVtt(id, source, trackIndex, qualityIndex, requestedUrl);
+      if (!trackVtt) return res.status(404).send("Not found");
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.send(trackVtt);
+    }
     const vtt = await movieSubtitleVtt(id);
     if (!vtt) {
       // Máy chủ không tải/đổi được phụ đề: chuyển hướng để trình phát tự thử link gốc.
@@ -357,6 +373,23 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
     }
     res.setHeader("Content-Type", "text/vtt; charset=utf-8");
     res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.send(vtt);
+  });
+  // Alias tương thích với các bundle web đã phát hành trước đây.
+  app.get("/api/movies/subtitle-track/:id.vtt", async (req, res) => {
+    const id = Number.parseInt(String(req.params.id), 10);
+    const trackIndex = Number.parseInt(String(req.query.track ?? "-1"), 10);
+    const qualityIndex = Number.parseInt(String(req.query.quality ?? "0"), 10);
+    const source = req.query.source === "quality" ? "quality" : "episode";
+    const requestedUrl = typeof req.query.url === "string" ? req.query.url : undefined;
+    if (!Number.isFinite(id) || !Number.isInteger(trackIndex) || !Number.isInteger(qualityIndex) || trackIndex < -1 || qualityIndex < 0) {
+      return res.status(400).send("Bad request");
+    }
+    const vtt = await movieSubtitleTrackVtt(id, source, trackIndex, qualityIndex, requestedUrl);
+    if (!vtt) return res.status(404).send("Not found");
+    res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=300");
     return res.send(vtt);
   });
 
