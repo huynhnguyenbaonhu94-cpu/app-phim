@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, MessageCircle, Paperclip, Pause, Play, RefreshCw, Send, ShieldCheck, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertCircle, Maximize2, MessageCircle, Paperclip, Pause, Play, RefreshCw, Send, ShieldCheck, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Link } from "wouter";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { AuthDialog } from "@/components/AuthDialog";
@@ -28,12 +28,16 @@ function AdminChatAttachment({ url, mimeType }: { url: string; mimeType: string 
   const [attempt, setAttempt] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const viewerRef = useRef<HTMLElement>(null);
   const isVideo = mimeType?.startsWith("video/") ?? false;
   const source = attempt ? `${url}${url.includes("?") ? "&" : "?"}retry=${attempt}` : url;
+  useEffect(() => { setPreviewSize(null); }, [source]);
   useEffect(() => {
     if (!viewerOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setViewerOpen(false); };
@@ -53,26 +57,38 @@ function AdminChatAttachment({ url, mimeType }: { url: string; mimeType: string 
     if (video.paused) void video.play().catch(() => setFailed(true));
     else video.pause();
   }
+  function toggleMute() {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    setIsMuted(video.muted);
+  }
+  function toggleFullscreen() {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    if (document.fullscreenElement === viewer) void document.exitFullscreen();
+    else if (viewer.requestFullscreen) void viewer.requestFullscreen();
+  }
   if (failed) return <button type="button" className="admin-chat-media-fallback" onClick={retry}><RefreshCw size={15} /> Không tải được tệp · thử lại</button>;
   return <>
-    {isVideo ? <button type="button" className="admin-chat-video-preview" onClick={() => { setViewerOpen(true); setIsPlaying(true); }} aria-label="Mở trình phát video">
-      <video key={source} muted preload="metadata" playsInline src={source} onError={() => setFailed(true)} />
+    {isVideo ? <button type="button" className={`admin-chat-video-preview${previewSize ? " has-dimensions" : ""}`} style={previewSize ? { width: `${previewSize.width}px`, aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined} onClick={() => { setViewerOpen(true); setIsPlaying(true); }} aria-label="Mở trình phát video">
+      <video key={source} muted preload="metadata" playsInline src={source} onLoadedMetadata={event => { const { videoWidth, videoHeight } = event.currentTarget; if (videoWidth > 0 && videoHeight > 0) { const scale = Math.min(320 / videoWidth, 320 / videoHeight, 1); setPreviewSize({ width: videoWidth * scale, height: videoHeight * scale }); } }} onError={() => setFailed(true)} />
       <span className="admin-chat-video-play"><Play size={21} fill="currentColor" /></span><span className="admin-chat-video-caption">Mở video</span>
     </button> : <button type="button" className="admin-chat-image-preview" onClick={() => { setViewerOpen(true); setZoom(1); }} aria-label="Phóng to ảnh">
       <img key={source} loading="lazy" src={source} alt="Media từ cuộc trò chuyện" onError={() => setFailed(true)} />
     </button>}
     {viewerOpen && <div className="admin-chat-viewer-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeViewer(); }}>
-      <section className="admin-chat-viewer" role="dialog" aria-modal="true" aria-label={isVideo ? "Trình phát video trong tin nhắn" : "Ảnh trong tin nhắn"}>
+      <section ref={viewerRef} className="admin-chat-viewer" role="dialog" aria-modal="true" aria-label={isVideo ? "Trình phát video trong tin nhắn" : "Ảnh trong tin nhắn"}>
         <header className="admin-chat-viewer-head"><strong>{isVideo ? "Video trong tin nhắn" : "Ảnh trong tin nhắn"}</strong><button type="button" onClick={closeViewer} aria-label="Đóng"><X size={20} /></button></header>
         {isVideo ? <>
-          <div className="admin-chat-video-stage"><video ref={videoRef} key={source} src={source} autoPlay playsInline controls preload="metadata"
+          <div className="admin-chat-video-stage"><video ref={videoRef} key={source} src={source} autoPlay loop playsInline preload="metadata"
             onLoadedMetadata={event => { setDuration(event.currentTarget.duration || 0); }}
             onTimeUpdate={event => { setCurrentTime(event.currentTarget.currentTime); setDuration(event.currentTarget.duration || 0); }}
             onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onError={() => setFailed(true)} />
           </div>
           <div className="admin-chat-video-tools">
             <div className="admin-chat-video-seek"><span>{formatClock(currentTime)}</span><input aria-label="Thanh tiến trình video" type="range" min="0" max={Math.max(duration, 0.1)} step="0.1" value={Math.min(currentTime, duration || 0)} onChange={event => { const next = Number(event.target.value); setCurrentTime(next); if (videoRef.current) videoRef.current.currentTime = next; }} /><span>{formatClock(duration)}</span></div>
-            <div className="admin-chat-video-buttons"><button type="button" onClick={() => seekBy(-10)} aria-label="Tua lùi 10 giây">−10 giây</button><button type="button" className="is-primary" onClick={togglePlay} aria-label={isPlaying ? "Tạm dừng" : "Phát"}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button type="button" onClick={() => seekBy(10)} aria-label="Tua tới 10 giây">+10 giây</button></div>
+            <div className="admin-chat-video-buttons"><button type="button" onClick={() => seekBy(-10)} aria-label="Tua lùi 10 giây">−10 giây</button><button type="button" className="is-primary" onClick={togglePlay} aria-label={isPlaying ? "Tạm dừng" : "Phát"}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button type="button" onClick={() => seekBy(10)} aria-label="Tua tới 10 giây">+10 giây</button><button type="button" className="is-utility" onClick={toggleMute} aria-label={isMuted ? "Bật âm thanh" : "Tắt âm thanh"} title={isMuted ? "Bật âm thanh" : "Tắt âm thanh"}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button type="button" className="is-utility" onClick={toggleFullscreen} aria-label="Toàn màn hình" title="Toàn màn hình"><Maximize2 size={16} /></button></div>
           </div>
         </> : <>
           <div className="admin-chat-image-stage" onWheel={event => { event.preventDefault(); setZoom(value => Math.max(0.5, Math.min(4, value + (event.deltaY < 0 ? 0.15 : -0.15)))); }}><img key={source} src={source} alt="Ảnh cuộc trò chuyện" onError={() => setFailed(true)} style={{ transform: `scale(${zoom})` }} /></div>

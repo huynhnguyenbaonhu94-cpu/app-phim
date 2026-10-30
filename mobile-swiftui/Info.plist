@@ -26,6 +26,8 @@
     <string>1</string>
     <key>NSCameraUsageDescription</key>
     <string>Cinemora cần camera để quét mã QR đăng nhập trên thiết bị khác.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Cinemora cần truy cập ảnh hoặc video bạn chọn để gửi trong cuộc trò chuyện với quản trị viên.</string>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
