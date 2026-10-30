@@ -416,39 +416,37 @@ private struct SpecialChatMessageBubble: View {
     private var outgoing: Bool { !message.isFromAdmin }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if outgoing { Spacer(minLength: 34) }
-            VStack(alignment: .leading, spacing: 7) {
-                Text(message.isFromAdmin ? "QUẢN TRỊ VIÊN" : "BẠN")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .tracking(0.5)
-                    .foregroundStyle(outgoing ? Color.auroraAmber : Color.auroraMint)
-                if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
-                    SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
-                }
-                if let text = message.text, !text.isEmpty {
-                    Text(text)
-                        .font(.auroraBody(13))
-                        .foregroundStyle(.white)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(message.createdAt.chatTimeLabel)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .fixedSize()
+        VStack(alignment: .leading, spacing: 7) {
+            Text(message.isFromAdmin ? "QUẢN TRỊ VIÊN" : "BẠN")
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .tracking(0.5)
+                .foregroundStyle(outgoing ? Color.auroraAmber : Color.auroraMint)
+            if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
+                SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(outgoing ? Color.auroraViolet.opacity(0.29) : Color.auroraRaised.opacity(0.95), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 19, style: .continuous)
-                    .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.34) : Color.white.opacity(0.10), lineWidth: 0.8)
+            if let text = message.text, !text.isEmpty {
+                Text(text)
+                    .font(.auroraBody(13))
+                    .foregroundStyle(.white)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: maxBubbleWidth, alignment: .leading)
-            if !outgoing { Spacer(minLength: 34) }
+            Text(message.createdAt.chatTimeLabel)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.50))
+                .fixedSize()
         }
-        .frame(width: rowWidth, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(outgoing ? Color.auroraViolet.opacity(0.29) : Color.auroraRaised.opacity(0.95), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 19, style: .continuous)
+                .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.34) : Color.white.opacity(0.10), lineWidth: 0.8)
+        }
+        // First constrain the bubble itself; then place that bubble in an exact-width
+        // row. This does not depend on Spacer expansion inside a lazy scroll stack.
+        .frame(maxWidth: maxBubbleWidth, alignment: outgoing ? .trailing : .leading)
+        .frame(width: rowWidth, alignment: outgoing ? .trailing : .leading)
     }
 }
 
