@@ -5,6 +5,8 @@ struct RemoteAccountUser: Codable, Identifiable, Hashable {
     let name: String?
     let email: String?
     let role: String?
+    /// Đặc quyền do admin cấp riêng; không thay thế quyền quản trị viên.
+    let hasSpecialPrivileges: Bool
     /// Nhãn cũ do admin đặt, ví dụ "VIP".
     let badge: String?
     /// Danh sách nhãn mới, có thể là chữ, ảnh/GIF, màu và hiệu ứng.
@@ -24,7 +26,7 @@ struct RemoteAccountUser: Codable, Identifiable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, email, role, badge, badges, nameStyle, avatar, createdAt
+        case id, name, email, role, hasSpecialPrivileges, badge, badges, nameStyle, avatar, createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -33,6 +35,7 @@ struct RemoteAccountUser: Codable, Identifiable, Hashable {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         email = try container.decodeIfPresent(String.self, forKey: .email)
         role = try container.decodeIfPresent(String.self, forKey: .role)
+        hasSpecialPrivileges = try container.decodeIfPresent(Bool.self, forKey: .hasSpecialPrivileges) ?? false
         badge = try container.decodeIfPresent(String.self, forKey: .badge)
         if let decoded = try? container.decode(FlexibleBadges.self, forKey: .badges) {
             badges = decoded.badges

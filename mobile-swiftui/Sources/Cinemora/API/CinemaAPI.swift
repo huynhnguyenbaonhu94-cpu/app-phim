@@ -300,6 +300,50 @@ struct CinemaAPI {
     func accountFavorites() async throws -> [RemoteFavorite] { try await query("account.favorites", input: nil) }
     func accountHistory() async throws -> [RemoteHistory] { try await query("account.history", input: nil) }
 
+    // MARK: - Chat riêng tài khoản đặc quyền
+
+    func specialChatMessages(afterId: Int? = nil) async throws -> [RemoteSpecialChatMessage] {
+        var input: [String: Any]? = nil
+        if let afterId { input = ["afterId": afterId] }
+        return try await query("account.specialChatMessages", input: input)
+    }
+
+    func sendSpecialChatMessage(text: String?, attachmentId: Int?) async throws -> RemoteSpecialChatMessage {
+        var input: [String: Any] = [:]
+        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { input["text"] = text }
+        if let attachmentId { input["attachmentId"] = attachmentId }
+        return try await mutate("account.sendSpecialChatMessage", input: input)
+    }
+
+    func uploadSpecialChatMedia(data: Data, filename: String, mimeType: String) async throws -> RemoteSpecialChatMedia {
+        let input: [String: Any] = [
+            "base64": data.base64EncodedString(),
+            "filename": filename,
+            "mimeType": mimeType,
+        ]
+        return try await mutate("account.uploadSpecialChatMedia", input: input, timeoutInterval: 90)
+    }
+
+    /// Lấy tệp chat từ route bảo vệ; backend xác nhận quyền sở hữu trước khi
+    /// chuyển hướng ngắn hạn tới vùng lưu trữ media.
+    func specialChatMediaData(path: String) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: Self.baseURL)?.absoluteURL,
+              url.host?.lowercased() == Self.baseURL.host?.lowercased() else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 50)
+        request.httpShouldHandleCookies = true
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        if let cookie = Self.forwardedSessionCookie(for: Self.baseURL) {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        return data
+    }
+
     func addFavorite(movie: Movie) async throws {
         let _: SuccessResponse = try await mutate("account.addFavorite", input: movieSnapshot(movie))
     }
@@ -374,7 +418,7 @@ struct CinemaAPI {
         catch { throw APIError.decoding(error.localizedDescription) }
     }
 
-    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any], base: URL = CinemaAPI.baseURL) async throws -> T {
+    private func mutate<T: Decodable>(_ procedure: String, input: [String: Any], base: URL = CinemaAPI.baseURL, timeoutInterval: TimeInterval = 12) async throws -> T {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = "/api/trpc/\(procedure)"
         guard let url = components.url else { throw APIError.invalidURL }
@@ -385,7 +429,7 @@ struct CinemaAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(deviceId, forHTTPHeaderField: "X-Cinemora-Device-Id")
         request.setValue(deviceName, forHTTPHeaderField: "X-Cinemora-Device-Name")
-        request.timeoutInterval = 12
+        request.timeoutInterval = timeoutInterval
         let cookieHost = base == CinemaAPI.baseURL ? base : CinemaAPI.baseURL
         if let cookie = Self.forwardedSessionCookie(for: cookieHost) {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")

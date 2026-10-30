@@ -162,6 +162,41 @@ export async function ensureMovieRequestsCompatibility(db: ReturnType<typeof dri
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
 }
 
+/**
+ * Chat đặc quyền: luôn tự tạo/sửa được trên DB cPanel cũ, kể cả khi migration
+ * journal của deployment cũ không còn đồng bộ với source hiện tại.
+ */
+export async function ensureSpecialChatCompatibility(db: ReturnType<typeof drizzle>) {
+  const [userColumns] = await db.execute(sql`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'hasSpecialPrivileges'
+  `);
+  if (!Array.isArray(userColumns) || userColumns.length === 0) {
+    await db.execute(sql.raw("ALTER TABLE `users` ADD COLUMN `hasSpecialPrivileges` tinyint(1) NOT NULL DEFAULT 0"));
+    console.log("[Database] Added users.hasSpecialPrivileges compatibility column.");
+  }
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS special_chat_attachments (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    userId int NOT NULL,
+    storageKey varchar(500) NOT NULL UNIQUE,
+    originalFilename varchar(180) NOT NULL,
+    mimeType varchar(80) NOT NULL,
+    byteSize int NOT NULL,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX special_chat_attachments_user_created_idx (userId, createdAt)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS special_chat_messages (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    userId int NOT NULL,
+    sender enum('user','admin') NOT NULL,
+    text text NULL,
+    attachmentId int NULL,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX special_chat_messages_user_created_idx (userId, createdAt),
+    INDEX special_chat_messages_attachment_idx (attachmentId)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+}
+
 export async function initializeDatabase() {
   if (initialization) return initialization;
   initialization = (async () => {
@@ -183,6 +218,7 @@ export async function initializeDatabase() {
     await ensureCustomMoviesCompatibility(db);
     await ensureMovieRequestsCompatibility(db);
     await ensureUsersProfileCompatibility(db);
+    await ensureSpecialChatCompatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {
@@ -343,7 +379,7 @@ export async function updateLocalPassword(userId: number, passwordHash: string) 
   return true;
 }
 
-export async function updateLocalAccountByAdmin(input: { id: number; name?: string; email?: string; passwordHash?: string; role?: "user" | "admin" }) {
+export async function updateLocalAccountByAdmin(input: { id: number; name?: string; email?: string; passwordHash?: string; role?: "user" | "admin"; hasSpecialPrivileges?: boolean }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const updates: Record<string, unknown> = {};
@@ -355,6 +391,7 @@ export async function updateLocalAccountByAdmin(input: { id: number; name?: stri
   }
   if (input.passwordHash !== undefined) updates.passwordHash = input.passwordHash;
   if (input.role !== undefined) updates.role = input.role;
+  if (input.hasSpecialPrivileges !== undefined) updates.hasSpecialPrivileges = input.hasSpecialPrivileges;
   if (Object.keys(updates).length === 0) return getUserById(input.id);
   await db.update(users).set(updates).where(eq(users.id, input.id));
   return getUserById(input.id);
@@ -373,6 +410,8 @@ export type MovieCommentView = {
   createdAt: string;
   userName: string;
   userRole: string | null;
+  /** Quyền đặc biệt do admin cấp, độc lập với role admin/user. */
+  hasSpecialPrivileges: boolean;
   badge: string | null;
   /** Danh sách nhãn dạng JSON để app hiển thị nhiều nhãn cùng lúc. */
   badges: string | null;
@@ -392,6 +431,7 @@ type CommentProfile = {
   id: number;
   name: string | null;
   role: string | null;
+  hasSpecialPrivileges: boolean;
   badge: string | null;
   badges: string | null;
   nameStyle: string | null;
@@ -557,6 +597,7 @@ async function loadCommentProfiles(db: ReturnType<typeof drizzle>, userIds: numb
       id: users.id,
       name: users.name,
       role: users.role,
+      hasSpecialPrivileges: users.hasSpecialPrivileges,
       badge: users.badge,
       badges: users.badges,
       nameStyle: users.nameStyle,
@@ -569,6 +610,7 @@ async function loadCommentProfiles(db: ReturnType<typeof drizzle>, userIds: numb
       id: row.id,
       name: row.name,
       role: row.role ?? null,
+      hasSpecialPrivileges: Boolean(row.hasSpecialPrivileges),
       badge: row.badge ?? null,
       badges: row.badges ?? null,
       nameStyle: row.nameStyle ?? null,
@@ -602,6 +644,7 @@ function toCommentView(row: MovieCommentRow, profile: CommentProfile | undefined
     createdAt: createdAt.toISOString(),
     userName: profile?.name?.trim() || row.userName,
     userRole: profile?.role ?? row.userRole,
+    hasSpecialPrivileges: profile?.hasSpecialPrivileges ?? false,
     badge: profile?.badge ?? null,
     badges: profile?.badges ?? null,
     nameStyle: profile?.nameStyle ?? null,

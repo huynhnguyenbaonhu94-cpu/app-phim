@@ -14,6 +14,7 @@ import AdminMovieRequests from "./pages/AdminMovieRequests";
 import AdminMovies from "./pages/AdminMovies";
 import AdminMovieSources from "./pages/AdminMovieSources";
 import AdminCustomMovie from "./pages/AdminCustomMovie";
+import AdminSpecialChat from "./pages/AdminSpecialChat";
 
 function Router() {
   return <Switch>
@@ -22,6 +23,7 @@ function Router() {
     <Route path="/account" component={AccountPage} />
     <Route path="/admin/tv" component={AdminTvStreams} />
     <Route path="/admin/accounts" component={AdminAccounts} />
+    <Route path="/admin/special-chat" component={AdminSpecialChat} />
     <Route path="/admin/movie-requests" component={AdminMovieRequests} />
     <Route path="/admin/movies/custom/new" component={AdminCustomMovie} />
     <Route path="/admin/movies/custom/:id" component={AdminCustomMovie} />

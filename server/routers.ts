@@ -39,6 +39,7 @@ import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus 
 import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 import { commentRevision, publishAllComments, publishComments, waitForComments } from "./commentFeed";
 import { createMovieRequest, listAllMovieRequests, listMovieRequestsForUser, updateMovieRequest, MOVIE_REQUEST_STATUSES, type MovieRequestStatus } from "./movieRequests";
+import { listSpecialChatConversations, listSpecialChatMessages, sendSpecialChatMessage, uploadSpecialChatMedia } from "./specialChat";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -522,6 +523,34 @@ export const appRouter = router({
       enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
       return clearWatchHistory(ctx.user.id);
     }),
+    specialChatMessages: protectedProcedure.input(z.object({ afterId: z.number().int().positive().optional() }).optional()).query(async ({ ctx, input }) => {
+      if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
+      return listSpecialChatMessages(ctx.user.id, input?.afterId);
+    }),
+    sendSpecialChatMessage: protectedProcedure.input(z.object({ text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+      if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
+      enforceRateLimit(ctx.req, "account.specialChat.write", 30, 60_000, String(ctx.user.id));
+      try { return await sendSpecialChatMessage({ userId: ctx.user.id, sender: "user", text: input.text, attachmentId: input.attachmentId }); }
+      catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
+    }),
+    uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ ctx, input }) => {
+      if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
+      enforceRateLimit(ctx.req, "account.specialChat.upload", 10, 60_000, String(ctx.user.id));
+      try { return await uploadSpecialChatMedia({ userId: ctx.user.id, ...input }); }
+      catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
+    }),
+  }),
+  adminSpecialChat: router({
+    conversations: adminProcedure.query(() => listSpecialChatConversations()),
+    messages: adminProcedure.input(z.object({ userId: z.number().int().positive(), afterId: z.number().int().positive().optional() })).query(({ input }) => listSpecialChatMessages(input.userId, input.afterId, true)),
+    sendMessage: adminProcedure.input(z.object({ userId: z.number().int().positive(), text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional() })).mutation(async ({ input }) => {
+      try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, allowUnprivileged: true }); }
+      catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
+    }),
+    uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ input }) => {
+      try { return await uploadSpecialChatMedia({ ...input, allowUnprivileged: true }); }
+      catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
+    }),
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({
@@ -708,12 +737,17 @@ export const appRouter = router({
       }),
     devices: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => listAccountDevices(input.userId)),
     logoutAll: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(({ input }) => revokeAllSessions(input.userId)),
+    setSpecialPrivileges: adminProcedure.input(z.object({ userId: z.number().int().positive(), enabled: z.boolean() })).mutation(async ({ input }) => {
+      await updateLocalAccountByAdmin({ id: input.userId, hasSpecialPrivileges: input.enabled });
+      return { success: true, userId: input.userId, hasSpecialPrivileges: input.enabled } as const;
+    }),
     update: adminProcedure.input(z.object({
       id: z.number().int().positive(),
       name: z.string().trim().min(2).max(120).optional(),
       email: z.string().trim().email().max(255).optional(),
       password: z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(200).optional(),
       role: z.enum(["user", "admin"]).optional(),
+      hasSpecialPrivileges: z.boolean().optional(),
     })).mutation(async ({ input }) => {
       const { password, ...rest } = input;
       const updated = await updateLocalAccountByAdmin({ ...rest, ...(password ? { passwordHash: await hashPassword(password) } : {}) });

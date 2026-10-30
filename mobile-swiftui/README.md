@@ -45,3 +45,18 @@ Quy ước khi thêm màn hình mới:
 3. Mọi card dùng `.auroraCard(...)`, mọi control nổi trên video dùng `.auroraSmoke(...)`, mọi nút dùng `.buttonStyle(.auroraPress())`.
 4. Không dùng `Material`/`glassEffect`; hiệu ứng kính được thay bằng gradient bán trong suốt để render nhẹ và ổn định hơn.
 5. Mọi animation lấy từ `Motion` và luôn tôn trọng `accessibilityReduceMotion` (đã xử lý sẵn trong `auroraReveal`, `auroraShimmer`, `LivePulse`, `EqualizerBars`).
+
+
+## Đặc quyền tài khoản và biểu tượng ứng dụng
+
+Backend cấp cờ `hasSpecialPrivileges` riêng với quyền `admin`. Quản trị viên bật/tắt cờ này tại **/admin/accounts**. Sau khi deploy backend đã cập nhật, người dùng có đặc quyền sẽ thấy khu vực **Đặc quyền tài khoản** trong trang tài khoản, có thể chọn một trong ba alternate icon Cinemora hoặc chat riêng với admin. Icon được đổi bằng API iOS chính thức `UIApplication.setAlternateIconName`; khi đăng xuất hoặc chuyển sang tài khoản không có đặc quyền, app đặt lại icon gốc. iOS có thể hiển thị hộp thoại hệ thống xác nhận việc đổi icon.
+
+Tin nhắn được phân tách theo user ID; endpoint đọc media kiểm tra phiên đăng nhập và quyền sở hữu cuộc hội thoại. Ảnh tối đa 8 MB, video tối đa 32 MB và chat tự đồng bộ định kỳ khoảng 3 giây khi màn hình đang mở. Đây là cập nhật gần thời gian thực bằng polling, không phải WebSocket hay mã hoá đầu-cuối.
+
+Khi hệ thống phát hiện thiết bị ngoại tuyến, lớp chặn toàn màn hình xuất hiện và tự biến mất khi mạng hoạt động lại. Trang chi tiết dùng skeleton cinematic thay cho khối loading xám đơn giản.
+
+Cấu hình alternate app icon dùng build setting `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES` và tên các `.appiconset` trong `project.yml`. Apple xác nhận Xcode tạo metadata `CFBundleAlternateIcons` từ build setting; `setAlternateIconName(nil)` trả về icon chính. Tài liệu: [Configuring your app to use alternate app icons](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons) và [UIApplication.setAlternateIconName](https://developer.apple.com/documentation/uikit/uiapplication/setalternateiconname(_:completionhandler:)).
+
+## Codemagic simulator preview
+
+Để tạo simulator app và dùng nút **Quick Launch / Previewing apps in the browser**, dùng gói preview riêng. Gói này có `codemagic.yaml` ở thư mục gốc và workflow `cinemora-ios-simulator`; workflow build `.app` cho `iphonesimulator`, không ký IPA và không cần Apple Developer signing. Trong Codemagic chọn cấu hình từ `codemagic.yaml` (không chọn Workflow Editor), sau đó chạy workflow simulator. `.app` simulator chỉ dành cho preview simulator, không thể cài trực tiếp lên iPhone thật.

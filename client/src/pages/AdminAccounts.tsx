@@ -120,6 +120,7 @@ export default function AdminAccounts() {
   const accounts = trpc.adminAccounts.list.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: 10_000, retry: false });
   const devices = trpc.adminAccounts.devices.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: 10_000, retry: false });
   const logoutAll = trpc.adminAccounts.logoutAll.useMutation({ onSuccess: () => { accounts.refetch(); if (selectedUserId) devices.refetch(); } });
+  const setSpecialPrivileges = trpc.adminAccounts.setSpecialPrivileges.useMutation({ onSuccess: () => accounts.refetch() });
   const updateAccount = trpc.adminAccounts.update.useMutation({ onSuccess: async () => { setEditingUserId(null); setForm({ name: "", email: "", password: "", role: "user" }); await accounts.refetch(); } });
   const saveBadges = trpc.adminAccounts.setBadges.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu nhãn hiển thị."); await accounts.refetch(); } });
   const saveNameStyle = trpc.adminAccounts.setNameStyle.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu kiểu tên người dùng."); await accounts.refetch(); } });
@@ -175,7 +176,7 @@ export default function AdminAccounts() {
   }
 
   return <PageShell><main className="content-wrap inner-page admin-accounts-page">
-    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/movie-requests" className="text-link">Yêu cầu phim</Link> · <Link href="/admin/movies" className="text-link">Quản lý phim</Link> · Admin · cập nhật mỗi 10 giây</span></div>
+    <div className="page-topline"><Link href="/" className="back-link">← Trang chủ</Link><span className="result-note"><Link href="/admin/movie-requests" className="text-link">Yêu cầu phim</Link> · <Link href="/admin/movies" className="text-link">Quản lý phim</Link> · <Link href="/admin/special-chat" className="text-link">Chat đặc quyền</Link> · Admin · cập nhật mỗi 10 giây</span></div>
     <SectionHeading eyebrow="CINEMORA ADMIN" title="Quản lý tất cả tài khoản app" action={<button className="admin-tv-refresh" onClick={() => accounts.refetch()} disabled={accounts.isFetching}><RefreshCw size={15} /></button>} />
     <p className="admin-accounts-note">Dữ liệu tài khoản, số thiết bị, yêu thích và lịch sử được lấy trực tiếp từ database. Website vẫn giữ thư viện local riêng.</p>
     <section className="admin-account-list">
@@ -187,9 +188,10 @@ export default function AdminAccounts() {
         return <article className={`admin-account-card${selectedUserId === account.id ? " is-selected" : ""}`} key={account.id}>
         <div className="admin-account-main">
           <div className="admin-account-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : <span>{accountInitial(account.name)}</span>}</div>
-          <div className="admin-account-copy"><strong><NameText name={account.name || "Chưa đặt tên"} style={accountNameStyle} />{legacyBadges.map((badge) => <BadgePreview key={badge.id} badge={badge} />)}</strong><span>{account.email || "Không có email"} · ID #{account.id} · {account.role}</span><small>Đăng ký: {formatDate(account.createdAt)} · Đăng nhập gần nhất: {formatDate(account.lastSignedIn)}</small></div>
+          <div className="admin-account-copy"><strong><NameText name={account.name || "Chưa đặt tên"} style={accountNameStyle} />{legacyBadges.map((badge) => <BadgePreview key={badge.id} badge={badge} />)}</strong><span>{account.email || "Không có email"} · ID #{account.id} · {account.role}{account.hasSpecialPrivileges ? " · Đặc quyền" : ""}</span><small>Đăng ký: {formatDate(account.createdAt)} · Đăng nhập gần nhất: {formatDate(account.lastSignedIn)}</small></div>
           <div className="admin-account-stats"><b>{account.activeDeviceCount}/5</b><span>thiết bị</span><b>{account.favoriteCount}</b><span>yêu thích</span><b>{account.historyCount}</b><span>lịch sử</span></div>
           <button className="button button-ghost" onClick={() => setSelectedUserId(selectedUserId === account.id ? null : account.id)}><Smartphone size={14} /> Thiết bị</button>
+          <button className={`button ${account.hasSpecialPrivileges ? "button-danger" : "button-primary"}`} disabled={setSpecialPrivileges.isPending} onClick={() => setSpecialPrivileges.mutate({ userId: account.id, enabled: !account.hasSpecialPrivileges })}><ShieldCheck size={14} /> {account.hasSpecialPrivileges ? "Bỏ đặc quyền" : "Cấp đặc quyền"}</button>
           <button className="button button-ghost" onClick={() => editingUserId === account.id ? setEditingUserId(null) : beginEdit(account)}><Edit3 size={14} /> Sửa</button>
           <button className="button button-danger" disabled={logoutAll.isPending} onClick={() => { if (window.confirm(`Đăng xuất tất cả thiết bị của ${account.email || account.name}?`)) logoutAll.mutate({ userId: account.id }); }}><LogOut size={14} /> Logout all</button>
         </div>

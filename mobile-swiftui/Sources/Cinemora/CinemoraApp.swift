@@ -156,12 +156,6 @@ struct CinemoraTabShell: View {
             AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity)
                 .ignoresSafeArea()
 
-            if !connectivity.isConnected {
-                OfflineBanner()
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
             if showLaunchLoader {
                 LaunchLoader()
                     .transition(.opacity.combined(with: .scale(scale: 1.04)))
@@ -182,6 +176,13 @@ struct CinemoraTabShell: View {
                 .animation(Motion.sheet, value: keyboardVisible)
                 .opacity(showLaunchLoader ? 0 : 1)
                 .animation(Motion.enter, value: showLaunchLoader)
+        }
+        .overlay {
+            if !connectivity.isConnected {
+                NetworkUnavailableOverlay()
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
         .animation(.easeInOut(duration: 0.28), value: connectivity.isConnected)
         .task {
@@ -434,32 +435,103 @@ private struct AccountSessionWatcher: View {
     }
 }
 
-private struct OfflineBanner: View {
+struct NetworkUnavailableOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var rotating = false
+    @State private var halo = false
 
     var body: some View {
-        HStack(spacing: 11) {
-            ZStack {
-                Circle()
-                    .fill(Color.auroraAmber.opacity(0.2))
-                    .frame(width: 34, height: 34)
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.auroraAmber)
+        ZStack {
+            Color.auroraVoid.opacity(0.97).ignoresSafeArea()
+            RadialGradient(
+                colors: [Color.auroraAmber.opacity(0.14), Color.auroraViolet.opacity(0.07), .clear],
+                center: .center,
+                startRadius: 8,
+                endRadius: 300
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                ZStack {
+                    Circle()
+                        .fill(Color.auroraAmber.opacity(halo ? 0.04 : 0.12))
+                        .frame(width: 132, height: 132)
+                        .scaleEffect(halo && !reduceMotion ? 1.13 : 0.92)
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        .frame(width: 98, height: 98)
+                    Circle()
+                        .trim(from: 0.06, to: 0.34)
+                        .stroke(
+                            AngularGradient(colors: [.auroraAmber, .auroraPink, .auroraViolet], center: .center),
+                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                        )
+                        .frame(width: 98, height: 98)
+                        .rotationEffect(.degrees(rotating ? 360 : 0))
+                    Circle()
+                        .fill(Color.auroraRaised)
+                        .frame(width: 68, height: 68)
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 27, weight: .semibold))
+                        .foregroundStyle(Color.auroraAmber)
+                        .symbolEffect(.pulse, value: halo && !reduceMotion)
+                }
+
+                VStack(spacing: 9) {
+                    Text("KHÔNG CÓ KẾT NỐI MẠNG")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .tracking(2.1)
+                        .foregroundStyle(Color.auroraAmber)
+                    Text("Cinemora đang chờ mạng")
+                        .font(.auroraDisplay(23))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                    Text("Bạn chưa thể sử dụng app khi thiết bị ngoại tuyến. Hãy bật Wi‑Fi hoặc dữ liệu di động; Cinemora sẽ tự tiếp tục khi có kết nối.")
+                        .font(.auroraBody(12))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 330)
+                }
+
+                HStack(spacing: 8) {
+                    LivePulse(color: .auroraAmber, size: 6, animated: true)
+                    Text("Đang kiểm tra kết nối…")
+                        .font(.auroraLabel(10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Không có kết nối Internet")
-                    .font(.auroraLabel(12, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
-                    .font(.auroraBody(10))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 30)
+            .padding(.vertical, 40)
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
-        .auroraCard(cornerRadius: 19, tint: .auroraAmber, glow: true)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { }
+        .onAppear(perform: startAnimation)
+        .onChange(of: reduceMotion) { _, shouldReduce in
+            if shouldReduce {
+                rotating = false
+                halo = false
+            } else {
+                startAnimation()
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
+    }
+
+    private func startAnimation() {
+        guard !reduceMotion else { return }
+        if !rotating {
+            withAnimation(.linear(duration: 2.2).repeatForever(autoreverses: false)) {
+                rotating = true
+            }
+        }
+        if !halo {
+            withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+                halo = true
+            }
+        }
     }
 }

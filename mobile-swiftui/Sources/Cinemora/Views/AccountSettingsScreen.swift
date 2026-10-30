@@ -3,7 +3,9 @@ import SwiftUI
 
 struct AccountSettingsScreen: View {
     @Environment(CinemaStore.self) private var store
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
+    var offlineGuardEnabled = false
     @State private var isRegistering = false
     @State private var name = ""
     @State private var email = ""
@@ -14,6 +16,8 @@ struct AccountSettingsScreen: View {
     @State private var showQrLogin = false
     @State private var showQrScanner = false
     @State private var showQrApproval = false
+    @State private var showSpecialChat = false
+    @State private var showAppIconPicker = false
     @State private var scannedNonce: String?
     @State private var scannedDeviceName = "thiết bị mới"
     @State private var qrActionError: String?
@@ -86,6 +90,19 @@ struct AccountSettingsScreen: View {
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordSheet().environment(store)
         }
+        .sheet(isPresented: $showSpecialChat) {
+            NavigationStack {
+                SpecialAccountChatScreen()
+                    .environment(store)
+            }
+            .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showAppIconPicker) {
+            NavigationStack {
+                SpecialAppIconPickerScreen()
+            }
+            .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showQrScanner) {
             NavigationStack {
                 QRCodeScannerView(onCode: { code in
@@ -111,6 +128,13 @@ struct AccountSettingsScreen: View {
         .alert("QR login", isPresented: Binding(get: { qrActionError != nil }, set: { if !$0 { qrActionError = nil } })) {
             Button("Đóng", role: .cancel) { qrActionError = nil }
         } message: { Text(qrActionError ?? "") }
+        .overlay {
+            if offlineGuardEnabled && !connectivity.isConnected {
+                NetworkUnavailableOverlay()
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
+        }
     }
 
     // MARK: - Signed out
@@ -280,6 +304,7 @@ struct AccountSettingsScreen: View {
                     HStack(spacing: 6) {
                         StyledCommentName(name: user.displayName, style: user.nameStyle, isAdmin: user.role == "admin", isMine: true)
                         .font(.auroraLabel(18, weight: .black))
+                        if user.hasSpecialPrivileges { CinemoraVerifiedBadge(size: 16) }
                         CommentBadgeRow(badges: user.visibleBadges)
                     }
                     Text(user.email ?? "")
@@ -304,10 +329,41 @@ struct AccountSettingsScreen: View {
             infoCard(icon: "arrow.triangle.2.circlepath", title: "Đồng bộ cloud", detail: "Lịch sử và yêu thích được đồng bộ trên các thiết bị đã đăng nhập.")
                 .auroraReveal(2)
 
+            if user.hasSpecialPrivileges {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack(spacing: 9) {
+                        CinemoraVerifiedBadge(size: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("ĐẶC QUYỀN TÀI KHOẢN")
+                                .font(.system(size: 9, weight: .black, design: .rounded))
+                                .tracking(1.3)
+                                .foregroundStyle(Color.auroraSky)
+                            Text("Tài khoản đã được xác minh")
+                                .font(.auroraLabel(13, weight: .black))
+                                .foregroundStyle(.white)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    Text("Bạn có thể tuỳ chỉnh biểu tượng Cinemora và nhắn tin riêng với quản trị viên.")
+                        .font(.auroraBody(11))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    AuroraGhostButton(title: "Đổi biểu tượng ứng dụng", icon: "app.dashed", tint: .auroraSky) {
+                        showAppIconPicker = true
+                    }
+                    AuroraGhostButton(title: "Chat riêng với admin", icon: "message.fill", tint: .auroraViolet) {
+                        showSpecialChat = true
+                    }
+                }
+                .padding(16)
+                .auroraCard(cornerRadius: 24, tint: .auroraSky, fill: 0.65, glow: true)
+                .auroraReveal(3)
+            }
+
             AuroraGhostButton(title: "Quét QR để đăng nhập thiết bị khác", icon: "qrcode.viewfinder", tint: .auroraSky) {
                 showQrScanner = true
             }
-            .auroraReveal(3)
+            .auroraReveal(user.hasSpecialPrivileges ? 4 : 3)
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack {

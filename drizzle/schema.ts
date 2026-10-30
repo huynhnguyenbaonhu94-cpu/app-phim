@@ -8,6 +8,8 @@ export const users = mysqlTable("users", {
   passwordHash: text("passwordHash"),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  /** Quyền chat trực tiếp và đổi icon app; không thay thế role user/admin. */
+  hasSpecialPrivileges: boolean("hasSpecialPrivileges").default(false).notNull(),
   /** Ảnh đại diện dạng data URL base64 do app gửi lên. */
   avatar: mediumtext("avatar"),
   /** Nhãn tuỳ chỉnh do admin đặt, hiện cạnh tên khi bình luận, ví dụ "VIP". */
@@ -92,6 +94,30 @@ export const movieRequests = mysqlTable("movie_requests", {
 }, (table) => ({
   userCreatedIndex: index("movie_requests_user_created_idx").on(table.userId, table.createdAt),
   statusCreatedIndex: index("movie_requests_status_created_idx").on(table.status, table.createdAt),
+}));
+
+/** Tệp chat đặc quyền lưu trong Forge/S3, không lưu base64 trong DB. */
+export const specialChatAttachments = mysqlTable("special_chat_attachments", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  storageKey: varchar("storageKey", { length: 500 }).notNull().unique(),
+  originalFilename: varchar("originalFilename", { length: 180 }).notNull(),
+  mimeType: varchar("mimeType", { length: 80 }).notNull(),
+  byteSize: int("byteSize").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ userCreatedIndex: index("special_chat_attachments_user_created_idx").on(table.userId, table.createdAt) }));
+
+/** Một cuộc hội thoại riêng theo userId; sender chỉ là user hoặc admin. */
+export const specialChatMessages = mysqlTable("special_chat_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  sender: mysqlEnum("sender", ["user", "admin"]).notNull(),
+  text: text("text"),
+  attachmentId: int("attachmentId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userCreatedIndex: index("special_chat_messages_user_created_idx").on(table.userId, table.createdAt),
+  attachmentIndex: index("special_chat_messages_attachment_idx").on(table.attachmentId),
 }));
 
 export const qrLoginChallenges = mysqlTable("qr_login_challenges", {

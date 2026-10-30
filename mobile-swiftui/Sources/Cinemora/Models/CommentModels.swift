@@ -121,12 +121,14 @@ private struct NestedCommentAuthor: Decodable {
     let name: String?
     let role: String?
     let email: String?
+    let hasSpecialPrivileges: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, userId, user_id
         case name, userName, user_name, displayName, display_name
         case role, userRole, user_role
         case email
+        case hasSpecialPrivileges, has_special_privileges
     }
 
     init(from decoder: Decoder) throws {
@@ -135,6 +137,7 @@ private struct NestedCommentAuthor: Decodable {
         name = try firstValue(String.self, in: container, keys: [.name, .userName, .user_name, .displayName, .display_name])
         role = try firstValue(String.self, in: container, keys: [.role, .userRole, .user_role])
         email = try firstValue(String.self, in: container, keys: [.email])
+        hasSpecialPrivileges = try firstValue(Bool.self, in: container, keys: [.hasSpecialPrivileges, .has_special_privileges]) ?? false
     }
 }
 
@@ -154,6 +157,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
     let authorRole: String?
     let authorID: String?
     let authorEmail: String?
+    let hasSpecialPrivileges: Bool
     let createdAt: Date?
     /// Nhãn tuỳ chỉnh do admin đặt, ví dụ "VIP".
     let badge: String?
@@ -231,6 +235,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
         authorRole: String?,
         authorID: String?,
         authorEmail: String? = nil,
+        hasSpecialPrivileges: Bool = false,
         createdAt: Date?,
         badge: String? = nil,
         badges: [CommentBadge] = [],
@@ -250,6 +255,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
         self.authorRole = authorRole
         self.authorID = authorID
         self.authorEmail = authorEmail
+        self.hasSpecialPrivileges = hasSpecialPrivileges
         self.createdAt = createdAt
         self.badge = badge
         self.badges = badges
@@ -271,6 +277,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
         case authorRole, role, userRole, user_role
         case authorId, userId, user_id
         case authorEmail, userEmail, user_email, email
+        case hasSpecialPrivileges, has_special_privileges
         case createdAt, created_at, time, date, timestamp
         case isMine, mine, isOwner, is_owner
         case user, author_user, authorUser
@@ -293,6 +300,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
         try container.encodeIfPresent(authorRole, forKey: .authorRole)
         try container.encodeIfPresent(authorID, forKey: .authorId)
         try container.encodeIfPresent(authorEmail, forKey: .authorEmail)
+        try container.encode(hasSpecialPrivileges, forKey: .hasSpecialPrivileges)
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(badge, forKey: .badge)
         if !badges.isEmpty, let data = try? JSONEncoder().encode(badges), let json = String(data: data, encoding: .utf8) {
@@ -337,6 +345,7 @@ struct MovieComment: Identifiable, Hashable, Codable {
 
         let rawRole = try firstValue(String.self, in: container, keys: [.authorRole, .role, .userRole, .user_role])
         authorRole = rawRole ?? nested?.role
+        hasSpecialPrivileges = try firstValue(Bool.self, in: container, keys: [.hasSpecialPrivileges, .has_special_privileges]) ?? nested?.hasSpecialPrivileges ?? false
 
         let rawAuthorID = try firstValue(FlexibleID.self, in: container, keys: [.authorId, .userId, .user_id])
         authorID = rawAuthorID?.value ?? nested?.id?.value
@@ -484,12 +493,14 @@ struct CommentAuthor: Equatable {
     let name: String
     let role: String?
     let email: String?
+    let hasSpecialPrivileges: Bool
 
-    init(id: String?, name: String, role: String?, email: String?) {
+    init(id: String?, name: String, role: String?, email: String?, hasSpecialPrivileges: Bool = false) {
         self.id = id
         self.name = name
         self.role = role
         self.email = email
+        self.hasSpecialPrivileges = hasSpecialPrivileges
     }
 
     /// Dựng từ tài khoản đang đăng nhập.
@@ -498,6 +509,7 @@ struct CommentAuthor: Equatable {
         self.name = account.displayName
         self.role = account.role
         self.email = account.email
+        self.hasSpecialPrivileges = account.hasSpecialPrivileges
     }
 
     /// Bỏ dấu và viết thường để "Quản trị", "quan tri", "ADMIN" đều nhận ra nhau.

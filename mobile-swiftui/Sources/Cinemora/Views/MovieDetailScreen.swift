@@ -4,6 +4,7 @@ struct MovieDetailScreen: View {
     let slug: String
     private let autoPlayOnLoad: Bool
     private let onExitRelated: (() -> Void)?
+    private let offlineGuardEnabled: Bool
     @Environment(CinemaStore.self) private var store
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
@@ -16,10 +17,11 @@ struct MovieDetailScreen: View {
     @State private var showLoginPrompt = false
     @State private var showLogin = false
 
-    init(slug: String, autoPlayOnLoad: Bool = false, onExitRelated: (() -> Void)? = nil) {
+    init(slug: String, autoPlayOnLoad: Bool = false, onExitRelated: (() -> Void)? = nil, offlineGuardEnabled: Bool = false) {
         self.slug = slug
         self.autoPlayOnLoad = autoPlayOnLoad
         self.onExitRelated = onExitRelated
+        self.offlineGuardEnabled = offlineGuardEnabled
     }
 
     private var movie: Movie? { store.detail(for: slug) }
@@ -88,7 +90,7 @@ struct MovieDetailScreen: View {
             Text("Bạn cần đăng nhập để lưu phim vào danh sách yêu thích. Danh sách yêu thích được đồng bộ theo tài khoản của bạn.")
         }
         .sheet(isPresented: $showLogin) {
-            AccountSettingsScreen()
+            AccountSettingsScreen(offlineGuardEnabled: true)
                 .environment(store)
                 .preferredColorScheme(.dark)
         }
@@ -134,7 +136,8 @@ struct MovieDetailScreen: View {
                     MovieDetailScreen(
                         slug: relatedMovieRoute.slug,
                         autoPlayOnLoad: true,
-                        onExitRelated: { showPlayer = false }
+                        onExitRelated: { showPlayer = false },
+                        offlineGuardEnabled: true
                     )
                         .environment(store)
                         .preferredColorScheme(.dark)
@@ -151,6 +154,13 @@ struct MovieDetailScreen: View {
                 }
             }
             .id(relatedMovieRoute?.id ?? "cinemora-player-\(slug)")
+        }
+        .overlay {
+            if offlineGuardEnabled && !connectivity.isConnected {
+                NetworkUnavailableOverlay()
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
     }
 
@@ -198,25 +208,88 @@ struct MovieDetailScreen: View {
             }
             .padding(.bottom, 2)
 
-            ZStack(alignment: .bottomLeading) {
-                SkeletonBlock(cornerRadius: 30)
-                VStack(alignment: .leading, spacing: 11) {
-                    Spacer()
-                    SkeletonBlock(cornerRadius: 6)
-                        .frame(width: 68, height: 16)
-                    SkeletonBlock(cornerRadius: 7)
-                        .frame(width: width * 0.68, height: 28)
-                    SkeletonBlock(cornerRadius: 6)
-                        .frame(width: width * 0.46, height: 14)
-                    HStack(spacing: 8) {
-                        SkeletonBlock(cornerRadius: 12).frame(width: 52, height: 24)
-                        SkeletonBlock(cornerRadius: 12).frame(width: 76, height: 24)
-                        SkeletonBlock(cornerRadius: 12).frame(width: 66, height: 24)
+            ZStack {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color.auroraRaised, Color.auroraInk, Color.auroraViolet.opacity(0.40)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                Circle()
+                    .fill(RadialGradient(colors: [Color.auroraSky.opacity(0.26), .clear], center: .center, startRadius: 4, endRadius: width * 0.48))
+                    .frame(width: width * 0.92, height: width * 0.92)
+                    .offset(x: width * 0.34, y: -110)
+                AuroraShimmerOverlay()
+                    .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "sparkles.tv.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.auroraAccent)
+                        Text("CINEMORA")
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .tracking(2.2)
+                            .foregroundStyle(.white.opacity(0.82))
+                        Spacer()
+                        Text("ĐANG TẢI")
+                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .tracking(1.1)
+                            .foregroundStyle(Color.auroraAccent)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Color.auroraAccent.opacity(0.12), in: Capsule())
                     }
-                    SkeletonBlock(cornerRadius: 18).frame(width: 124, height: 44)
+
+                    Spacer(minLength: 20)
+
+                    HStack(spacing: 13) {
+                        DetailLoadingMark()
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("ĐANG CHUẨN BỊ PHIM")
+                                .font(.system(size: 8, weight: .black, design: .rounded))
+                                .tracking(1.1)
+                                .foregroundStyle(Color.auroraSky.opacity(0.95))
+                            Text("Đang tải thông tin")
+                                .font(.auroraLabel(12, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.9))
+                            Text("Một chút nữa thôi…")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                    }
+
+                    Spacer(minLength: 20)
+
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 66, height: 13)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: width * 0.68, height: 25)
+                        .padding(.top, 9)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: width * 0.46, height: 11)
+                        .padding(.top, 7)
+                    HStack(spacing: 8) {
+                        loadingPill(width: 52)
+                        loadingPill(width: 76)
+                        loadingPill(width: 66)
+                    }
+                    .padding(.top, 12)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.auroraAccent.opacity(0.72))
+                        .frame(width: 124, height: 42)
+                        .overlay {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 12, weight: .black))
+                                .foregroundStyle(Color.auroraVoid.opacity(0.7))
+                        }
+                        .padding(.top, 15)
                 }
                 .padding(22)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
             .frame(width: width, height: 430)
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
@@ -262,6 +335,10 @@ struct MovieDetailScreen: View {
 
     private func offlineState(retry: @escaping () -> Void) -> some View {
         OfflineDetailConnectionCard(compact: false, hasCachedMovie: false, retry: retry)
+    }
+
+    private func loadingPill(width: CGFloat) -> some View {
+        Capsule().fill(Color.white.opacity(0.10)).frame(width: width, height: 22)
     }
 
     // MARK: - Content
@@ -663,6 +740,45 @@ struct MovieDetailScreen: View {
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+        }
+    }
+}
+
+private struct DetailLoadingMark: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isRotating = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.12), lineWidth: 2)
+            Circle()
+                .trim(from: 0.04, to: 0.34)
+                .stroke(
+                    AngularGradient(colors: [.auroraSky, .auroraViolet, .auroraAccent], center: .center),
+                    style: StrokeStyle(lineWidth: 2.6, lineCap: .round)
+                )
+                .rotationEffect(.degrees(isRotating ? 360 : 0))
+            Circle()
+                .fill(Color.white.opacity(0.055))
+                .padding(8)
+            Image(systemName: "play.fill")
+                .font(.system(size: 15, weight: .black))
+                .foregroundStyle(Color.auroraAccent)
+                .offset(x: 1)
+        }
+        .frame(width: 54, height: 54)
+        .accessibilityHidden(true)
+        .onAppear(perform: startRotation)
+        .onChange(of: reduceMotion) { _, shouldReduce in
+            if shouldReduce { isRotating = false } else { startRotation() }
+        }
+    }
+
+    private func startRotation() {
+        guard !reduceMotion, !isRotating else { return }
+        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+            isRotating = true
         }
     }
 }

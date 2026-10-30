@@ -641,6 +641,7 @@ struct CinemaPlayerScreen: View {
     let onOpenRelated: ((Movie) -> Void)?
     @Environment(CinemaStore.self) private var store
     @Environment(DownloadManager.self) private var downloads
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var playback = PlaybackController()
@@ -870,13 +871,22 @@ struct CinemaPlayerScreen: View {
                         .transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)))
                         .zIndex(13)
                 }
+                if !connectivity.isConnected {
+                    NetworkUnavailableOverlay()
+                        .transition(.opacity)
+                        .zIndex(100)
+                }
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
                     .onChanged { value in
+                        guard connectivity.isConnected else { return }
                         handleAdjustmentDrag(value, width: proxy.size.width, height: proxy.size.height)
                     }
-                    .onEnded { _ in finishAdjustmentGesture() }
+                    .onEnded { _ in
+                        guard connectivity.isConnected else { return }
+                        finishAdjustmentGesture()
+                    }
             )
             .animation(Motion.sheet, value: picker != nil)
             .animation(.easeInOut(duration: 0.22), value: controlsVisible)
@@ -926,7 +936,8 @@ struct CinemaPlayerScreen: View {
             MovieDetailScreen(
                 slug: related.slug,
                 autoPlayOnLoad: true,
-                onExitRelated: { selectedRelatedMovie = nil }
+                onExitRelated: { selectedRelatedMovie = nil },
+                offlineGuardEnabled: true
             )
                 .environment(store)
                 .preferredColorScheme(.dark)

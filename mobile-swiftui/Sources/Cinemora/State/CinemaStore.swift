@@ -105,6 +105,7 @@ final class CinemaStore {
         clearLegacyLocalLibrary()
         if let data = localDefaults.data(forKey: accountUserCacheKey), let cached = try? decoder.decode(RemoteAccountUser.self, from: data) {
             accountUser = cached
+            CinemoraAppIconController.resetIfNotPrivileged(cached.hasSpecialPrivileges)
         }
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
@@ -433,6 +434,7 @@ final class CinemaStore {
 
     private func clearAccountState() {
         accountUser = nil
+        CinemoraAppIconController.resetIfNotPrivileged(false)
         localDefaults.removeObject(forKey: accountUserCacheKey)
         sessionMissCount = 0
         accountDevices = []
@@ -446,6 +448,7 @@ final class CinemaStore {
 
     private func setAccountUser(_ user: RemoteAccountUser?) {
         accountUser = user
+        CinemoraAppIconController.resetIfNotPrivileged(user?.hasSpecialPrivileges == true)
         if let user, let data = try? JSONEncoder().encode(user) {
             localDefaults.set(data, forKey: accountUserCacheKey)
         } else {

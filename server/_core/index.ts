@@ -14,6 +14,7 @@ import { serveStatic, setupVite } from "./vite";
 import { currentTvStreamsVersion, listTvStreams, refreshAllTvStreamsHealth, subscribeTvStreams } from "../tvStreams";
 import { refreshAllTvVideosHealth } from "../tvVideos";
 import { initializeDatabase } from "../db";
+import { registerSpecialChatMediaRoute } from "../specialChat";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
 const tvProxyOrigin = "https://baothanhhoa.vn";
@@ -196,6 +197,7 @@ async function startServer() {
     next();
   });
   registerStorageProxy(app);
+  registerSpecialChatMediaRoute(app);
   registerOAuthRoutes(app);
   app.get("/api/cinema/image/:token", async (req, res) => {
     const source = getImageSource(req.params.token);

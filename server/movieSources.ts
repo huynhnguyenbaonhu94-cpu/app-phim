@@ -19,6 +19,8 @@ export type MovieSourceSubtitleTrack = {
   language: string;
   subtitleUrl: string;
 };
+type StoredSubtitleTrack = MovieSourceSubtitleTrack & { subtitleVtt?: string };
+type StoredQuality = Omit<MovieSourceQuality, "subtitleTracks"> & { subtitleTracks: StoredSubtitleTrack[] };
 export type MovieSourceQuality = {
   label: string;
   streamUrl: string;
@@ -52,7 +54,7 @@ export type MovieSource = {
 const SUBTITLE_DIR = "uploads/movie-subs";
 
 /** Đọc JSON chất lượng đã lưu; dữ liệu hỏng thì coi như không có chất lượng. */
-function parseQualities(value: unknown): MovieSourceQuality[] {
+function parseQualities(value: unknown): StoredQuality[] {
   if (typeof value !== "string" || !value.trim()) return [];
   try {
     const parsed = JSON.parse(value);
@@ -67,8 +69,12 @@ function parseQualities(value: unknown): MovieSourceQuality[] {
         subtitleTracks: Array.isArray(item.subtitleTracks)
           ? item.subtitleTracks
               .filter((track: any) => track && typeof track.language === "string" && typeof track.subtitleUrl === "string" && track.subtitleUrl.trim())
-              .map((track: any) => ({ language: String(track.language).trim().slice(0, 40), subtitleUrl: String(track.subtitleUrl).trim().slice(0, 2000) }))
-              .filter((track: MovieSourceSubtitleTrack) => track.language && track.subtitleUrl)
+              .map((track: any) => ({
+                language: String(track.language).trim().slice(0, 40),
+                subtitleUrl: String(track.subtitleUrl).trim().slice(0, 2000),
+                subtitleVtt: typeof track.subtitleVtt === "string" && track.subtitleVtt.trim() ? track.subtitleVtt : undefined,
+              }))
+              .filter((track: StoredSubtitleTrack) => track.language && track.subtitleUrl)
           : [],
       }));
   } catch {
@@ -76,15 +82,19 @@ function parseQualities(value: unknown): MovieSourceQuality[] {
   }
 }
 
-function parseSubtitleTracks(value: unknown): MovieSourceSubtitleTrack[] {
+function parseSubtitleTracks(value: unknown): StoredSubtitleTrack[] {
   if (typeof value !== "string" || !value.trim()) return [];
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item: any) => item && typeof item.language === "string" && typeof item.subtitleUrl === "string" && item.subtitleUrl.trim())
-      .map((item: any) => ({ language: String(item.language).trim().slice(0, 40), subtitleUrl: String(item.subtitleUrl).trim().slice(0, 2000) }))
-      .filter((track: MovieSourceSubtitleTrack) => track.language && track.subtitleUrl);
+      .map((item: any) => ({
+        language: String(item.language).trim().slice(0, 40),
+        subtitleUrl: String(item.subtitleUrl).trim().slice(0, 2000),
+        subtitleVtt: typeof item.subtitleVtt === "string" && item.subtitleVtt.trim() ? item.subtitleVtt : undefined,
+      }))
+      .filter((track: StoredSubtitleTrack) => track.language && track.subtitleUrl);
   } catch {
     return [];
   }
@@ -115,9 +125,9 @@ async function resolveSubtitleUrl(input: { subtitleUrl?: string | null; subtitle
 }
 
 /** Lưu danh sách chất lượng của tập, kèm phụ đề riêng từng chất lượng. */
-async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> | undefined): Promise<MovieSourceSubtitleTrack[]> {
+async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleUrl?: string | null; subtitleVtt?: string | null }> | undefined): Promise<StoredSubtitleTrack[]> {
   if (!input || input.length === 0) return [];
-  const resolved: MovieSourceSubtitleTrack[] = [];
+  const resolved: StoredSubtitleTrack[] = [];
   for (const track of input) {
     const language = String(track.language ?? "").trim().slice(0, 40);
     if (!language) continue;
@@ -126,15 +136,18 @@ async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleU
     // uploads có bị thay thế khi cập nhật source trên cPanel hay không.
     const uploaded = track.subtitleVtt?.trim();
     let subtitleUrl: string | null;
+    let cachedVtt: string | undefined;
     if (uploaded) {
+      cachedVtt = toWebVTT(uploaded);
       const saved = await saveMovieSubtitle({ base64: Buffer.from(uploaded, "utf8").toString("base64"), filename: "track.vtt" });
       subtitleUrl = saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
     } else {
       const link = track.subtitleUrl?.trim();
       if (!link) continue;
       subtitleUrl = link.startsWith("uploads/") ? `/${link}` : link;
+      if (/^https?:\/\//i.test(link)) cachedVtt = (await fetchSubtitleAsVtt(link)) || undefined;
     }
-    if (subtitleUrl) resolved.push({ language, subtitleUrl });
+    if (subtitleUrl) resolved.push({ language, subtitleUrl, subtitleVtt: cachedVtt });
   }
   return resolved;
 }
@@ -159,6 +172,8 @@ async function resolveQualities(input: Array<{ label?: string; streamUrl: string
 function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpisode {
   const parsedQualities = parseQualities(row.qualities);
   const storedTracks = parseSubtitleTracks(row.subtitleTracks);
+  const publicTracks = (tracks: StoredSubtitleTrack[]): MovieSourceSubtitleTrack[] =>
+    tracks.map(({ language, subtitleUrl }) => ({ language, subtitleUrl }));
   // Bản cũ từng lưu subtitle cấp tập thành quality "Mặc định". Chuẩn hóa khi đọc
   // để giao diện không hiện quality giả và giữ dữ liệu cũ dùng được.
   const legacyDefault = parsedQualities.length === 1
@@ -174,10 +189,10 @@ function toEpisode(row: typeof movieSourceEpisodes.$inferSelect): MovieSourceEpi
     // link ngoài được máy chủ tải về và đổi sang WebVTT (AVPlayer chỉ đọc VTT).
     subtitleUrl: row.subtitleVtt || row.subtitleUrl ? `/api/movies/subtitle/${row.id}.vtt` : null,
     subtitleLabel: typeof row.subtitleLabel === "string" && row.subtitleLabel.trim() ? row.subtitleLabel.trim() : null,
-    subtitleTracks: storedTracks.length ? storedTracks : (legacyDefault ? parsedQualities[0].subtitleTracks : []),
+    subtitleTracks: storedTracks.length ? publicTracks(storedTracks) : (legacyDefault ? publicTracks(parsedQualities[0].subtitleTracks) : []),
     hasUploadedSubtitle: Boolean(row.subtitleVtt && row.subtitleVtt.length > 0),
     sortOrder: row.sortOrder,
-    qualities: legacyDefault ? [] : parsedQualities,
+    qualities: legacyDefault ? [] : parsedQualities.map((quality) => ({ ...quality, subtitleTracks: publicTracks(quality.subtitleTracks) })),
   };
 }
 
@@ -590,15 +605,19 @@ export async function movieSubtitleTrackVtt(
   const [row] = await db.select().from(movieSourceEpisodes).where(eq(movieSourceEpisodes.id, episodeId));
   if (!row) return null;
   if (source === "episode") {
-    const candidate = trackIndex === -1 ? row.subtitleUrl : parseSubtitleTracks(row.subtitleTracks)[trackIndex]?.subtitleUrl;
+    const storedTrack = trackIndex === -1 ? null : parseSubtitleTracks(row.subtitleTracks)[trackIndex];
+    const candidate = trackIndex === -1 ? row.subtitleUrl : storedTrack?.subtitleUrl;
     if (requestedUrl && candidate !== requestedUrl) return null;
     if (trackIndex === -1 && !requestedUrl && row.subtitleVtt) return row.subtitleVtt;
+    if (storedTrack?.subtitleVtt) return storedTrack.subtitleVtt;
     return subtitleTrackContent(candidate);
   }
   const quality = parseQualities(row.qualities)[qualityIndex];
   if (!quality) return null;
-  const candidate = trackIndex === -1 ? quality.subtitleUrl : quality.subtitleTracks[trackIndex]?.subtitleUrl;
+  const storedTrack = trackIndex === -1 ? null : quality.subtitleTracks[trackIndex];
+  const candidate = trackIndex === -1 ? quality.subtitleUrl : storedTrack?.subtitleUrl;
   if (requestedUrl && candidate !== requestedUrl) return null;
+  if (storedTrack?.subtitleVtt) return storedTrack.subtitleVtt;
   return subtitleTrackContent(candidate);
 }
 

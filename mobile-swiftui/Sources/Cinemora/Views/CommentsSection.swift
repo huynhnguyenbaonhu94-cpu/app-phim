@@ -69,7 +69,7 @@ struct CommentsSection: View {
             Text("Bạn cần đăng nhập để bình luận và trả lời bình luận của người khác.")
         }
         .sheet(isPresented: $showLogin) {
-            AccountSettingsScreen()
+            AccountSettingsScreen(offlineGuardEnabled: true)
                 .environment(store)
                 .preferredColorScheme(.dark)
         }
@@ -355,6 +355,7 @@ struct CommentsSection: View {
 
                 HStack(spacing: 6) {
                     nameLabel(comment)
+                    if comment.hasSpecialPrivileges { CinemoraVerifiedBadge(size: 13) }
                     CommentBadgeRow(badges: comment.visibleBadges)
                     if comment.isAdmin { AdminBadge() }
                     if comment.isMine && !comment.isAdmin {
