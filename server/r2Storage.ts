@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getDb } from "./db";
 import { r2Settings } from "../drizzle/schema";
@@ -162,6 +162,47 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
+/** Old chat records stored the unhashed key even though storagePut wrote the suffixed key. */
+function legacyChatKeyPattern(key: string) {
+  if (!key.startsWith("special-chat/")) return null;
+  const extension = path.extname(key);
+  if (!extension) return null;
+  const stem = key.slice(0, -extension.length);
+  if (/_([a-f0-9]{8})$/i.test(path.basename(stem))) return null;
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return {
+    prefix: `${stem}_`,
+    filenamePattern: new RegExp(`^${escape(path.basename(stem))}_[a-f0-9]{8}${escape(extension)}$`, "i"),
+  };
+}
+
+async function findLegacyLocalChatFile(key: string): Promise<string | null> {
+  const pattern = legacyChatKeyPattern(key);
+  if (!pattern) return null;
+  const directory = path.dirname(localPath(key));
+  try {
+    const entries = await readdir(directory);
+    const matches = entries.filter((entry) => pattern.filenamePattern.test(entry));
+    return matches.length === 1 ? path.join(directory, matches[0]) : null;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function findLegacyR2ChatKey(config: R2Config, key: string): Promise<string | null> {
+  const pattern = legacyChatKeyPattern(key);
+  if (!pattern) return null;
+  try {
+    const result = await clientFor(config).send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: pattern.prefix, MaxKeys: 25 }));
+    const matches = (result.Contents ?? []).flatMap((item) => item.Key && pattern.filenamePattern.test(path.basename(item.Key)) ? [item.Key] : []);
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    // Listing permission may not be enabled; current uploads use the exact saved key and do not need this fallback.
+    return null;
+  }
+}
+
 function localPath(key: string): string {
   const normalized = normalizeKey(key);
   const candidate = path.resolve(LOCAL_ROOT, normalized);
@@ -207,14 +248,34 @@ export async function storagePutPublic(relKey: string, data: Buffer | Uint8Array
 export async function storageRead(relKey: string): Promise<Buffer> {
   const key = normalizeKey(relKey);
   const config = await resolveConfig();
-  if (!config) return readFile(localPath(key));
+  if (!config) {
+    try { return await readFile(localPath(key)); }
+    catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
+      const legacyFile = await findLegacyLocalChatFile(key);
+      if (legacyFile) return readFile(legacyFile);
+      throw error;
+    }
+  }
   try {
     const response = await clientFor(config).send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
     if (!response.Body) throw new Error("Storage trả về object rỗng.");
     return Buffer.from(await response.Body.transformToByteArray());
   } catch (remoteError) {
+    const legacyKey = await findLegacyR2ChatKey(config, key);
+    if (legacyKey) {
+      try {
+        const response = await clientFor(config).send(new GetObjectCommand({ Bucket: config.bucket, Key: legacyKey }));
+        if (response.Body) return Buffer.from(await response.Body.transformToByteArray());
+      } catch { /* Continue to the protected local fallback. */ }
+    }
     // Files uploaded while R2 was not configured remain readable after migration.
-    try { return await readFile(localPath(key)); } catch { throw remoteError; }
+    try { return await readFile(localPath(key)); }
+    catch {
+      const legacyFile = await findLegacyLocalChatFile(key);
+      if (legacyFile) return readFile(legacyFile);
+      throw remoteError;
+    }
   }
 }
 
@@ -233,17 +294,27 @@ export async function storageGetSignedUrl(relKey: string): Promise<string | null
   const key = normalizeKey(relKey);
   const config = await resolveConfig();
   if (!config) return null;
+  let actualKey = key;
   try {
     await clientFor(config).send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }));
   } catch (remoteError) {
-    try {
-      await readFile(localPath(key));
-      return null;
-    } catch {
-      throw remoteError;
+    const legacyKey = await findLegacyR2ChatKey(config, key);
+    if (legacyKey) {
+      try {
+        await clientFor(config).send(new HeadObjectCommand({ Bucket: config.bucket, Key: legacyKey }));
+        actualKey = legacyKey;
+      } catch { /* Try local fallback below. */ }
+    }
+    if (actualKey === key) {
+      try { await readFile(localPath(key)); return null; }
+      catch {
+        const legacyFile = await findLegacyLocalChatFile(key);
+        if (legacyFile) return null;
+        throw remoteError;
+      }
     }
   }
-  return getSignedUrl(clientFor(config), new GetObjectCommand({ Bucket: config.bucket, Key: key, ResponseCacheControl: "private, no-store" }), { expiresIn: 300 });
+  return getSignedUrl(clientFor(config), new GetObjectCommand({ Bucket: config.bucket, Key: actualKey, ResponseCacheControl: "private, no-store" }), { expiresIn: 300 });
 }
 
 export async function testR2Connection(): Promise<{ ok: true; backend: "r2"; key: string; bytes: number }> {

@@ -535,7 +535,7 @@ export const appRouter = router({
       try { return await sendSpecialChatMessage({ userId: ctx.user.id, sender: "user", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
-    uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ ctx, input }) => {
+    uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ ctx, input }) => {
       if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
       enforceRateLimit(ctx.req, "account.specialChat.upload", 10, 60_000, String(ctx.user.id));
       try { return await uploadSpecialChatMedia({ userId: ctx.user.id, ...input }); }
@@ -549,7 +549,7 @@ export const appRouter = router({
       try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
-    uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ input }) => {
+    uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ input }) => {
       try { return await uploadSpecialChatMedia({ ...input, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
     }),

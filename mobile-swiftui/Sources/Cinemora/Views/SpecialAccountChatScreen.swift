@@ -20,6 +20,7 @@ struct SpecialAccountChatScreen: View {
     @State private var isUploading = false
     @State private var errorNote: String?
     @State private var actionErrorVisible = false
+    @State private var pendingMedia: PendingSpecialChatMedia?
     @State private var videoPlayback: SpecialChatVideoPlayback?
     @FocusState private var composerFocused: Bool
 
@@ -37,13 +38,25 @@ struct SpecialAccountChatScreen: View {
                 } else {
                     messageList
                 }
-                if let errorNote {
-                    Text(errorNote)
-                        .font(.auroraBody(10))
-                        .foregroundStyle(Color.auroraPink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 5)
+                if errorNote != nil || pendingMedia != nil {
+                    VStack(alignment: .leading, spacing: 7) {
+                        if let errorNote {
+                            Text(errorNote)
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraPink)
+                        }
+                        if pendingMedia != nil {
+                            Button { Task { await retryPendingMedia() } } label: {
+                                Label("Thử gửi lại tệp", systemImage: "arrow.clockwise")
+                                    .font(.auroraLabel(9, weight: .bold))
+                                    .foregroundStyle(Color.auroraAccent)
+                            }
+                            .disabled(isSending || isUploading)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 5)
                 }
                 composer
             }
@@ -61,6 +74,8 @@ struct SpecialAccountChatScreen: View {
             guard let account = store.accountUser, account.hasSpecialPrivileges else {
                 messages = []
                 loadedUserID = nil
+                pendingMedia = nil
+                draft = ""
                 isLoading = false
                 actionErrorVisible = false
                 errorNote = "Tài khoản chưa được cấp quyền sử dụng chat đặc biệt."
@@ -69,6 +84,8 @@ struct SpecialAccountChatScreen: View {
             if loadedUserID != account.id {
                 messages = []
                 loadedUserID = account.id
+                pendingMedia = nil
+                draft = ""
                 isLoading = true
                 actionErrorVisible = false
             }
@@ -198,7 +215,7 @@ struct SpecialAccountChatScreen: View {
                     .background(Color.auroraSky.opacity(0.10), in: Circle())
                     .overlay(Circle().strokeBorder(Color.auroraSky.opacity(0.20), lineWidth: 0.8))
             }
-            .disabled(isSending || isUploading || store.accountUser?.hasSpecialPrivileges != true)
+            .disabled(isSending || isUploading || pendingMedia != nil || store.accountUser?.hasSpecialPrivileges != true)
             .accessibilityLabel("Chọn ảnh hoặc video đính kèm")
 
             TextField("Nhắn tin cho admin…", text: $draft, axis: .vertical)
@@ -210,7 +227,7 @@ struct SpecialAccountChatScreen: View {
                 .padding(.vertical, 11)
                 .background(Color.auroraRaised.opacity(0.95), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
-                .disabled(isUploading || isSending)
+                .disabled(isUploading || isSending || pendingMedia != nil)
 
             Button { Task { await sendText() } } label: {
                 Image(systemName: isSending ? "hourglass" : "arrow.up")
@@ -232,7 +249,7 @@ struct SpecialAccountChatScreen: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending && store.accountUser?.hasSpecialPrivileges == true
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending && pendingMedia == nil && store.accountUser?.hasSpecialPrivileges == true
     }
 
     private var chatTaskKey: String {
@@ -262,7 +279,7 @@ struct SpecialAccountChatScreen: View {
     @MainActor
     private func sendText() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, !isUploading else { return }
+        guard !text.isEmpty, !isSending, !isUploading, pendingMedia == nil else { return }
         if pendingTextValue != text {
             pendingTextValue = text
             pendingTextRequestID = UUID().uuidString
@@ -289,7 +306,7 @@ struct SpecialAccountChatScreen: View {
     @MainActor
     private func sendPickedMedia(_ item: PhotosPickerItem) async {
         selectedMedia = nil
-        guard !isUploading, store.accountUser?.hasSpecialPrivileges == true else { return }
+        guard !isUploading, pendingMedia == nil, let ownerUserID = store.accountUser?.id, store.accountUser?.hasSpecialPrivileges == true else { return }
         isUploading = true
         actionErrorVisible = false
         errorNote = nil
@@ -301,11 +318,42 @@ struct SpecialAccountChatScreen: View {
             let contentType = item.supportedContentTypes.first
             let prepared = try prepareMedia(original, contentType: contentType)
             let uploaded = try await api.uploadSpecialChatMedia(data: prepared.data, filename: prepared.filename, mimeType: prepared.mimeType)
+            guard store.accountUser?.id == ownerUserID, store.accountUser?.hasSpecialPrivileges == true else {
+                actionErrorVisible = true
+                errorNote = "Tài khoản đã thay đổi trong lúc tải tệp; tệp chưa được gửi."
+                return
+            }
             let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = try await api.sendSpecialChatMessage(text: text.isEmpty ? nil : text, attachmentId: uploaded.attachmentId, clientRequestId: UUID().uuidString)
+            let pending = PendingSpecialChatMedia(attachmentId: uploaded.attachmentId, userID: ownerUserID, text: text.isEmpty ? nil : text, clientRequestID: UUID().uuidString)
+            pendingMedia = pending
+            let message = try await api.sendSpecialChatMessage(text: pending.text, attachmentId: pending.attachmentId, clientRequestId: pending.clientRequestID)
+            pendingMedia = nil
             draft = ""
             pendingTextRequestID = nil
             pendingTextValue = nil
+            append(message)
+        } catch {
+            actionErrorVisible = true
+            errorNote = friendlySpecialChatError(error, operation: .media)
+        }
+    }
+
+    @MainActor
+    private func retryPendingMedia() async {
+        guard let pending = pendingMedia, !isSending, !isUploading else { return }
+        guard pending.userID == store.accountUser?.id, store.accountUser?.hasSpecialPrivileges == true else {
+            pendingMedia = nil
+            errorNote = "Tài khoản đã thay đổi; hãy chọn lại tệp trong tài khoản được cấp quyền."
+            return
+        }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let message = try await api.sendSpecialChatMessage(text: pending.text, attachmentId: pending.attachmentId, clientRequestId: pending.clientRequestID)
+            pendingMedia = nil
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines) == (pending.text ?? "") { draft = "" }
+            actionErrorVisible = false
+            errorNote = nil
             append(message)
         } catch {
             actionErrorVisible = true
@@ -392,6 +440,7 @@ private struct SpecialChatMediaPreview: View {
     @State private var image: UIImage?
     @State private var isLoading = false
     @State private var error = false
+    @State private var retryToken = 0
 
     private var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
 
@@ -428,19 +477,29 @@ private struct SpecialChatMediaPreview: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .accessibilityLabel("Ảnh được gửi trong chat")
             } else {
-                HStack(spacing: 8) {
-                    if isLoading { ProgressView().tint(.auroraSky) }
-                    else { Image(systemName: error ? "photo.badge.exclamationmark" : "photo.fill").foregroundStyle(Color.auroraSky) }
-                    Text(error ? "Không tải được ảnh đính kèm" : "Đang tải ảnh…")
-                        .font(.auroraBody(10))
-                        .foregroundStyle(Color.auroraTextSecondary)
+                Button {
+                    guard error, !isLoading else { return }
+                    error = false
+                    retryToken += 1
+                } label: {
+                    HStack(spacing: 8) {
+                        if isLoading { ProgressView().tint(.auroraSky) }
+                        else { Image(systemName: error ? "arrow.clockwise.circle" : "photo.fill").foregroundStyle(Color.auroraSky) }
+                        Text(error ? "Không tải được ảnh · chạm để thử lại" : "Đang tải ảnh…")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    }
+                    .frame(width: 230, height: 64)
+                    .contentShape(Rectangle())
                 }
-                .frame(width: 210, height: 64)
+                .buttonStyle(.plain)
+                .disabled(!error || isLoading)
             }
         }
-        .task(id: path) {
+        .task(id: "\(path)-\(retryToken)") {
             guard !isVideo, image == nil else { return }
             isLoading = true
+            error = false
             do {
                 let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
                 image = UIImage(data: data)
@@ -476,6 +535,13 @@ private struct SpecialChatMediaPreview: View {
 private struct SpecialChatVideoPlayback: Identifiable {
     let fileURL: URL
     var id: URL { fileURL }
+}
+
+private struct PendingSpecialChatMedia {
+    let attachmentId: Int
+    let userID: Int
+    let text: String?
+    let clientRequestID: String
 }
 
 private struct SpecialChatVideoPlayerSheet: View {

@@ -16,6 +16,19 @@ describe("R2-compatible storage adapter", () => {
     await expect(testR2Connection()).rejects.toThrow(/R2 chưa được cấu hình/);
   });
 
+  it("reads legacy special-chat objects saved with a hashed storage key", async () => {
+    if (await storageBackend() !== "local") return;
+    const legacyKey = `special-chat/legacy-${Date.now()}.jpg`;
+    const payload = Buffer.from("legacy private chat media");
+    const uploaded = await storagePut(legacyKey, payload, "image/jpeg");
+    try {
+      expect(uploaded.key).not.toBe(legacyKey);
+      expect(await storageRead(legacyKey)).toEqual(payload);
+    } finally {
+      await storageDelete(uploaded.key);
+    }
+  });
+
   it("stores public assets in a distinct public-assets namespace", async () => {
     const uploaded = await storagePutPublic(`movie-images/test-${Date.now()}.png`, Buffer.from("public image"), "image/png");
     expect(uploaded.backend).toBe("local");

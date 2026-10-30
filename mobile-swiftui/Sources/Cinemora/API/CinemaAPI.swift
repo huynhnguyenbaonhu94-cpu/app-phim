@@ -335,14 +335,48 @@ struct CinemaAPI {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 50)
         request.httpShouldHandleCookies = true
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        request.setValue("image/*, video/*, application/octet-stream", forHTTPHeaderField: "Accept")
         if let cookie = Self.forwardedSessionCookie(for: Self.baseURL) {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
+        for attempt in 0...2 {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+                guard (200..<300).contains(http.statusCode) else {
+                    if attempt < 2, http.statusCode >= 500 {
+                        try await Task.sleep(for: .milliseconds(350 * (attempt + 1)))
+                        continue
+                    }
+                    throw APIError.http(http.statusCode)
+                }
+                let responseType = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
+                    .split(separator: ";", maxSplits: 1).first.map(String.init)?.lowercased() ?? ""
+                guard !data.isEmpty,
+                      responseType != "text/html",
+                      responseType != "application/json",
+                      responseType != "text/plain" else {
+                    throw APIError.invalidResponse
+                }
+                return data
+            } catch {
+                guard attempt < 2, Self.isRetryableMediaError(error) else { throw error }
+                try await Task.sleep(for: .milliseconds(350 * (attempt + 1)))
+            }
         }
-        return data
+        throw APIError.invalidResponse
+    }
+
+    private static func isRetryableMediaError(_ error: Error) -> Bool {
+        if let apiError = error as? APIError {
+            if case .http(let status) = apiError { return status >= 500 }
+            return false
+        }
+        if let urlError = error as? URLError {
+            return [.timedOut, .networkConnectionLost, .notConnectedToInternet,
+                    .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains(urlError.code)
+        }
+        return false
     }
 
     func addFavorite(movie: Movie) async throws {

@@ -4608,3 +4608,25 @@ select:-webkit-autofill {
 
 .admin-switch input:disabled + span { opacity: .42; cursor: not-allowed; }
 .admin-r2-schedule select:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Admin chat media feedback and responsive polish */
+.admin-chat-layout{align-items:stretch}
+.admin-chat-conversations{max-height:720px;overflow-y:auto}
+.admin-chat-thread{min-height:560px;min-height:min(74vh,820px)}
+.admin-chat-thread-head{position:sticky;top:0;z-index:1;background:#121519}
+.admin-chat-messages{min-height:0;max-height:calc(74vh - 150px);overscroll-behavior:contain}
+.admin-chat-attach{min-height:38px;border:1px solid rgba(255,255,255,.1);border-radius:9px;transition:color .18s,border-color .18s,background .18s}
+.admin-chat-attach:hover{border-color:rgba(210,243,107,.35);background:rgba(210,243,107,.05)}
+.admin-chat-attach.is-disabled{opacity:.55;cursor:wait}
+.admin-chat-media-state{display:flex;align-items:center;gap:9px;min-height:42px;padding:9px 14px;border-top:1px solid rgba(255,255,255,.07);color:#b9c7a8;background:rgba(210,243,107,.045);font-size:11px}
+.admin-chat-media-state>span{min-width:0;flex:1;overflow-wrap:anywhere}
+.admin-chat-media-state.has-error{color:#ffb6aa;background:rgba(255,92,73,.07)}
+.admin-chat-retry,.admin-chat-dismiss{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);border-radius:7px;color:#e6ebdf;background:rgba(255,255,255,.06);font:inherit;cursor:pointer}
+.admin-chat-retry{min-height:30px;padding:0 10px}
+.admin-chat-dismiss{width:28px;height:28px;padding:0}
+.admin-chat-retry:hover,.admin-chat-dismiss:hover{border-color:rgba(210,243,107,.45);color:var(--accent)}
+.admin-chat-retry:disabled{opacity:.5;cursor:wait}
+@media(max-width:900px){.admin-chat-thread{min-height:560px}.admin-chat-messages{max-height:58vh}}
+@media(max-width:560px){.admin-chat-thread-head{padding:13px}.admin-chat-messages{padding:12px;max-height:55vh}.admin-chat-media-state{align-items:flex-start;flex-wrap:wrap}.admin-chat-retry{margin-left:auto}.admin-chat-composer{padding:10px}}
+.admin-chat-media-fallback{display:flex;align-items:center;justify-content:center;gap:8px;min-width:190px;min-height:56px;padding:12px;border:1px solid rgba(255,150,125,.24);border-radius:12px;color:#ffc2b3;background:rgba(255,102,75,.07);font:inherit;font-size:11px;cursor:pointer}
+.admin-chat-media-fallback:hover{border-color:rgba(255,150,125,.5);background:rgba(255,102,75,.11)}

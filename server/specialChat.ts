@@ -82,16 +82,21 @@ async function attachmentForUser(attachmentId: number, userId: number) {
 
 export async function uploadSpecialChatMedia(input: { userId: number; base64: string; filename?: string; mimeType: string; allowUnprivileged?: boolean }) {
   await ensureUserCanChat(input.userId, input.allowUnprivileged);
+  const declaredMime = input.mimeType.trim().toLowerCase();
+  const declaredKind = declaredMime.startsWith("image/") ? SPECIAL_CHAT_MEDIA_RULES.image : declaredMime.startsWith("video/") ? SPECIAL_CHAT_MEDIA_RULES.video : null;
+  if (!declaredKind || !(declaredKind.mimes as readonly string[]).includes(declaredMime)) throw new Error("Chỉ chấp nhận ảnh JPG/PNG/WebP/GIF hoặc video MP4/MOV/WebM.");
+  const encoded = input.base64.replace(/^data:[^;,]+;base64,/i, "").replace(/\s+/g, "");
+  if (encoded.length > Math.ceil(declaredKind.maxBytes / 3) * 4 + 4) throw new Error(`Tệp quá lớn (tối đa ${Math.round(declaredKind.maxBytes / 1024 / 1024)}MB).`);
   const bytes = decodeBase64(input.base64);
   const mimeType = validateMedia(input.mimeType, bytes.byteLength);
   const extension = extensionForMime(mimeType);
   if (!extension) throw new Error("MIME không được hỗ trợ.");
   const filename = normalizeFilename(input.filename, mimeType);
   const storageKey = `special-chat/${input.userId}/${randomUUID()}.${extension}`;
-  await storagePut(storageKey, bytes, mimeType);
+  const stored = await storagePut(storageKey, bytes, mimeType);
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey, originalFilename: filename, mimeType, byteSize: bytes.byteLength }).$returningId();
+  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey: stored.key, originalFilename: filename, mimeType, byteSize: bytes.byteLength }).$returningId();
   const attachmentId = Number(result[0]?.id);
   if (!Number.isFinite(attachmentId) || attachmentId <= 0) throw new Error("Không tạo được attachment.");
   return { attachmentId, mimeType, byteSize: bytes.byteLength, mediaUrl: mediaUrl(attachmentId) };
@@ -204,7 +209,9 @@ export async function signedSpecialChatMediaUrl(attachment: { storageKey: string
 /** Media không public: mỗi request phải có session và được kiểm tra ownership. */
 export function registerSpecialChatMediaRoute(app: Express) {
   app.get("/api/special-chat/media/:id", async (req, res) => {
-    const id = Number.parseInt(String(req.params.id), 10);
+    const rawId = String(req.params.id);
+    if (!/^\d+$/.test(rawId)) return res.status(400).send("Bad attachment id");
+    const id = Number(rawId);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).send("Bad attachment id");
     const viewer = await authenticateLocalRequest(req);
     if (!viewer) return res.status(401).send("Unauthorized");
@@ -213,16 +220,50 @@ export function registerSpecialChatMediaRoute(app: Express) {
     try {
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Type", attachment.mimeType);
-      res.setHeader("Content-Disposition", `inline; filename="${attachment.originalFilename.replace(/[^a-zA-Z0-9._-]/g, "_")}"`);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename="${attachment.originalFilename.replace(/[^a-zA-Z0-9._-]/g, "_" )}"`);
       if (await storageBackend() === "local") {
-        return res.status(200).send(await storageRead(attachment.storageKey));
+        return sendPrivateMediaBytes(req.headers.range, await storageRead(attachment.storageKey), res);
       }
       const signedUrl = await signedSpecialChatMediaUrl(attachment);
-      if (!signedUrl) return res.status(200).send(await storageRead(attachment.storageKey));
+      if (!signedUrl) return sendPrivateMediaBytes(req.headers.range, await storageRead(attachment.storageKey), res);
       return res.redirect(307, signedUrl);
     } catch (error) {
       console.error("[SpecialChat] protected media failed:", error);
       return res.status(502).send("Media unavailable");
     }
   });
+}
+
+function sendPrivateMediaBytes(range: string | undefined, bytes: Buffer, res: import("express").Response) {
+  res.setHeader("Accept-Ranges", "bytes");
+  if (!range) return res.status(200).setHeader("Content-Length", bytes.length).send(bytes);
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match || (!match[1] && !match[2])) {
+    res.setHeader("Content-Range", `bytes */${bytes.length}`);
+    return res.status(416).end();
+  }
+  let start: number;
+  let end: number;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!suffixLength || !bytes.length) {
+      res.setHeader("Content-Range", `bytes */${bytes.length}`);
+      return res.status(416).end();
+    }
+    start = Math.max(0, bytes.length - suffixLength);
+    end = bytes.length - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : bytes.length - 1;
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= bytes.length || end < start) {
+    res.setHeader("Content-Range", `bytes */${bytes.length}`);
+    return res.status(416).end();
+  }
+  end = Math.min(end, bytes.length - 1);
+  const chunk = bytes.subarray(start, end + 1);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${bytes.length}`);
+  res.setHeader("Content-Length", chunk.length);
+  return res.status(206).send(chunk);
 }
