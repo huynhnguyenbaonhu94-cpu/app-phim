@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { getDb, getUserById } from "./db";
 import { specialChatAttachments, specialChatMessages, users } from "../drizzle/schema";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storageBackend, storageGetSignedUrl, storagePut, storageRead } from "./storage";
 import { authenticateLocalRequest } from "./localAuth";
 import type { Express } from "express";
 
@@ -91,8 +91,8 @@ export async function uploadSpecialChatMedia(input: { userId: number; base64: st
   await storagePut(storageKey, bytes, mimeType);
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey, originalFilename: filename, mimeType, byteSize: bytes.byteLength });
-  const attachmentId = Number((result as unknown as { insertId?: number }).insertId);
+  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey, originalFilename: filename, mimeType, byteSize: bytes.byteLength }).$returningId();
+  const attachmentId = Number(result[0]?.id);
   if (!Number.isFinite(attachmentId) || attachmentId <= 0) throw new Error("Không tạo được attachment.");
   return { attachmentId, mimeType, byteSize: bytes.byteLength, mediaUrl: mediaUrl(attachmentId) };
 }
@@ -120,7 +120,7 @@ export async function listSpecialChatMessages(userId: number, afterId?: number, 
     .where(and(...conditions)).orderBy(asc(specialChatMessages.id)).limit(MAX_MESSAGES);
   return mapMessages(rows);
 }
-export async function sendSpecialChatMessage(input: { userId: number; sender: Sender; text?: string | null; attachmentId?: number | null; allowUnprivileged?: boolean }) {
+export async function sendSpecialChatMessage(input: { userId: number; sender: Sender; text?: string | null; attachmentId?: number | null; clientRequestId?: string | null; allowUnprivileged?: boolean }) {
   await ensureUserCanChat(input.userId, input.allowUnprivileged);
   const text = input.text?.trim() || null;
   const attachmentId = input.attachmentId ?? null;
@@ -132,12 +132,34 @@ export async function sendSpecialChatMessage(input: { userId: number; sender: Se
   }
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const result = await db.insert(specialChatMessages).values({ userId: input.userId, sender: input.sender, text, attachmentId });
-  const id = Number((result as unknown as { insertId?: number }).insertId);
-  if (!Number.isFinite(id) || id <= 0) throw new Error("Không tạo được tin nhắn.");
-  const rows = await db.select({ message: specialChatMessages, attachment: specialChatAttachments }).from(specialChatMessages)
+  const clientRequestId = input.clientRequestId?.trim() || randomUUID();
+  const existing = await db.select({ message: specialChatMessages, attachment: specialChatAttachments })
+    .from(specialChatMessages)
     .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
-    .where(eq(specialChatMessages.id, id)).limit(1);
+    .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId)))
+    .limit(1);
+  if (existing[0]) return (await mapMessages(existing))[0];
+  let id = 0;
+  try {
+    const result = await db.insert(specialChatMessages).values({ userId: input.userId, sender: input.sender, text, attachmentId, clientRequestId }).$returningId();
+    id = Number(result[0]?.id);
+  } catch (error) {
+    // Concurrent retries can hit the unique request key after the first insert committed.
+    const existing = await db.select({ message: specialChatMessages, attachment: specialChatAttachments })
+      .from(specialChatMessages)
+      .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
+      .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId)))
+      .limit(1);
+    if (existing[0]) return (await mapMessages(existing))[0];
+    throw error;
+  }
+  const rows = Number.isSafeInteger(id) && id > 0
+    ? await db.select({ message: specialChatMessages, attachment: specialChatAttachments }).from(specialChatMessages)
+      .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
+      .where(eq(specialChatMessages.id, id)).limit(1)
+    : await db.select({ message: specialChatMessages, attachment: specialChatAttachments }).from(specialChatMessages)
+      .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
+      .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId))).limit(1);
   const mapped = await mapMessages(rows);
   if (!mapped[0]) throw new Error("Không đọc lại được tin nhắn.");
   return mapped[0];
@@ -189,10 +211,14 @@ export function registerSpecialChatMediaRoute(app: Express) {
     const attachment = await getSpecialChatAttachmentForAccess(id, viewer);
     if (!attachment) return res.status(404).send("Not found");
     try {
-      const signedUrl = await signedSpecialChatMediaUrl(attachment);
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Type", attachment.mimeType);
       res.setHeader("Content-Disposition", `inline; filename="${attachment.originalFilename.replace(/[^a-zA-Z0-9._-]/g, "_")}"`);
+      if (await storageBackend() === "local") {
+        return res.status(200).send(await storageRead(attachment.storageKey));
+      }
+      const signedUrl = await signedSpecialChatMediaUrl(attachment);
+      if (!signedUrl) return res.status(200).send(await storageRead(attachment.storageKey));
       return res.redirect(307, signedUrl);
     } catch (error) {
       console.error("[SpecialChat] protected media failed:", error);

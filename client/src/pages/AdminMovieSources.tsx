@@ -87,7 +87,7 @@ function subtitleURLObject(value: string) {
 function isInternalSubtitleRoute(value: string | null | undefined) {
   if (!value) return false;
   const url = subtitleURLObject(value);
-  return Boolean(url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/uploads/movie-subs/")));
+  return Boolean(url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/api/public-storage/public-assets/movie-subs/") || url.pathname.startsWith("/uploads/movie-subs/")));
 }
 
 function displaySubtitleURL(value: string | null | undefined) {
@@ -98,7 +98,7 @@ function displaySubtitleURL(value: string | null | undefined) {
 function storedSubtitleURL(value: string | null | undefined) {
   if (!value) return value || null;
   const url = subtitleURLObject(value);
-  return url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/uploads/movie-subs/")) ? `${url.pathname}${url.search}` : value;
+  return url && url.origin === window.location.origin && (url.pathname.startsWith("/api/movies/subtitle/") || url.pathname.startsWith("/api/public-storage/public-assets/movie-subs/") || url.pathname.startsWith("/uploads/movie-subs/")) ? `${url.pathname}${url.search}` : value;
 }
 
 function EpisodeForm({ initial, onSubmit, onSubmitMany, existingEpisodes, onCancel, submitLabel }: EpisodeFormProps) {

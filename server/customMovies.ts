@@ -8,8 +8,6 @@
  * nên app đọc như phim bình thường: hiện trong danh sách, tìm kiếm, trang chi tiết,
  * có diễn viên kèm ảnh, và phát được ngay.
  */
-import fs from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -17,6 +15,7 @@ import { customMovies } from "../drizzle/schema";
 import type { Movie, MovieDetail } from "./cinema";
 import { registerStreamSource } from "./cinema";
 import { listMovieSources, listSourceNamesBySlug } from "./movieSources";
+import { storagePutPublic } from "./storage";
 
 export type CustomMovieTag = { name: string; slug: string };
 /** Đầu vào từ biểu mẫu quản trị: slug có thể thiếu, sẽ tự sinh từ tên. */
@@ -55,7 +54,6 @@ export type CustomMovieInput = {
 
 type CustomMovieRow = typeof customMovies.$inferSelect;
 
-const IMAGE_DIR = "uploads/movie-images";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -455,17 +453,16 @@ export async function searchCustomMovies(keyword: string): Promise<Movie[]> {
     .map(toApiMovie);
 }
 
-/** Ghi ảnh đã kiểm tra xuống thư mục uploads và trả về URL công khai. */
+/** Ghi ảnh đã kiểm tra vào R2 public-assets (hoặc private local fallback) và trả URL hiển thị công khai. */
 async function storeImageBuffer(buffer: Buffer): Promise<{ url: string; mimeType: string }> {
   if (buffer.byteLength === 0) throw new Error("Ảnh rỗng");
   if (buffer.byteLength > MAX_IMAGE_BYTES) throw new Error("Ảnh vượt quá 8MB");
   const kind = detectImageKind(buffer);
   if (!kind) throw new Error("Chỉ nhận ảnh JPEG, PNG hoặc WebP");
-  const target = path.resolve(process.cwd(), IMAGE_DIR);
-  await fs.mkdir(target, { recursive: true });
   const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${kind}`;
-  await fs.writeFile(path.join(target, name), buffer);
-  return { url: `/${IMAGE_DIR}/${name}`, mimeType: kind === "jpg" ? "image/jpeg" : `image/${kind}` };
+  const mimeType = kind === "jpg" ? "image/jpeg" : `image/${kind}`;
+  const stored = await storagePutPublic(`movie-images/${name}`, buffer, mimeType);
+  return { url: stored.url, mimeType };
 }
 
 /** Lưu ảnh poster/thumbnail/diễn viên admin tải lên, trả về URL công khai. */

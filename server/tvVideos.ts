@@ -12,7 +12,7 @@ function clean(value: string | null | undefined, max: number) { return value?.tr
 function validateSubtitleUrl(value: string | null | undefined) {
   if (!value?.trim()) return null;
   const trimmed = value.trim();
-  if (trimmed.startsWith("/uploads/tv-subtitles/") || trimmed.startsWith("uploads/tv-subtitles/")) return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (trimmed.startsWith("/uploads/tv-subtitles/") || trimmed.startsWith("uploads/tv-subtitles/") || trimmed.startsWith("/api/public-storage/public-assets/tv-subtitles/")) return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   try { const url = new URL(trimmed); if (!["http:", "https:"].includes(url.protocol)) throw new Error(); return url.toString(); } catch { throw new Error("URL phụ đề phải là URL http(s) hoặc file VTT đã upload."); }
 }
 function normalize(input: TvVideoPayload) {

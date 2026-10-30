@@ -195,6 +195,43 @@ export async function ensureSpecialChatCompatibility(db: ReturnType<typeof drizz
     INDEX special_chat_messages_user_created_idx (userId, createdAt),
     INDEX special_chat_messages_attachment_idx (attachmentId)
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  for (const statement of [
+    "ALTER TABLE `special_chat_messages` ADD COLUMN `clientRequestId` varchar(120) NULL",
+    "ALTER TABLE `special_chat_messages` ADD UNIQUE INDEX `special_chat_messages_user_request_unique` (`userId`, `clientRequestId`)",
+  ]) { try { await db.execute(sql.raw(statement)); } catch { /* cột/index đã có */ } }
+}
+
+/** R2 settings and backup history for deployments where the Drizzle journal is older. */
+export async function ensureR2Compatibility(db: ReturnType<typeof drizzle>) {
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS r2_settings (
+    id int NOT NULL PRIMARY KEY,
+    endpoint text NULL,
+    bucket varchar(255) NULL,
+    region varchar(80) NOT NULL DEFAULT 'auto',
+    accessKeyIdEncrypted mediumtext NULL,
+    secretAccessKeyEncrypted mediumtext NULL,
+    publicBaseUrl text NULL,
+    backupEnabled tinyint(1) NOT NULL DEFAULT 0,
+    backupFrequency varchar(20) NOT NULL DEFAULT 'daily',
+    scheduleHourUtc int NOT NULL DEFAULT 2,
+    createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS r2_backup_runs (
+    id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    status varchar(20) NOT NULL,
+    startedAt timestamp NOT NULL,
+    completedAt timestamp NULL,
+    backupKey varchar(500) NULL,
+    manifestKey varchar(500) NULL,
+    byteSize int NULL,
+    errorMessage text NULL,
+    INDEX r2_backup_runs_status_started_idx (status, startedAt)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  for (const statement of [
+    "ALTER TABLE `r2_settings` ADD COLUMN `backupFrequency` varchar(20) NOT NULL DEFAULT 'daily'",
+    "ALTER TABLE `r2_settings` ADD COLUMN `scheduleHourUtc` int NOT NULL DEFAULT 2",
+  ]) { try { await db.execute(sql.raw(statement)); } catch { /* cột đã có */ } }
 }
 
 export async function initializeDatabase() {
@@ -219,6 +256,7 @@ export async function initializeDatabase() {
     await ensureMovieRequestsCompatibility(db);
     await ensureUsersProfileCompatibility(db);
     await ensureSpecialChatCompatibility(db);
+    await ensureR2Compatibility(db);
     await ensureDefaultAdmin(db);
   })();
   try {

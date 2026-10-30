@@ -1,97 +1,84 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uploads via Forge Server presigned URL to S3 (PUT direct).
-// Downloads return /manus-storage/{key} paths served via 307 redirect.
+/**
+ * Storage facade used by chat, posters and generated media.
+ * The backend now prefers Cloudflare R2 (S3-compatible) and safely falls back
+ * to a private filesystem directory when R2 is not configured. No Forge token
+ * is required for uploads.
+ */
+import { storagePut as put, storagePutPublic as putPublic, storageRead, storageDelete, storageGetSignedUrl, storageBackend } from "./r2Storage";
+import type { Express } from "express";
+import { authenticateLocalRequest } from "./localAuth";
 
-import { ENV } from "./_core/env";
-
-function getForgeConfig() {
-  const forgeUrl = ENV.forgeApiUrl;
-  const forgeKey = ENV.forgeApiKey;
-
-  if (!forgeUrl || !forgeKey) {
-    throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY",
-    );
-  }
-
-  return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
-}
-
-function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
-}
-
-function appendHashSuffix(relKey: string): string {
-  const hash = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
-  const lastDot = relKey.lastIndexOf(".");
-  if (lastDot === -1) return `${relKey}_${hash}`;
-  return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
-}
+export { storageRead, storageDelete, storageGetSignedUrl, storageBackend };
 
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
-): Promise<{ key: string; url: string }> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+): Promise<{ key: string; url: string; backend: "r2" | "local" }> {
+  return put(relKey, data, contentType);
+}
 
-  // 1. Get presigned PUT URL from Forge
-  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
-  presignUrl.searchParams.set("path", key);
-
-  const presignResp = await fetch(presignUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` },
-  });
-
-  if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
-  }
-
-  const { url: s3Url } = (await presignResp.json()) as { url: string };
-  if (!s3Url) throw new Error("Forge returned empty presign URL");
-
-  // 2. PUT file directly to S3
-  const blob =
-    typeof data === "string"
-      ? new Blob([data], { type: contentType })
-      : new Blob([data as any], { type: contentType });
-
-  const uploadResp = await fetch(s3Url, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob,
-  });
-
-  if (!uploadResp.ok) {
-    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
-  }
-
-  return { key, url: `/manus-storage/${key}` };
+export async function storagePutPublic(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream",
+): Promise<{ key: string; url: string; backend: "r2" | "local" }> {
+  return putPublic(relKey, data, contentType);
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
-  const key = normalizeKey(relKey);
-  return { key, url: `/manus-storage/${key}` };
+  const backend = await storageBackend();
+  return {
+    key: relKey.replace(/^\/+/, ""),
+    url: backend === "local" ? `/api/private-storage/${encodeURIComponent(relKey.replace(/^\/+/, ""))}` : `/api/private-storage/${encodeURIComponent(relKey.replace(/^\/+/, ""))}`,
+  };
 }
 
-export async function storageGetSignedUrl(relKey: string): Promise<string> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = normalizeKey(relKey);
-
-  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
-  getUrl.searchParams.set("path", key);
-
-  const resp = await fetch(getUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` },
+/** Authenticated-only fallback for non-chat backend uploads (never a public static mount). */
+export function registerPrivateStorageRoute(app: Express) {
+  app.get("/api/private-storage/*", async (req, res) => {
+    const viewer = await authenticateLocalRequest(req);
+    if (!viewer) return res.status(401).send("Unauthorized");
+    const key = (req.params as Record<string, string>)[0];
+    if (!key) return res.status(400).send("Missing storage key");
+    const parts = key.split("/");
+    if (parts[0] === "special-chat") {
+      const ownerId = Number(parts[1]);
+      if (!Number.isInteger(ownerId) || ownerId <= 0 || (viewer.role !== "admin" && viewer.id !== ownerId)) return res.status(404).send("Not found");
+    } else if (parts[0] === "generated") {
+      if (viewer.role !== "admin") return res.status(404).send("Not found");
+    } else {
+      return res.status(404).send("Not found");
+    }
+    try {
+      res.setHeader("Cache-Control", "private, no-store");
+      const extension = key.split(".").pop()?.toLowerCase();
+      const contentType = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm" } as Record<string, string>)[extension || ""] || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.send(await storageRead(key));
+    } catch {
+      return res.status(404).send("Not found");
+    }
   });
+}
 
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
-  }
-
-  const { url } = (await resp.json()) as { url: string };
-  return url;
+/** Public movie/TV artwork only. Private chat and backup keys are never readable here. */
+export function registerPublicStorageRoute(app: Express) {
+  app.get("/api/public-storage/*", async (req, res) => {
+    const key = (req.params as Record<string, string>)[0];
+    if (!key || !key.startsWith("public-assets/")) return res.status(404).send("Not found");
+    const extension = key.split(".").pop()?.toLowerCase();
+    const contentType = ({
+      jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", vtt: "text/vtt; charset=utf-8",
+    } as Record<string, string>)[extension || ""] || "application/octet-stream";
+    try {
+      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.status(200).send(await storageRead(key));
+    } catch {
+      return res.status(404).send("Not found");
+    }
+  });
 }

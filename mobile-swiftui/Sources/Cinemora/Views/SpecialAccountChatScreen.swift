@@ -12,11 +12,14 @@ struct SpecialAccountChatScreen: View {
     @State private var messages: [RemoteSpecialChatMessage] = []
     @State private var loadedUserID: Int?
     @State private var draft = ""
+    @State private var pendingTextRequestID: String?
+    @State private var pendingTextValue: String?
     @State private var selectedMedia: PhotosPickerItem?
     @State private var isLoading = true
     @State private var isSending = false
     @State private var isUploading = false
     @State private var errorNote: String?
+    @State private var actionErrorVisible = false
     @State private var videoPlayback: SpecialChatVideoPlayback?
     @FocusState private var composerFocused: Bool
 
@@ -59,6 +62,7 @@ struct SpecialAccountChatScreen: View {
                 messages = []
                 loadedUserID = nil
                 isLoading = false
+                actionErrorVisible = false
                 errorNote = "Tài khoản chưa được cấp quyền sử dụng chat đặc biệt."
                 return
             }
@@ -66,6 +70,7 @@ struct SpecialAccountChatScreen: View {
                 messages = []
                 loadedUserID = account.id
                 isLoading = true
+                actionErrorVisible = false
             }
             await refreshMessages(initial: true)
             while !Task.isCancelled {
@@ -125,27 +130,32 @@ struct SpecialAccountChatScreen: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(messages) { message in
-                        SpecialChatMessageBubble(message: message) { fileURL in
-                            videoPlayback = SpecialChatVideoPlayback(fileURL: fileURL)
+            GeometryReader { geometry in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(messages) { message in
+                            SpecialChatMessageBubble(
+                                message: message,
+                                maxBubbleWidth: max(0, (geometry.size.width - 28) * 0.78)
+                            ) { fileURL in
+                                videoPlayback = SpecialChatVideoPlayback(fileURL: fileURL)
+                            }
+                            .id(message.id)
                         }
-                        .id(message.id)
+                        Color.clear.frame(height: 1).id("special-chat-bottom")
                     }
-                    Color.clear.frame(height: 1).id("special-chat-bottom")
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 15)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 15)
-            }
-            .scrollIndicators(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.count) { _, _ in
-                guard !reduceMotion else {
-                    proxy.scrollTo("special-chat-bottom", anchor: .bottom)
-                    return
+                .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: messages.count) { _, _ in
+                    guard !reduceMotion else {
+                        proxy.scrollTo("special-chat-bottom", anchor: .bottom)
+                        return
+                    }
+                    withAnimation(.easeOut(duration: 0.22)) { proxy.scrollTo("special-chat-bottom", anchor: .bottom) }
                 }
-                withAnimation(.easeOut(duration: 0.22)) { proxy.scrollTo("special-chat-bottom", anchor: .bottom) }
             }
         }
     }
@@ -200,7 +210,7 @@ struct SpecialAccountChatScreen: View {
                 .padding(.vertical, 11)
                 .background(Color.auroraRaised.opacity(0.95), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8))
-                .disabled(isUploading)
+                .disabled(isUploading || isSending)
 
             Button { Task { await sendText() } } label: {
                 Image(systemName: isSending ? "hourglass" : "arrow.up")
@@ -239,29 +249,41 @@ struct SpecialAccountChatScreen: View {
                 let known = Set(messages.map(\.id))
                 messages.append(contentsOf: incoming.filter { !known.contains($0.id) })
             }
-            errorNote = nil
+            if !actionErrorVisible { errorNote = nil }
             isLoading = false
         } catch {
             isLoading = false
-            errorNote = messages.isEmpty ? "Không tải được tin nhắn. Hãy thử lại khi mạng ổn định." : "Chưa đồng bộ được tin nhắn mới. Đang tiếp tục thử lại…"
+            if !actionErrorVisible {
+                errorNote = messages.isEmpty ? "Không tải được tin nhắn. Hãy thử lại khi mạng ổn định." : "Chưa đồng bộ được tin nhắn mới. Đang tiếp tục thử lại…"
+            }
         }
     }
 
     @MainActor
     private func sendText() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        guard !text.isEmpty, !isSending, !isUploading else { return }
+        if pendingTextValue != text {
+            pendingTextValue = text
+            pendingTextRequestID = UUID().uuidString
+        }
+        let requestID = pendingTextRequestID ?? UUID().uuidString
+        pendingTextRequestID = requestID
         isSending = true
+        actionErrorVisible = false
         errorNote = nil
+        defer { isSending = false }
         do {
-            let message = try await api.sendSpecialChatMessage(text: text, attachmentId: nil)
-            append(message)
+            let message = try await api.sendSpecialChatMessage(text: text, attachmentId: nil, clientRequestId: requestID)
             draft = ""
+            pendingTextRequestID = nil
+            pendingTextValue = nil
+            append(message)
             composerFocused = true
         } catch {
-            errorNote = error.localizedDescription
+            actionErrorVisible = true
+            errorNote = friendlySpecialChatError(error, operation: .text)
         }
-        isSending = false
     }
 
     @MainActor
@@ -269,6 +291,7 @@ struct SpecialAccountChatScreen: View {
         selectedMedia = nil
         guard !isUploading, store.accountUser?.hasSpecialPrivileges == true else { return }
         isUploading = true
+        actionErrorVisible = false
         errorNote = nil
         defer { isUploading = false }
         do {
@@ -279,11 +302,14 @@ struct SpecialAccountChatScreen: View {
             let prepared = try prepareMedia(original, contentType: contentType)
             let uploaded = try await api.uploadSpecialChatMedia(data: prepared.data, filename: prepared.filename, mimeType: prepared.mimeType)
             let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = try await api.sendSpecialChatMessage(text: text.isEmpty ? nil : text, attachmentId: uploaded.attachmentId)
-            append(message)
+            let message = try await api.sendSpecialChatMessage(text: text.isEmpty ? nil : text, attachmentId: uploaded.attachmentId, clientRequestId: UUID().uuidString)
             draft = ""
+            pendingTextRequestID = nil
+            pendingTextValue = nil
+            append(message)
         } catch {
-            errorNote = error.localizedDescription
+            actionErrorVisible = true
+            errorNote = friendlySpecialChatError(error, operation: .media)
         }
     }
 
@@ -320,12 +346,13 @@ struct SpecialAccountChatScreen: View {
 
 private struct SpecialChatMessageBubble: View {
     let message: RemoteSpecialChatMessage
+    let maxBubbleWidth: CGFloat
     let onPlayVideo: (URL) -> Void
     private var outgoing: Bool { !message.isFromAdmin }
 
     var body: some View {
-        HStack {
-            if outgoing { Spacer(minLength: 42) }
+        HStack(alignment: .bottom, spacing: 0) {
+            if outgoing { Spacer(minLength: 0) }
             VStack(alignment: .leading, spacing: 7) {
                 if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
                     SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, onPlayVideo: onPlayVideo)
@@ -340,7 +367,7 @@ private struct SpecialChatMessageBubble: View {
                 Text(message.createdAt.chatTimeLabel)
                     .font(.system(size: 8, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.50))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .fixedSize()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -349,8 +376,12 @@ private struct SpecialChatMessageBubble: View {
                 RoundedRectangle(cornerRadius: 19, style: .continuous)
                     .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.27) : Color.white.opacity(0.08), lineWidth: 0.8)
             }
-            if !outgoing { Spacer(minLength: 42) }
+            .frame(maxWidth: maxBubbleWidth, alignment: .leading)
+            if !outgoing { Spacer(minLength: 0) }
         }
+        .frame(maxWidth: .infinity, alignment: outgoing ? .trailing : .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(message.isFromAdmin ? "Quản trị viên" : "Bạn"): \(message.text ?? "Tệp đính kèm")")
     }
 }
 
@@ -476,6 +507,46 @@ private struct SpecialChatVideoPlayerSheet: View {
             try? FileManager.default.removeItem(at: fileURL)
         }
     }
+}
+
+private enum SpecialChatOperation {
+    case text
+    case media
+
+    var fallbackMessage: String {
+        switch self {
+        case .text: return "Không thể gửi tin nhắn lúc này. Vui lòng thử lại sau."
+        case .media: return "Không thể tải tệp lên lúc này. Vui lòng thử lại sau."
+        }
+    }
+}
+
+private func friendlySpecialChatError(_ error: Error, operation: SpecialChatOperation) -> String {
+    if let knownError = error as? SpecialChatClientError {
+        return knownError.localizedDescription
+    }
+
+    if let apiError = error as? APIError {
+        switch apiError {
+        case .rateLimited(let seconds):
+            return "Bạn thao tác quá nhanh. Vui lòng thử lại sau khoảng \(max(1, seconds)) giây."
+        case .http(let status) where status == 401 || status == 403:
+            return "Phiên đăng nhập không còn hợp lệ. Vui lòng đăng nhập lại rồi thử lại."
+        case .invalidURL, .invalidResponse, .decoding(_), .server(_), .http(_):
+            return operation.fallbackMessage
+        }
+    }
+
+    if let urlError = error as? URLError {
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .timedOut:
+            return "Kết nối không ổn định. Vui lòng kiểm tra mạng rồi thử lại."
+        default:
+            break
+        }
+    }
+
+    return operation.fallbackMessage
 }
 
 private enum SpecialChatClientError: LocalizedError {

@@ -1,9 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { ensureTvStreamsCompatibility, getDb } from "./db";
 import { tvStreams } from "../drizzle/schema";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { storagePutPublic } from "./storage";
 
 export type TvStreamPayload = {
   name: string;
@@ -50,7 +49,7 @@ export function validateStreamUrl(value: string) {
 export function validateOptionalUrl(value: string | null | undefined, label = "URL") {
   if (!value?.trim()) return null;
   const trimmed = value.trim();
-  if (trimmed.startsWith("/uploads/tv-posters/")) return trimmed.slice(0, 1000);
+  if (trimmed.startsWith("/uploads/tv-posters/") || trimmed.startsWith("/api/public-storage/public-assets/tv-posters/")) return trimmed.slice(0, 1000);
   if (trimmed.startsWith("uploads/tv-posters/")) return `/${trimmed}`.slice(0, 1000);
   try {
     const url = new URL(trimmed);
@@ -70,22 +69,16 @@ export async function saveTvSubtitle(input: { base64: string; mimeType: "text/vt
   const isVtt = /^WEBVTT(?:\s|$)/i.test(text);
   const isSrt = hasCueTiming && /\d{2}:\d{2}:\d{2},\d{3}\s+-->/.test(text);
   if (!hasCueTiming || (!isVtt && !isSrt)) throw new Error("File phụ đề phải là WebVTT (.vtt) hoặc SubRip (.srt) hợp lệ.");
-  const directory = path.resolve(process.cwd(), "uploads", "tv-subtitles");
-  await mkdir(directory, { recursive: true });
   const filename = `${randomUUID()}.vtt`;
-  await writeFile(path.join(directory, filename), bytes, { flag: "wx" });
-  return `/uploads/tv-subtitles/${filename}`;
+  return (await storagePutPublic(`tv-subtitles/${filename}`, bytes, "text/vtt")).url;
 }
 export async function saveTvPoster(input: { base64: string; mimeType: "image/jpeg" | "image/png" | "image/webp" }) {
   const raw = input.base64.includes(",") ? input.base64.split(",", 2)[1] : input.base64;
   const bytes = Buffer.from(raw, "base64");
   if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error("Ảnh poster phải nhỏ hơn 8MB.");
   const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
-  const directory = path.resolve(process.cwd(), "uploads", "tv-posters");
-  await mkdir(directory, { recursive: true });
   const filename = `${randomUUID()}.${extension}`;
-  await writeFile(path.join(directory, filename), bytes, { flag: "wx" });
-  return `/uploads/tv-posters/${filename}`;
+  return (await storagePutPublic(`tv-posters/${filename}`, bytes, input.mimeType)).url;
 }
 
 type ProbeResult = { status: "online" | "offline" | "unknown"; message: string };

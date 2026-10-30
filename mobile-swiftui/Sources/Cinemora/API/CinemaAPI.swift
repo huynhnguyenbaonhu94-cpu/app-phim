@@ -308,10 +308,11 @@ struct CinemaAPI {
         return try await query("account.specialChatMessages", input: input)
     }
 
-    func sendSpecialChatMessage(text: String?, attachmentId: Int?) async throws -> RemoteSpecialChatMessage {
+    func sendSpecialChatMessage(text: String?, attachmentId: Int?, clientRequestId: String? = nil) async throws -> RemoteSpecialChatMessage {
         var input: [String: Any] = [:]
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { input["text"] = text }
         if let attachmentId { input["attachmentId"] = attachmentId }
+        if let clientRequestId, !clientRequestId.isEmpty { input["clientRequestId"] = clientRequestId }
         return try await mutate("account.sendSpecialChatMessage", input: input)
     }
 

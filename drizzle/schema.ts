@@ -109,16 +109,46 @@ export const specialChatAttachments = mysqlTable("special_chat_attachments", {
 
 /** Một cuộc hội thoại riêng theo userId; sender chỉ là user hoặc admin. */
 export const specialChatMessages = mysqlTable("special_chat_messages", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  sender: mysqlEnum("sender", ["user", "admin"]).notNull(),
-  text: text("text"),
-  attachmentId: int("attachmentId"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
+	id: int("id").autoincrement().primaryKey(),
+	userId: int("userId").notNull(),
+	sender: mysqlEnum("sender", ["user", "admin"]).notNull(),
+	text: text("text"),
+	attachmentId: int("attachmentId"),
+	/** Client-generated key used to make retries return the original message. */
+	clientRequestId: varchar("clientRequestId", { length: 120 }),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
-  userCreatedIndex: index("special_chat_messages_user_created_idx").on(table.userId, table.createdAt),
-  attachmentIndex: index("special_chat_messages_attachment_idx").on(table.attachmentId),
+	userCreatedIndex: index("special_chat_messages_user_created_idx").on(table.userId, table.createdAt),
+	attachmentIndex: index("special_chat_messages_attachment_idx").on(table.attachmentId),
+	requestIdIndex: uniqueIndex("special_chat_messages_user_request_unique").on(table.userId, table.clientRequestId),
 }));
+
+/** R2 credentials are encrypted before they are stored; never expose these columns to clients. */
+export const r2Settings = mysqlTable("r2_settings", {
+	id: int("id").primaryKey(),
+	endpoint: text("endpoint"),
+	bucket: varchar("bucket", { length: 255 }),
+	region: varchar("region", { length: 80 }).default("auto").notNull(),
+	accessKeyIdEncrypted: mediumtext("accessKeyIdEncrypted"),
+	secretAccessKeyEncrypted: mediumtext("secretAccessKeyEncrypted"),
+	publicBaseUrl: text("publicBaseUrl"),
+	backupEnabled: boolean("backupEnabled").default(false).notNull(),
+	backupFrequency: varchar("backupFrequency", { length: 20 }).default("daily").notNull(),
+	scheduleHourUtc: int("scheduleHourUtc").default(2).notNull(),
+	createdAt: timestamp("createdAt").defaultNow().notNull(),
+	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const r2BackupRuns = mysqlTable("r2_backup_runs", {
+	id: int("id").autoincrement().primaryKey(),
+	status: varchar("status", { length: 20 }).notNull(),
+	startedAt: timestamp("startedAt").notNull(),
+	completedAt: timestamp("completedAt"),
+	backupKey: varchar("backupKey", { length: 500 }),
+	manifestKey: varchar("manifestKey", { length: 500 }),
+	byteSize: int("byteSize"),
+	errorMessage: text("errorMessage"),
+}, (table) => ({ statusStartedIndex: index("r2_backup_runs_status_started_idx").on(table.status, table.startedAt) }));
 
 export const qrLoginChallenges = mysqlTable("qr_login_challenges", {
   id: int("id").autoincrement().primaryKey(),

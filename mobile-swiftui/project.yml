@@ -16,7 +16,7 @@ settings:
     # binh luan rieng tren cPanel, dien ten mien phu vao day roi build lai.
     COMMENTS_API_BASE_URL: ""
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-    ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "CinemoraGold CinemoraViolet CinemoraEmerald"
+    ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "CinemoraGold CinemoraViolet CinemoraEmerald CinemoraSilver CinemoraRuby CinemoraSapphire CinemoraRoseCopper"
     CODE_SIGN_STYLE: Automatic
     PRODUCT_BUNDLE_IDENTIFIER: app.serval4238.taurus3258
 targets:

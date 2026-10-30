@@ -15,6 +15,8 @@ import { currentTvStreamsVersion, listTvStreams, refreshAllTvStreamsHealth, subs
 import { refreshAllTvVideosHealth } from "../tvVideos";
 import { initializeDatabase } from "../db";
 import { registerSpecialChatMediaRoute } from "../specialChat";
+import { startR2BackupScheduler } from "../r2Backup";
+import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
 const tvProxyOrigin = "https://baothanhhoa.vn";
@@ -103,6 +105,7 @@ async function startServer() {
   } catch (error) {
     console.error("[Database] Startup initialization failed:", error instanceof Error ? error.message : error);
   }
+  startR2BackupScheduler();
   const app = express();
   const server = createServer(app);
   const mobileAppOrigins = new Set(
@@ -197,6 +200,8 @@ async function startServer() {
     next();
   });
   registerStorageProxy(app);
+  registerPublicStorageRoute(app);
+  registerPrivateStorageRoute(app);
   registerSpecialChatMediaRoute(app);
   registerOAuthRoutes(app);
   app.get("/api/cinema/image/:token", async (req, res) => {

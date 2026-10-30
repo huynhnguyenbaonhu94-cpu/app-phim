@@ -43,6 +43,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
     case gold
     case violet
     case emerald
+    case silver
+    case ruby
+    case sapphire
+    case roseCopper
 
     var id: String { rawValue }
 
@@ -52,6 +56,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return "Aurora Gold"
         case .violet: return "Midnight Violet"
         case .emerald: return "Emerald Reel"
+        case .silver: return "Platinum Reel"
+        case .ruby: return "Ruby Cinema"
+        case .sapphire: return "Sapphire Screen"
+        case .roseCopper: return "Rose Copper"
         }
     }
 
@@ -61,6 +69,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return "Sang trọng, ánh vàng điện ảnh"
         case .violet: return "Tím huyền ảo, điểm cyan"
         case .emerald: return "Xanh ngọc, cảm hứng cuộn phim"
+        case .silver: return "Bạch kim tối giản, ánh kim lạnh"
+        case .ruby: return "Đỏ ruby sâu, cảm hứng rạp phim"
+        case .sapphire: return "Xanh sapphire trên nền midnight"
+        case .roseCopper: return "Đồng hồng ấm, ánh champagne"
         }
     }
 
@@ -70,6 +82,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return "CinemoraGold"
         case .violet: return "CinemoraViolet"
         case .emerald: return "CinemoraEmerald"
+        case .silver: return "CinemoraSilver"
+        case .ruby: return "CinemoraRuby"
+        case .sapphire: return "CinemoraSapphire"
+        case .roseCopper: return "CinemoraRoseCopper"
         }
     }
 
@@ -79,6 +95,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return "play.rectangle.fill"
         case .violet: return "camera.aperture"
         case .emerald: return "film.stack.fill"
+        case .silver: return "sparkles"
+        case .ruby: return "play.rectangle.on.rectangle.fill"
+        case .sapphire: return "sparkle.magnifyingglass"
+        case .roseCopper: return "film.fill"
         }
     }
 
@@ -88,6 +108,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return "CinemoraGoldPreview"
         case .violet: return "CinemoraVioletPreview"
         case .emerald: return "CinemoraEmeraldPreview"
+        case .silver: return "CinemoraSilverPreview"
+        case .ruby: return "CinemoraRubyPreview"
+        case .sapphire: return "CinemoraSapphirePreview"
+        case .roseCopper: return "CinemoraRoseCopperPreview"
         }
     }
 
@@ -97,6 +121,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return [Color(red: 0.10, green: 0.16, blue: 0.18), Color(red: 0.66, green: 0.43, blue: 0.12)]
         case .violet: return [Color(red: 0.12, green: 0.08, blue: 0.24), Color(red: 0.34, green: 0.20, blue: 0.67)]
         case .emerald: return [Color(red: 0.04, green: 0.17, blue: 0.15), Color(red: 0.08, green: 0.49, blue: 0.38)]
+        case .silver: return [Color(red: 0.10, green: 0.12, blue: 0.15), Color(red: 0.55, green: 0.61, blue: 0.70)]
+        case .ruby: return [Color(red: 0.16, green: 0.04, blue: 0.06), Color(red: 0.67, green: 0.12, blue: 0.21)]
+        case .sapphire: return [Color(red: 0.03, green: 0.08, blue: 0.18), Color(red: 0.08, green: 0.34, blue: 0.75)]
+        case .roseCopper: return [Color(red: 0.16, green: 0.08, blue: 0.08), Color(red: 0.70, green: 0.36, blue: 0.30)]
         }
     }
 
@@ -106,6 +134,10 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
         case .gold: return Color(red: 1.0, green: 0.79, blue: 0.31)
         case .violet: return Color(red: 0.78, green: 0.68, blue: 1.0)
         case .emerald: return Color(red: 0.44, green: 0.96, blue: 0.72)
+        case .silver: return Color(red: 0.83, green: 0.88, blue: 0.96)
+        case .ruby: return Color(red: 1.0, green: 0.38, blue: 0.48)
+        case .sapphire: return Color(red: 0.42, green: 0.68, blue: 1.0)
+        case .roseCopper: return Color(red: 1.0, green: 0.67, blue: 0.57)
         }
     }
 

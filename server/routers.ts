@@ -40,6 +40,8 @@ import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 import { commentRevision, publishAllComments, publishComments, waitForComments } from "./commentFeed";
 import { createMovieRequest, listAllMovieRequests, listMovieRequestsForUser, updateMovieRequest, MOVIE_REQUEST_STATUSES, type MovieRequestStatus } from "./movieRequests";
 import { listSpecialChatConversations, listSpecialChatMessages, sendSpecialChatMessage, uploadSpecialChatMedia } from "./specialChat";
+import { checkR2Connection, getBackupStatus, runR2Backup } from "./r2Backup";
+import { getR2PublicSettings, saveR2Settings } from "./r2Storage";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -114,7 +116,7 @@ const changePasswordInput = z.object({
 const movieRequestCooldown = new Map<string, number>();
 const tvPosterInput = z.string().trim().max(1000).nullable().optional().refine((value) => {
   if (!value) return true;
-  if (value.startsWith("/uploads/tv-posters/") || value.startsWith("uploads/tv-posters/")) return true;
+  if (value.startsWith("/uploads/tv-posters/") || value.startsWith("uploads/tv-posters/") || value.startsWith("/api/public-storage/public-assets/tv-posters/")) return true;
   try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; }
 }, "Poster phải là URL http(s) hoặc file đã upload trên máy chủ.");
 
@@ -527,10 +529,10 @@ export const appRouter = router({
       if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
       return listSpecialChatMessages(ctx.user.id, input?.afterId);
     }),
-    sendSpecialChatMessage: protectedProcedure.input(z.object({ text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    sendSpecialChatMessage: protectedProcedure.input(z.object({ text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional(), clientRequestId: z.string().trim().min(8).max(120).optional() })).mutation(async ({ ctx, input }) => {
       if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
       enforceRateLimit(ctx.req, "account.specialChat.write", 30, 60_000, String(ctx.user.id));
-      try { return await sendSpecialChatMessage({ userId: ctx.user.id, sender: "user", text: input.text, attachmentId: input.attachmentId }); }
+      try { return await sendSpecialChatMessage({ userId: ctx.user.id, sender: "user", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
     uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ ctx, input }) => {
@@ -543,14 +545,32 @@ export const appRouter = router({
   adminSpecialChat: router({
     conversations: adminProcedure.query(() => listSpecialChatConversations()),
     messages: adminProcedure.input(z.object({ userId: z.number().int().positive(), afterId: z.number().int().positive().optional() })).query(({ input }) => listSpecialChatMessages(input.userId, input.afterId, true)),
-    sendMessage: adminProcedure.input(z.object({ userId: z.number().int().positive(), text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional() })).mutation(async ({ input }) => {
-      try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, allowUnprivileged: true }); }
+    sendMessage: adminProcedure.input(z.object({ userId: z.number().int().positive(), text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional(), clientRequestId: z.string().trim().min(8).max(120).optional() })).mutation(async ({ input }) => {
+      try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
     uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(44_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ input }) => {
       try { return await uploadSpecialChatMedia({ ...input, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
     }),
+  }),
+  adminR2: router({
+    getSettings: adminProcedure.query(() => getR2PublicSettings()),
+    saveSettings: adminProcedure.input(z.object({
+      endpoint: z.string().trim().url().max(500).nullable().optional(),
+      bucket: z.string().trim().max(255).nullable().optional(),
+      region: z.string().trim().max(80).nullable().optional(),
+      accessKeyId: z.string().trim().max(300).nullable().optional(),
+      secretAccessKey: z.string().trim().max(500).nullable().optional(),
+      publicBaseUrl: z.string().trim().url().max(1000).nullable().optional(),
+      backupEnabled: z.boolean().optional(),
+      backupFrequency: z.enum(["daily", "weekly"]).optional(),
+      scheduleHourUtc: z.number().int().min(0).max(23).optional(),
+    })).mutation(({ input }) => saveR2Settings(input)),
+    testConnection: adminProcedure.input(z.object({}).optional()).mutation(() => checkR2Connection()),
+    runBackup: adminProcedure.input(z.object({}).optional()).mutation(() => runR2Backup()),
+    getBackupStatus: adminProcedure.query(() => getBackupStatus()),
+    updateBackupSchedule: adminProcedure.input(z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), scheduleHourUtc: z.number().int().min(0).max(23) })).mutation(({ input }) => saveR2Settings({ backupEnabled: input.enabled, backupFrequency: input.frequency, scheduleHourUtc: input.scheduleHourUtc })),
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({

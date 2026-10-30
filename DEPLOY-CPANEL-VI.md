@@ -95,8 +95,8 @@ npm run build
 Backend tự xử lý khi khởi động:
 
 - Tự chạy migration trong `drizzle/`.
-- Tự thêm cột còn thiếu: `users.avatar`, `users.badge`, `movie_comments.pinnedAt`, và
-  các cột `tv_streams` như trước.
+- Tự tạo/kiểm tra các bảng tương thích cho phiên thiết bị, đăng nhập QR, yêu cầu phim,
+  chat đặc quyền, cấu hình R2 và lịch sử backup; tự thêm các cột mới còn thiếu.
 - Tự tạo tài khoản admin mặc định nếu chưa có.
 
 Log khởi động cần thấy:
@@ -234,7 +234,7 @@ sang gọi từ trình duyệt, nhưng nên sửa để máy chủ gọi đượ
 
 ## 5. Environment variables
 
-Không cần thêm biến mới cho đợt này. Giữ nguyên những biến đang chạy:
+Giữ các biến hiện tại; nếu nhập R2 trong trang admin thì thêm khóa mã hóa ổn định:
 
 ```text
 NODE_ENV=production
@@ -244,7 +244,12 @@ TELEGRAM_BOT_TOKEN=…
 TELEGRAM_CHAT_ID=…
 ADMIN_EMAIL=…
 ADMIN_PASSWORD=…
+R2_SETTINGS_ENCRYPTION_KEY=<chuỗi ngẫu nhiên tối thiểu 32 byte, giữ ổn định>
 ```
+
+Có thể tạo khóa bằng `openssl rand -base64 48`, sau đó thêm trong cPanel → **Setup Node.js App → Environment Variables** và **Restart**. Không thay khóa sau khi đã lưu credentials R2 vì server cần nó để giải mã.
+
+Thay vì lưu thông tin R2 trong database, có thể cấu hình trực tiếp `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` và tùy chọn `R2_REGION` / `R2_PUBLIC_BASE_URL` trong environment. Cấu hình đã lưu trong database được ưu tiên. Không công khai Access Key/Secret Key.
 
 ## 6. Kiểm tra sau khi Restart
 
@@ -256,10 +261,16 @@ ADMIN_PASSWORD=…
 4. Bấm **Ghim lên đầu** ở một bình luận → bình luận đó nằm đầu danh sách trên cả web và app.
 5. Trong app: **Tài khoản & thiết bị** → chạm vào ảnh đại diện → chọn ảnh → ảnh phải hiện
    ở mọi bình luận của tài khoản đó.
+6. Tại `/admin/accounts`, chọn tài khoản và bật **Đặc quyền**; kiểm tra tài khoản được mở icon/chat và huy hiệu tích xanh.
+7. Tại `/admin/special-chat`, gửi tin nhắn, ảnh và video; tin nhắn chỉ được trả về đúng cuộc hội thoại.
+8. Tại `/admin/r2-settings`, lưu credentials và chạy **Lưu & kiểm tra kết nối**; bật lịch backup sau khi R2 test thành công.
 
 ## 7. Lưu ý
 
 - Đừng xoá thư mục `uploads/` khi giải nén, poster truyền hình đang nằm trong đó.
+- Source ZIP không chứa `uploads/`, `.private-uploads` hoặc `.env`; giữ các thư mục runtime hiện tại trên cPanel. Sau khi cấu hình R2, các lần upload mới dùng R2; media cũ không tự động chuyển kho.
+- Media chat và backup nằm trong namespace private; poster/thumbnail/phụ đề admin upload nằm trong `public-assets/`. `R2_PUBLIC_BASE_URL` chỉ dùng cho public media, không dùng cho chat hoặc backup.
+- Backup tự động cần `mysqldump` cài trên máy chủ và Node.js app tiếp tục chạy. Backup được ghi vào prefix `backups/`; mặc định không tự xóa. Có thể đặt lifecycle rule trên Cloudflare R2 sau khi đã xác nhận quy trình khôi phục.
 - Không upload `node_modules`; nếu đã lỡ có thì xoá rồi `npm install` lại.
 - Nếu `npm run build` báo thiếu dependency, chạy `npm install --include=dev` trước.
 - `cpanel-comments/` chỉ là phương án dự phòng khi hosting không chạy được Node; dùng nó
@@ -360,4 +371,3 @@ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'custom_movies' AND COLUMN_NAME
 ```
 
 Kết quả không còn chữ `on update CURRENT_TIMESTAMP` là đạt.
-

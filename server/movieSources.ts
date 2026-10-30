@@ -13,6 +13,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { movieSourceEpisodes, movieSources } from "../drizzle/schema";
 import { customDirectStreamUrl, registerCustomStreamSource } from "./cinema";
+import { storagePutPublic, storageRead } from "./storage";
 
 /** Một chất lượng của tập: mỗi chất lượng có link M3U8 và nhiều phụ đề theo ngôn ngữ. */
 export type MovieSourceSubtitleTrack = {
@@ -103,25 +104,24 @@ function parseSubtitleTracks(value: unknown): StoredSubtitleTrack[] {
 /**
  * Chuẩn hoá phụ đề của một chất lượng thành URL dùng được cho app.
  *
- * Tệp admin tải lên được lưu thành file VTT; link ngoài được máy chủ tải về, đổi
- * sang WebVTT rồi cũng lưu thành file — nhờ vậy lúc phát không phụ thuộc máy chủ
- * nguồn và AVPlayer luôn đọc được (AVPlayer chỉ đọc WebVTT).
+ * Tệp admin tải lên và bản chuẩn hóa từ link ngoài được lưu bền vững trong object
+ * storage; URL nội bộ hoặc CDN trả về vẫn tương thích web player và AVPlayer.
  */
 async function resolveSubtitleUrl(input: { subtitleUrl?: string | null; subtitleVtt?: string | null }): Promise<string | null> {
   const uploaded = input.subtitleVtt?.trim();
   if (uploaded) {
     const saved = await saveMovieSubtitle({ base64: Buffer.from(uploaded, "utf8").toString("base64"), filename: "quality.vtt" });
-    return saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+    return saved.url;
   }
   const link = input.subtitleUrl?.trim();
   if (!link) return null;
-  if (link.startsWith("/uploads/") || link.startsWith("uploads/") || link.startsWith("/api/movies/subtitle/")) {
+  if (link.startsWith("/uploads/") || link.startsWith("uploads/") || link.startsWith("/api/movies/subtitle/") || link.startsWith("/api/public-storage/")) {
     return link.startsWith("/") ? link : `/${link}`;
   }
   const converted = await fetchSubtitleAsVtt(link);
   if (!converted) return link;
   const saved = await saveMovieSubtitle({ base64: Buffer.from(converted, "utf8").toString("base64"), filename: "quality.vtt" });
-  return saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+  return saved.url;
 }
 
 /** Lưu danh sách chất lượng của tập, kèm phụ đề riêng từng chất lượng. */
@@ -140,7 +140,7 @@ async function resolveSubtitleTracks(input: Array<{ language?: string; subtitleU
     if (uploaded) {
       cachedVtt = toWebVTT(uploaded);
       const saved = await saveMovieSubtitle({ base64: Buffer.from(uploaded, "utf8").toString("base64"), filename: "track.vtt" });
-      subtitleUrl = saved.url.startsWith("/") ? saved.url : `/${saved.url}`;
+      subtitleUrl = saved.url;
     } else {
       const link = track.subtitleUrl?.trim();
       if (!link) continue;
@@ -517,11 +517,9 @@ export async function saveMovieSubtitle(input: {
   filename?: string;
 }): Promise<{ url: string; content: string }> {
   const content = toWebVTT(Buffer.from(input.base64, "base64").toString("utf8"));
-  const target = path.resolve(process.cwd(), SUBTITLE_DIR);
-  await fs.mkdir(target, { recursive: true });
   const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.vtt`;
-  await fs.writeFile(path.join(target, name), content, "utf8");
-  return { url: `${SUBTITLE_DIR}/${name}`, content };
+  const stored = await storagePutPublic(`movie-subs/${name}`, Buffer.from(content, "utf8"), "text/vtt; charset=utf-8");
+  return { url: stored.url, content };
 }
 
 /**
@@ -579,6 +577,16 @@ async function subtitleTrackContent(url: string | null | undefined): Promise<str
       const filePath = path.resolve(process.cwd(), link.replace(/^\/+/, ""));
       const content = await fs.readFile(filePath, "utf8");
       return toWebVTT(content);
+    } catch {
+      return null;
+    }
+  }
+  if (link.startsWith("/api/public-storage/")) {
+    try {
+      const rawKey = link.slice("/api/public-storage/".length).split("?", 1)[0];
+      const key = rawKey.split("/").map((part) => decodeURIComponent(part)).join("/");
+      if (!key.startsWith("public-assets/")) return null;
+      return toWebVTT((await storageRead(key)).toString("utf8"));
     } catch {
       return null;
     }
