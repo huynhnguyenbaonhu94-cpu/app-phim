@@ -123,6 +123,13 @@ export const specialChatMessages = mysqlTable("special_chat_messages", {
 	requestIdIndex: uniqueIndex("special_chat_messages_user_request_unique").on(table.userId, table.clientRequestId),
 }));
 
+/** Tin nhắn cuối admin đã mở/đọc trong từng cuộc hội thoại. */
+export const specialChatAdminReads = mysqlTable("special_chat_admin_reads", {
+	userId: int("userId").primaryKey(),
+	lastReadMessageId: int("lastReadMessageId").default(0).notNull(),
+	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** R2 credentials are encrypted before they are stored; never expose these columns to clients. */
 export const r2Settings = mysqlTable("r2_settings", {
 	id: int("id").primaryKey(),

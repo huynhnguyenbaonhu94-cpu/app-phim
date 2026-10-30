@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { getDb, getUserById } from "./db";
-import { specialChatAttachments, specialChatMessages, users } from "../drizzle/schema";
+import { specialChatAdminReads, specialChatAttachments, specialChatMessages, users } from "../drizzle/schema";
 import { storageBackend, storageGetSignedUrl, storagePut, storageRead } from "./storage";
 import { authenticateLocalRequest } from "./localAuth";
 import type { Express } from "express";
@@ -28,6 +28,12 @@ export type SpecialChatConversation = {
   email: string | null;
   hasSpecialPrivileges: boolean;
   messageCount: number;
+  memberMessageCount: number;
+  unreadCount: number;
+  latestMessageId: number;
+  latestUserMessageId: number;
+  latestMessageSender: Sender;
+  needsReply: boolean;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
 };
@@ -174,23 +180,68 @@ export async function listSpecialChatConversations(): Promise<SpecialChatConvers
   const db = await getDb();
   if (!db) return [];
   const latest = max(specialChatMessages.createdAt);
-  const grouped = await db.select({ userId: specialChatMessages.userId, lastMessageAt: latest, messageCount: sql<number>`count(*)` })
+  const grouped = await db.select({
+    userId: specialChatMessages.userId,
+    lastMessageAt: latest,
+    messageCount: sql<number>`count(*)`,
+    memberMessageCount: sql<number>`SUM(CASE WHEN ${specialChatMessages.sender} = 'user' THEN 1 ELSE 0 END)`,
+    latestMessageId: max(specialChatMessages.id),
+    latestUserMessageId: sql<number>`MAX(CASE WHEN ${specialChatMessages.sender} = 'user' THEN ${specialChatMessages.id} ELSE 0 END)`,
+  })
     .from(specialChatMessages).groupBy(specialChatMessages.userId).orderBy(desc(latest)).limit(200);
   if (!grouped.length) return [];
   const profileRows = await db.select({ id: users.id, name: users.name, email: users.email, hasSpecialPrivileges: users.hasSpecialPrivileges })
     .from(users).where(inArray(users.id, grouped.map(row => row.userId)));
   const profiles = new Map(profileRows.map(profile => [profile.id, profile]));
-  const previews = await Promise.all(grouped.map(async row => {
-    const latestMessage = await db.select({ text: specialChatMessages.text, attachmentId: specialChatMessages.attachmentId }).from(specialChatMessages)
-      .where(and(eq(specialChatMessages.userId, row.userId), eq(specialChatMessages.createdAt, row.lastMessageAt!))).orderBy(desc(specialChatMessages.id)).limit(1);
-    return [row.userId, latestMessage[0]] as const;
-  }));
-  const previewMap = new Map(previews);
+  const readRows = await db.select().from(specialChatAdminReads).where(inArray(specialChatAdminReads.userId, grouped.map(row => row.userId)));
+  const readCursors = new Map(readRows.map(row => [row.userId, row.lastReadMessageId]));
+  const lastIds = grouped.map(row => Number(row.latestMessageId ?? 0)).filter(id => id > 0);
+  const lastMessages = lastIds.length
+    ? await db.select({ id: specialChatMessages.id, userId: specialChatMessages.userId, sender: specialChatMessages.sender, text: specialChatMessages.text, attachmentId: specialChatMessages.attachmentId })
+      .from(specialChatMessages).where(inArray(specialChatMessages.id, lastIds))
+    : [];
+  const latestByUser = new Map(lastMessages.map(message => [message.userId, message]));
+  const unreadRows = await db.select({
+    userId: specialChatMessages.userId,
+    unreadCount: sql<number>`SUM(CASE WHEN ${specialChatMessages.sender} = 'user' AND ${specialChatMessages.id} > COALESCE((SELECT ${specialChatAdminReads.lastReadMessageId} FROM ${specialChatAdminReads} WHERE ${specialChatAdminReads.userId} = ${specialChatMessages.userId}), 0) THEN 1 ELSE 0 END)`,
+  }).from(specialChatMessages).where(inArray(specialChatMessages.userId, grouped.map(row => row.userId))).groupBy(specialChatMessages.userId);
+  const unreadByUser = new Map(unreadRows.map(row => [row.userId, Number(row.unreadCount ?? 0)]));
   return grouped.map(row => {
     const profile = profiles.get(row.userId);
-    const last = previewMap.get(row.userId);
-    return { userId: row.userId, name: profile?.name ?? null, email: profile?.email ?? null, hasSpecialPrivileges: Boolean(profile?.hasSpecialPrivileges), messageCount: Number(row.messageCount), lastMessageAt: row.lastMessageAt ? asIso(row.lastMessageAt) : null, lastMessagePreview: last?.text || (last?.attachmentId ? "[Media]" : null) };
+    const last = latestByUser.get(row.userId);
+    const latestMessageSender = (last?.sender ?? "user") as Sender;
+    return {
+      userId: row.userId,
+      name: profile?.name ?? null,
+      email: profile?.email ?? null,
+      hasSpecialPrivileges: Boolean(profile?.hasSpecialPrivileges),
+      messageCount: Number(row.messageCount),
+      memberMessageCount: Number(row.memberMessageCount ?? 0),
+      unreadCount: unreadByUser.get(row.userId) ?? 0,
+      latestMessageId: Number(row.latestMessageId ?? 0),
+      latestUserMessageId: Number(row.latestUserMessageId ?? 0),
+      latestMessageSender,
+      needsReply: latestMessageSender === "user",
+      lastMessageAt: row.lastMessageAt ? asIso(row.lastMessageAt) : null,
+      lastMessagePreview: last?.text || (last?.attachmentId ? "[Tệp đính kèm]" : null),
+    };
   });
+}
+
+/** Chỉ admin router được gọi; cursor luôn được lấy từ tin cuối thật trong DB. */
+export async function markSpecialChatConversationRead(userId: number, seenMessageId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.select({ latestId: max(specialChatMessages.id) }).from(specialChatMessages).where(eq(specialChatMessages.userId, userId));
+  const actualLatestId = Number(rows[0]?.latestId ?? 0);
+  const latestId = Math.min(Math.max(0, Math.floor(seenMessageId)), actualLatestId);
+  await db.insert(specialChatAdminReads).values({ userId, lastReadMessageId: latestId }).onDuplicateKeyUpdate({
+    set: {
+      lastReadMessageId: sql`GREATEST(${specialChatAdminReads.lastReadMessageId}, ${latestId})`,
+      updatedAt: new Date(),
+    },
+  });
+  return { userId, lastReadMessageId: latestId };
 }
 
 export async function getSpecialChatAttachmentForAccess(attachmentId: number, viewer: { id: number; role: string; hasSpecialPrivileges: boolean }) {

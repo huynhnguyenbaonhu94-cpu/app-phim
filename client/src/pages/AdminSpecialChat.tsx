@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, MessageCircle, Paperclip, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
+import { AlertCircle, MessageCircle, Paperclip, Pause, Play, RefreshCw, Send, ShieldCheck, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Link } from "wouter";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { AuthDialog } from "@/components/AuthDialog";
@@ -26,11 +26,67 @@ async function readMedia(file: File) {
 function AdminChatAttachment({ url, mimeType }: { url: string; mimeType: string | null }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const isVideo = mimeType?.startsWith("video/") ?? false;
   const source = attempt ? `${url}${url.includes("?") ? "&" : "?"}retry=${attempt}` : url;
-  if (failed) return <button type="button" className="admin-chat-media-fallback" onClick={() => { setFailed(false); setAttempt(value => value + 1); }}><RefreshCw size={15} /> Không tải được tệp · thử lại</button>;
-  return mimeType?.startsWith("video/")
-    ? <video key={source} controls preload="metadata" src={source} onError={() => setFailed(true)} />
-    : <img key={source} loading="lazy" src={source} alt="Media từ cuộc trò chuyện" onError={() => setFailed(true)} />;
+  useEffect(() => {
+    if (!viewerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setViewerOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [viewerOpen]);
+  function retry() { setFailed(false); setAttempt(value => value + 1); }
+  function closeViewer() { videoRef.current?.pause(); setViewerOpen(false); setZoom(1); }
+  function seekBy(delta: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(video.duration || duration, video.currentTime + delta));
+  }
+  function togglePlay() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void video.play().catch(() => setFailed(true));
+    else video.pause();
+  }
+  if (failed) return <button type="button" className="admin-chat-media-fallback" onClick={retry}><RefreshCw size={15} /> Không tải được tệp · thử lại</button>;
+  return <>
+    {isVideo ? <button type="button" className="admin-chat-video-preview" onClick={() => { setViewerOpen(true); setIsPlaying(true); }} aria-label="Mở trình phát video">
+      <video key={source} muted preload="metadata" playsInline src={source} onError={() => setFailed(true)} />
+      <span className="admin-chat-video-play"><Play size={21} fill="currentColor" /></span><span className="admin-chat-video-caption">Mở video</span>
+    </button> : <button type="button" className="admin-chat-image-preview" onClick={() => { setViewerOpen(true); setZoom(1); }} aria-label="Phóng to ảnh">
+      <img key={source} loading="lazy" src={source} alt="Media từ cuộc trò chuyện" onError={() => setFailed(true)} />
+    </button>}
+    {viewerOpen && <div className="admin-chat-viewer-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeViewer(); }}>
+      <section className="admin-chat-viewer" role="dialog" aria-modal="true" aria-label={isVideo ? "Trình phát video trong tin nhắn" : "Ảnh trong tin nhắn"}>
+        <header className="admin-chat-viewer-head"><strong>{isVideo ? "Video trong tin nhắn" : "Ảnh trong tin nhắn"}</strong><button type="button" onClick={closeViewer} aria-label="Đóng"><X size={20} /></button></header>
+        {isVideo ? <>
+          <div className="admin-chat-video-stage"><video ref={videoRef} key={source} src={source} autoPlay playsInline controls preload="metadata"
+            onLoadedMetadata={event => { setDuration(event.currentTarget.duration || 0); }}
+            onTimeUpdate={event => { setCurrentTime(event.currentTarget.currentTime); setDuration(event.currentTarget.duration || 0); }}
+            onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onError={() => setFailed(true)} />
+          </div>
+          <div className="admin-chat-video-tools">
+            <div className="admin-chat-video-seek"><span>{formatClock(currentTime)}</span><input aria-label="Thanh tiến trình video" type="range" min="0" max={Math.max(duration, 0.1)} step="0.1" value={Math.min(currentTime, duration || 0)} onChange={event => { const next = Number(event.target.value); setCurrentTime(next); if (videoRef.current) videoRef.current.currentTime = next; }} /><span>{formatClock(duration)}</span></div>
+            <div className="admin-chat-video-buttons"><button type="button" onClick={() => seekBy(-10)} aria-label="Tua lùi 10 giây">−10 giây</button><button type="button" className="is-primary" onClick={togglePlay} aria-label={isPlaying ? "Tạm dừng" : "Phát"}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button type="button" onClick={() => seekBy(10)} aria-label="Tua tới 10 giây">+10 giây</button></div>
+          </div>
+        </> : <>
+          <div className="admin-chat-image-stage" onWheel={event => { event.preventDefault(); setZoom(value => Math.max(0.5, Math.min(4, value + (event.deltaY < 0 ? 0.15 : -0.15)))); }}><img key={source} src={source} alt="Ảnh cuộc trò chuyện" onError={() => setFailed(true)} style={{ transform: `scale(${zoom})` }} /></div>
+          <div className="admin-chat-image-tools"><button type="button" onClick={() => setZoom(value => Math.max(0.5, value - 0.2))} aria-label="Thu nhỏ"><ZoomOut size={17} /></button><input aria-label="Mức thu phóng ảnh" type="range" min="0.5" max="4" step="0.1" value={zoom} onChange={event => setZoom(Number(event.target.value))} /><strong>{Math.round(zoom * 100)}%</strong><button type="button" onClick={() => setZoom(value => Math.min(4, value + 0.2))} aria-label="Phóng to"><ZoomIn size={17} /></button><button type="button" onClick={() => setZoom(1)}>Vừa khung</button></div>
+        </>}
+      </section>
+    </div>}
+  </>;
+}
+
+function formatClock(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
+  const total = Math.floor(seconds);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 export default function AdminSpecialChat() {
@@ -41,17 +97,88 @@ export default function AdminSpecialChat() {
   const [mediaStatus, setMediaStatus] = useState("");
   const [mediaError, setMediaError] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<{ attachmentId: number; userId: number; filename: string; text: string | null; clientRequestId: string } | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => window.localStorage.getItem("cinemora-admin-chat-sound") !== "false");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textRequestRef = useRef<{ text: string; id: string } | null>(null);
+  const incomingMessageIdsRef = useRef<Map<number, number> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const conversations = trpc.adminSpecialChat.conversations.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: 3_000, retry: false });
   const messages = trpc.adminSpecialChat.messages.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: 3_000, retry: false });
   const sendMessage = trpc.adminSpecialChat.sendMessage.useMutation({ onSuccess: async () => { setDraft(""); await Promise.all([messages.refetch(), conversations.refetch()]); }, onError: error => toast.error("Không gửi được tin nhắn", { description: error.message }) });
   const uploadMedia = trpc.adminSpecialChat.uploadMedia.useMutation();
+  const markRead = trpc.adminSpecialChat.markRead.useMutation();
   const selected = useMemo(() => (conversations.data ?? []).find(item => item.userId === selectedUserId) ?? null, [conversations.data, selectedUserId]);
   useEffect(() => {
     if (selectedUserId === null && conversations.data?.[0]) setSelectedUserId(conversations.data[0].userId);
   }, [conversations.data, selectedUserId]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.data?.length, selectedUserId]);
+  function ensureAudioContext() {
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext;
+      if (AudioContextClass) audioContextRef.current = new AudioContextClass();
+    }
+    return audioContextRef.current;
+  }
+  function playNotification() {
+    if (!soundEnabled) return;
+    const context = ensureAudioContext();
+    if (!context) return;
+    const playTone = () => {
+      const now = context.currentTime;
+      [880, 1174].forEach((frequency, index) => {
+        const start = now + index * 0.12;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(frequency, start);
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.11, start + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+        oscillator.connect(gain); gain.connect(context.destination);
+        oscillator.start(start); oscillator.stop(start + 0.17);
+      });
+    };
+    if (context.state === "running") playTone();
+    else void context.resume().then(playTone).catch(() => undefined);
+  }
+  function toggleNotificationSound() {
+    const enabled = !soundEnabled;
+    setSoundEnabled(enabled);
+    window.localStorage.setItem("cinemora-admin-chat-sound", String(enabled));
+    if (enabled) {
+      const context = ensureAudioContext();
+      if (context) void context.resume().catch(() => undefined);
+    }
+  }
+  useEffect(() => {
+    if (!soundEnabled) return;
+    const unlock = () => {
+      const context = ensureAudioContext();
+      if (context?.state === "suspended") void context.resume().catch(() => undefined);
+    };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [soundEnabled]);
+  useEffect(() => {
+    if (!soundEnabled || !conversations.data) return;
+    const current = new Map(conversations.data.map(item => [item.userId, item.latestUserMessageId]));
+    const previous = incomingMessageIdsRef.current;
+    if (previous) {
+      const hasIncoming = conversations.data.some(item => item.latestUserMessageId > (previous.get(item.userId) ?? 0));
+      if (hasIncoming) playNotification();
+    }
+    incomingMessageIdsRef.current = current;
+  }, [conversations.data, soundEnabled]);
+  const latestLoadedMessage = messages.data?.length ? messages.data[messages.data.length - 1] : null;
+  useEffect(() => {
+    if (!selectedUserId || !messages.data || messages.data.some(message => message.userId !== selectedUserId)) return;
+    const seenMessageId = messages.data.length ? messages.data[messages.data.length - 1].id : 0;
+    if (seenMessageId > 0) markRead.mutate({ userId: selectedUserId, seenMessageId }, { onSuccess: () => { void conversations.refetch(); } });
+  }, [selectedUserId, latestLoadedMessage?.id]);
 
   if (loading) return <PageShell><main className="content-wrap inner-page"><p>Đang kiểm tra quyền truy cập…</p></main></PageShell>;
   if (!user) return <PageShell><main className="content-wrap inner-page"><div className="empty-state"><ShieldCheck size={30} /><h3>Cần đăng nhập admin</h3><p>Đăng nhập tài khoản quản trị viên để quản lý chat đặc quyền.</p><button className="button button-primary" onClick={() => setAuthOpen(true)}>Đăng nhập</button></div><AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /></main></PageShell>;
@@ -107,9 +234,9 @@ export default function AdminSpecialChat() {
   }
   return <PageShell><main className="content-wrap inner-page admin-chat-page">
     <div className="page-topline"><Link href="/admin/accounts" className="back-link">← Tài khoản</Link><span className="result-note"><Link href="/admin/accounts" className="text-link">Cấp/bỏ quyền chat</Link> · polling mỗi 3 giây</span></div>
-    <SectionHeading eyebrow="CINEMORA ADMIN" title="Chat đặc quyền" action={<button className="admin-tv-refresh" onClick={() => { conversations.refetch(); messages.refetch(); }} disabled={conversations.isFetching || messages.isFetching}><RefreshCw size={15} /></button>} />
+    <SectionHeading eyebrow="CINEMORA ADMIN" title="Chat đặc quyền" action={<div className="admin-chat-header-actions"><button type="button" className={`admin-chat-sound-toggle${soundEnabled ? " is-on" : ""}`} onClick={toggleNotificationSound} aria-pressed={soundEnabled} title={soundEnabled ? "Tắt âm báo tin nhắn mới" : "Bật âm báo tin nhắn mới"}>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}<span>{soundEnabled ? "Âm báo bật" : "Bật âm báo"}</span></button><button className="admin-tv-refresh" onClick={() => { conversations.refetch(); messages.refetch(); }} disabled={conversations.isFetching || messages.isFetching}><RefreshCw size={15} /></button></div>} />
     <div className="admin-chat-layout">
-      <aside className="admin-chat-conversations"><div className="admin-chat-panel-title"><strong>Cuộc hội thoại</strong><span>{conversations.data?.length ?? 0} user</span></div>{conversations.isLoading ? <p>Đang tải…</p> : (conversations.data ?? []).length === 0 ? <div className="admin-chat-empty"><MessageCircle size={24} /><span>Chưa có tin nhắn.</span></div> : (conversations.data ?? []).map(item => <button type="button" key={item.userId} className={`admin-chat-conversation${item.userId === selectedUserId ? " is-selected" : ""}`} onClick={() => setSelectedUserId(item.userId)}><span className="admin-chat-avatar">{(item.name || item.email || "?").slice(0, 1).toUpperCase()}</span><span className="admin-chat-conversation-copy"><strong>{item.name || item.email || `User #${item.userId}`}</strong><small>{item.email || `ID #${item.userId}`} {item.hasSpecialPrivileges ? "· Được cấp quyền" : "· Đã bỏ quyền"}</small><em>{item.lastMessagePreview || "[Media]"}</em></span><time>{formatDate(item.lastMessageAt)}</time></button>)}</aside>
+      <aside className="admin-chat-conversations"><div className="admin-chat-panel-title"><strong>Cuộc hội thoại</strong><span>{conversations.data?.length ?? 0} tài khoản</span></div>{conversations.isLoading ? <p>Đang tải…</p> : (conversations.data ?? []).length === 0 ? <div className="admin-chat-empty"><MessageCircle size={24} /><span>Chưa có tin nhắn.</span></div> : (conversations.data ?? []).map(item => <button type="button" key={item.userId} className={`admin-chat-conversation${item.userId === selectedUserId ? " is-selected" : ""}${item.unreadCount > 0 || item.needsReply ? " has-attention" : ""}`} onClick={() => setSelectedUserId(item.userId)}><span className="admin-chat-avatar">{(item.name || item.email || "?").slice(0, 1).toUpperCase()}</span><span className="admin-chat-conversation-copy"><strong>{item.name || item.email || `User #${item.userId}`}</strong><small>{item.email || `ID #${item.userId}`} · {item.memberMessageCount} tin nhắn thành viên</small><em>{item.lastMessagePreview || "[Tệp đính kèm]"}</em></span><span className="admin-chat-conversation-meta"><time>{formatDate(item.lastMessageAt)}</time>{item.unreadCount > 0 && <span className="admin-chat-unread-badge" title={`${item.unreadCount} tin nhắn chưa đọc`}>{item.unreadCount > 99 ? "99+" : item.unreadCount} mới</span>}{item.needsReply && <span className="admin-chat-needs-reply"><i />Chờ phản hồi</span>}</span></button>)}</aside>
       <section className="admin-chat-thread">
         <header className="admin-chat-thread-head"><div><strong>{selected?.name || selected?.email || (selectedUserId ? `User #${selectedUserId}` : "Chọn cuộc hội thoại")}</strong><span>{selected?.email || ""}</span></div><span className="live-sync"><span /> Live polling</span></header>
         {!selectedUserId ? <div className="admin-chat-empty admin-chat-thread-empty"><MessageCircle size={30} /><span>Chọn một cuộc hội thoại để xem tin nhắn.</span></div> : <>

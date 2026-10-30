@@ -195,6 +195,11 @@ export async function ensureSpecialChatCompatibility(db: ReturnType<typeof drizz
     INDEX special_chat_messages_user_created_idx (userId, createdAt),
     INDEX special_chat_messages_attachment_idx (attachmentId)
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS special_chat_admin_reads (
+    userId int NOT NULL PRIMARY KEY,
+    lastReadMessageId int NOT NULL DEFAULT 0,
+    updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
   for (const statement of [
     "ALTER TABLE `special_chat_messages` ADD COLUMN `clientRequestId` varchar(120) NULL",
     "ALTER TABLE `special_chat_messages` ADD UNIQUE INDEX `special_chat_messages_user_request_unique` (`userId`, `clientRequestId`)",

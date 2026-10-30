@@ -411,7 +411,6 @@ private struct SpecialChatMessageBubble: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            if outgoing { Spacer(minLength: 0) }
             VStack(alignment: .leading, spacing: 7) {
                 if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
                     SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
@@ -436,7 +435,6 @@ private struct SpecialChatMessageBubble: View {
                     .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.27) : Color.white.opacity(0.08), lineWidth: 0.8)
             }
             .frame(maxWidth: maxBubbleWidth, alignment: .leading)
-            if !outgoing { Spacer(minLength: 0) }
         }
         .frame(maxWidth: .infinity, alignment: outgoing ? .trailing : .leading)
     }

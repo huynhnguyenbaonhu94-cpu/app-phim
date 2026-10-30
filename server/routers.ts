@@ -39,7 +39,7 @@ import { approveQrLogin, completeQrLogin, createQrLoginChallenge, qrLoginStatus 
 import { enforceRateLimit, SECURITY_LIMITS } from "./securityRateLimit";
 import { commentRevision, publishAllComments, publishComments, waitForComments } from "./commentFeed";
 import { createMovieRequest, listAllMovieRequests, listMovieRequestsForUser, updateMovieRequest, MOVIE_REQUEST_STATUSES, type MovieRequestStatus } from "./movieRequests";
-import { listSpecialChatConversations, listSpecialChatMessages, sendSpecialChatMessage, uploadSpecialChatMedia } from "./specialChat";
+import { listSpecialChatConversations, listSpecialChatMessages, markSpecialChatConversationRead, sendSpecialChatMessage, uploadSpecialChatMedia } from "./specialChat";
 import { checkR2Connection, getBackupStatus, runR2Backup } from "./r2Backup";
 import { getR2PublicSettings, saveR2Settings } from "./r2Storage";
 
@@ -545,6 +545,7 @@ export const appRouter = router({
   adminSpecialChat: router({
     conversations: adminProcedure.query(() => listSpecialChatConversations()),
     messages: adminProcedure.input(z.object({ userId: z.number().int().positive(), afterId: z.number().int().positive().optional() })).query(({ input }) => listSpecialChatMessages(input.userId, input.afterId, true)),
+    markRead: adminProcedure.input(z.object({ userId: z.number().int().positive(), seenMessageId: z.number().int().positive() })).mutation(({ input }) => markSpecialChatConversationRead(input.userId, input.seenMessageId)),
     sendMessage: adminProcedure.input(z.object({ userId: z.number().int().positive(), text: z.string().trim().max(4000).optional(), attachmentId: z.number().int().positive().optional(), clientRequestId: z.string().trim().min(8).max(120).optional() })).mutation(async ({ input }) => {
       try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
