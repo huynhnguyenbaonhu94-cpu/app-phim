@@ -155,10 +155,11 @@ struct SpecialAccountChatScreen: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messages) { message in
-                            let rowWidth = max(0, geometry.size.width - 28)
+                            let rowWidth = max(1, geometry.size.width - 28)
                             let bubbleWidth = min(420, rowWidth * 0.82)
                             SpecialChatMessageBubble(
                                 message: message,
+                                rowWidth: rowWidth,
                                 maxBubbleWidth: bubbleWidth,
                                 maxMediaWidth: max(140, bubbleWidth - 24)
                             ) { fileURL in
@@ -170,7 +171,10 @@ struct SpecialAccountChatScreen: View {
                         }
                         Color.clear.frame(height: 1).id("special-chat-bottom")
                     }
-                    .frame(maxWidth: .infinity)
+                    // A vertical ScrollView does not always propose its viewport width
+                    // to LazyVStack. Give the stack an explicit width so each HStack
+                    // row has real trailing space for member messages to align right.
+                    .frame(width: max(1, geometry.size.width - 28), alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 15)
                 }
@@ -404,6 +408,7 @@ struct SpecialAccountChatScreen: View {
 
 private struct SpecialChatMessageBubble: View {
     let message: RemoteSpecialChatMessage
+    let rowWidth: CGFloat
     let maxBubbleWidth: CGFloat
     let maxMediaWidth: CGFloat
     let onPlayVideo: (URL) -> Void
@@ -443,7 +448,7 @@ private struct SpecialChatMessageBubble: View {
             .frame(maxWidth: maxBubbleWidth, alignment: .leading)
             if !outgoing { Spacer(minLength: 34) }
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: rowWidth, alignment: .leading)
     }
 }
 
