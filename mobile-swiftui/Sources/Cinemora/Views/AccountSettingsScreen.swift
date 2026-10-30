@@ -356,7 +356,7 @@ struct AccountSettingsScreen: View {
                     }
                 }
                 .padding(16)
-                .auroraCard(cornerRadius: 24, tint: .auroraSky, fill: 0.65, glow: true)
+                .auroraCard(cornerRadius: 24, tint: .auroraSky, glow: true, fill: 0.65)
                 .auroraReveal(3)
             }
 

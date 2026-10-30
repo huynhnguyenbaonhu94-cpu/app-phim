@@ -414,7 +414,7 @@ private struct SpecialChatMediaPreview: View {
                 let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
                 image = UIImage(data: data)
                 error = image == nil
-            } catch { error = true }
+            } catch { self.error = true }
             isLoading = false
         }
     }
@@ -437,7 +437,7 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
             onPlayVideo(fileURL)
-        } catch { error = true }
+        } catch { self.error = true }
         isLoading = false
     }
 }

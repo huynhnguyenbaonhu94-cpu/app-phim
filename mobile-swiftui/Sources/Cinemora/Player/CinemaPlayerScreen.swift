@@ -168,7 +168,7 @@ final class PlaybackController: ObservableObject {
                         self.loadTask?.cancel()
                         // Master playlist phụ đề hỏng: quay về link M3U8 gốc ngay,
                         // người xem không phải bấm thử lại.
-                        if self.usedSubtitledPlaylist, let fallback = self.fallbackPlaybackURL {
+                        if self.usedSubtitledPlaylist, self.fallbackPlaybackURL != nil {
                             self.usedSubtitledPlaylist = false
                             self.fallbackPlaybackURL = nil
                             self.load(episode, startAt: startAt, localURL: nil, allowSubtitledPlaylist: false)
