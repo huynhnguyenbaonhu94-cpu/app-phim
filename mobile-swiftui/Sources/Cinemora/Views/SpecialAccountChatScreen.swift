@@ -155,7 +155,7 @@ struct SpecialAccountChatScreen: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messages) { message in
-                            let rowWidth = max(280, geometry.size.width - 28)
+                            let rowWidth = max(0, geometry.size.width - 28)
                             let bubbleWidth = min(420, rowWidth * 0.82)
                             SpecialChatMessageBubble(
                                 message: message,
@@ -170,6 +170,7 @@ struct SpecialAccountChatScreen: View {
                         }
                         Color.clear.frame(height: 1).id("special-chat-bottom")
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 15)
                 }
@@ -411,32 +412,38 @@ private struct SpecialChatMessageBubble: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
+            if outgoing { Spacer(minLength: 34) }
             VStack(alignment: .leading, spacing: 7) {
+                Text(message.isFromAdmin ? "QUẢN TRỊ VIÊN" : "BẠN")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .tracking(0.5)
+                    .foregroundStyle(outgoing ? Color.auroraAmber : Color.auroraMint)
                 if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
                     SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
                 }
                 if let text = message.text, !text.isEmpty {
                     Text(text)
-                        .font(.auroraBody(12))
+                        .font(.auroraBody(13))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(message.createdAt.chatTimeLabel)
-                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.50))
                     .fixedSize()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(outgoing ? Color.auroraViolet.opacity(0.29) : Color.auroraRaised.opacity(0.95), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 19, style: .continuous)
-                    .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.27) : Color.white.opacity(0.08), lineWidth: 0.8)
+                    .strokeBorder(outgoing ? Color.auroraViolet.opacity(0.34) : Color.white.opacity(0.10), lineWidth: 0.8)
             }
             .frame(maxWidth: maxBubbleWidth, alignment: .leading)
+            if !outgoing { Spacer(minLength: 34) }
         }
-        .frame(maxWidth: .infinity, alignment: outgoing ? .trailing : .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 
