@@ -127,17 +127,19 @@ export function SearchPage() {
           {draft.trim().length < 2 ? "Nhập ít nhất 2 ký tự để bắt đầu tìm kiếm." : "Tìm theo tên phim tiếng Việt, tên gốc hoặc diễn viên."}
         </p>
 
-        {keyword.trim().length < 2 ? (
-          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Nhập ít nhất 2 ký tự</h3><p>Dùng ô tìm kiếm phía trên để khám phá phim phù hợp.</p></div>
-        ) : query.isError ? (
-          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Chưa thể tải kết quả</h3><p>Kiểm tra kết nối rồi thử lại sau nhé.</p></div>
-        ) : query.isLoading ? (
-          <div className="movie-grid catalog-grid">{Array.from({ length: 8 }).map((_, index) => <SkeletonCard key={index} />)}</div>
-        ) : items.length === 0 ? (
-          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Chưa tìm thấy phim phù hợp</h3><p>Thử tên khác, tên gốc hoặc một từ khóa ngắn hơn.</p></div>
-        ) : (
-          <div className="movie-grid catalog-grid">{items.map((movie, index) => <MovieCard key={movie.id} movie={movie} index={index} />)}</div>
-        )}
+        <div className="search-results-region" aria-live="polite">
+          {keyword.trim().length < 2 ? (
+            <div className="empty-state search-page-empty" role="status"><div className="search-page-empty-icon"><SearchIcon size={22} /></div><h3>Nhập ít nhất 2 ký tự</h3><p>Dùng ô tìm kiếm phía trên để khám phá phim phù hợp.</p></div>
+          ) : query.isError ? (
+            <div className="empty-state search-page-empty" role="alert"><div className="search-page-empty-icon"><SearchIcon size={22} /></div><h3>Chưa thể tải kết quả</h3><p>Kiểm tra kết nối rồi thử lại sau nhé.</p><button type="button" className="button button-ghost search-page-retry" onClick={() => void query.refetch()}>Thử lại</button></div>
+          ) : query.isLoading ? (
+            <div className="movie-grid catalog-grid" role="status" aria-label="Đang tìm kiếm"><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /></div>
+          ) : items.length === 0 ? (
+            <div className="empty-state search-page-empty" role="status"><div className="search-page-empty-icon"><SearchIcon size={22} /></div><h3>Chưa tìm thấy phim phù hợp</h3><p>Thử tên khác, tên gốc hoặc một từ khóa ngắn hơn.</p></div>
+          ) : (
+            <div className="movie-grid catalog-grid">{items.map((movie, index) => <MovieCard key={movie.id} movie={movie} index={index} />)}</div>
+          )}
+        </div>
       </main>
     </PageShell>
   );

@@ -4,6 +4,7 @@ import { getDb, getUserById } from "./db";
 import { specialChatAdminReads, specialChatAttachments, specialChatMessages, users } from "../drizzle/schema";
 import { storageBackend, storageGetSignedUrl, storagePut, storageRead } from "./storage";
 import { authenticateLocalRequest } from "./localAuth";
+import { chatTimestampFromEpochMilliseconds } from "./chatTimestamp";
 import type { Express } from "express";
 
 export const SPECIAL_CHAT_MEDIA_RULES = {
@@ -11,6 +12,11 @@ export const SPECIAL_CHAT_MEDIA_RULES = {
   video: { maxBytes: 32 * 1024 * 1024, mimes: ["video/mp4", "video/quicktime", "video/webm"] },
 } as const;
 const MAX_MESSAGES = 100;
+const chatMessageSelection = {
+  message: specialChatMessages,
+  attachment: specialChatAttachments,
+  createdAtEpochMs: sql<number>`CAST(UNIX_TIMESTAMP(${specialChatMessages.createdAt}) * 1000 AS UNSIGNED)`,
+};
 
 type Sender = "user" | "admin";
 export type SpecialChatMessage = {
@@ -45,8 +51,8 @@ function mediaUrl(attachmentId: number | null): string | null {
 }
 function asIso(value: Date | string | null | undefined): string {
   if (!value) return new Date(0).toISOString();
-  // MySQL DATETIME values have no timezone marker. Treat them as UTC rather
-  // than letting the cPanel host's local timezone shift the message clock.
+  // Fallback only for unexpected/legacy driver values. Normal chat queries use
+  // UNIX_TIMESTAMP(...)*1000 so the server's local timezone cannot shift them.
   const raw = typeof value === "string" ? value.trim() : value;
   const naiveMySqlDateTime = typeof raw === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
     ? `${raw.replace(" ", "T")}Z`
@@ -120,8 +126,8 @@ export async function uploadSpecialChatMedia(input: { userId: number; base64: st
   return { attachmentId, mimeType, byteSize: bytes.byteLength, mediaUrl: mediaUrl(attachmentId) };
 }
 
-async function mapMessages(rows: Array<{ message: typeof specialChatMessages.$inferSelect; attachment: typeof specialChatAttachments.$inferSelect | null }>): Promise<SpecialChatMessage[]> {
-  return rows.map(({ message, attachment }) => ({
+async function mapMessages(rows: Array<{ message: typeof specialChatMessages.$inferSelect; attachment: typeof specialChatAttachments.$inferSelect | null; createdAtEpochMs: number | string | null }>): Promise<SpecialChatMessage[]> {
+  return rows.map(({ message, attachment, createdAtEpochMs }) => ({
     id: message.id,
     userId: message.userId,
     sender: message.sender as Sender,
@@ -130,7 +136,7 @@ async function mapMessages(rows: Array<{ message: typeof specialChatMessages.$in
     mediaType: attachment?.mimeType ?? null,
     mediaWidth: attachment?.mediaWidth ?? null,
     mediaHeight: attachment?.mediaHeight ?? null,
-    createdAt: asIso(message.createdAt),
+    createdAt: chatTimestampFromEpochMilliseconds(createdAtEpochMs) ?? asIso(message.createdAt),
   }));
 }
 export async function listSpecialChatMessages(userId: number, afterId?: number, allowUnprivileged = false) {
@@ -139,7 +145,7 @@ export async function listSpecialChatMessages(userId: number, afterId?: number, 
   if (!db) throw new Error("Database is not available");
   const conditions = [eq(specialChatMessages.userId, userId)];
   if (afterId !== undefined) conditions.push(gt(specialChatMessages.id, afterId));
-  const rows = await db.select({ message: specialChatMessages, attachment: specialChatAttachments })
+  const rows = await db.select(chatMessageSelection)
     .from(specialChatMessages)
     .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, userId)))
     .where(and(...conditions)).orderBy(asc(specialChatMessages.id)).limit(MAX_MESSAGES);
@@ -158,7 +164,7 @@ export async function sendSpecialChatMessage(input: { userId: number; sender: Se
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const clientRequestId = input.clientRequestId?.trim() || randomUUID();
-  const existing = await db.select({ message: specialChatMessages, attachment: specialChatAttachments })
+  const existing = await db.select(chatMessageSelection)
     .from(specialChatMessages)
     .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
     .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId)))
@@ -170,7 +176,7 @@ export async function sendSpecialChatMessage(input: { userId: number; sender: Se
     id = Number(result[0]?.id);
   } catch (error) {
     // Concurrent retries can hit the unique request key after the first insert committed.
-    const existing = await db.select({ message: specialChatMessages, attachment: specialChatAttachments })
+    const existing = await db.select(chatMessageSelection)
       .from(specialChatMessages)
       .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
       .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId)))
@@ -179,10 +185,10 @@ export async function sendSpecialChatMessage(input: { userId: number; sender: Se
     throw error;
   }
   const rows = Number.isSafeInteger(id) && id > 0
-    ? await db.select({ message: specialChatMessages, attachment: specialChatAttachments }).from(specialChatMessages)
+    ? await db.select(chatMessageSelection).from(specialChatMessages)
       .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
       .where(eq(specialChatMessages.id, id)).limit(1)
-    : await db.select({ message: specialChatMessages, attachment: specialChatAttachments }).from(specialChatMessages)
+    : await db.select(chatMessageSelection).from(specialChatMessages)
       .leftJoin(specialChatAttachments, and(eq(specialChatMessages.attachmentId, specialChatAttachments.id), eq(specialChatAttachments.userId, input.userId)))
       .where(and(eq(specialChatMessages.userId, input.userId), eq(specialChatMessages.clientRequestId, clientRequestId))).limit(1);
   const mapped = await mapMessages(rows);
@@ -194,9 +200,10 @@ export async function listSpecialChatConversations(): Promise<SpecialChatConvers
   const db = await getDb();
   if (!db) return [];
   const latest = max(specialChatMessages.createdAt);
+  const latestEpochMs = sql<number>`CAST(UNIX_TIMESTAMP(${latest}) * 1000 AS UNSIGNED)`;
   const grouped = await db.select({
     userId: specialChatMessages.userId,
-    lastMessageAt: latest,
+    lastMessageAt: latestEpochMs,
     messageCount: sql<number>`count(*)`,
     memberMessageCount: sql<number>`SUM(CASE WHEN ${specialChatMessages.sender} = 'user' THEN 1 ELSE 0 END)`,
     latestMessageId: max(specialChatMessages.id),
@@ -236,7 +243,7 @@ export async function listSpecialChatConversations(): Promise<SpecialChatConvers
       latestUserMessageId: Number(row.latestUserMessageId ?? 0),
       latestMessageSender,
       needsReply: latestMessageSender === "user",
-      lastMessageAt: row.lastMessageAt ? asIso(row.lastMessageAt) : null,
+      lastMessageAt: chatTimestampFromEpochMilliseconds(row.lastMessageAt),
       lastMessagePreview: last?.text || (last?.attachmentId ? "[Tệp đính kèm]" : null),
     };
   });

@@ -25,6 +25,8 @@ final class PlaybackController: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var activeRequestID = UUID()
     private var seekRequestID = UUID()
+    /// Keep the user's play intent stable while AVPlayer is buffering or seeking.
+    private var wantsToPlay = false
     private var suppressLoadingUntil = Date.distantPast
     private var overlayRecoveryTask: Task<Void, Never>?
     private var resumeAfterOverlay = false
@@ -53,7 +55,20 @@ final class PlaybackController: ObservableObject {
                 guard let self, let requestID, self.activeRequestID == requestID else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
-                self.isPlaying = self.player.timeControlStatus == .playing
+                switch self.player.timeControlStatus {
+                case .playing:
+                    self.isPlaying = self.wantsToPlay
+                case .paused:
+                    // A delayed observer callback must not erase a newer play
+                    // or pause button action while AVPlayer changes status.
+                    self.isPlaying = self.wantsToPlay
+                case .waitingToPlayAtSpecifiedRate:
+                    // Waiting is still playback from the controls' point of
+                    // view; the loading indicator communicates the buffer wait.
+                    self.isPlaying = self.wantsToPlay
+                @unknown default:
+                    break
+                }
                 if !self.isSeeking, Date() >= self.suppressLoadingUntil {
                     self.isLoading = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 }
@@ -66,6 +81,7 @@ final class PlaybackController: ObservableObject {
     /// make the dismissal look sticky, so it is deferred until the animation is
     /// over.
     func pauseForDismissal() {
+        wantsToPlay = false
         player.pause()
         isPlaying = false
         isLoading = false
@@ -76,6 +92,7 @@ final class PlaybackController: ObservableObject {
         overlayRecoveryTask?.cancel()
         overlayRecoveryTask = nil
         resumeAfterOverlay = false
+        wantsToPlay = false
         player.pause()
         player.replaceCurrentItem(with: nil)
         activeURL = nil
@@ -103,11 +120,12 @@ final class PlaybackController: ObservableObject {
         try? session.setActive(true, options: [])
     }
     private func recoverAfterAudioRouteChange() {
-        guard activeURL != nil, isPlaying else { return }
+        guard activeURL != nil, wantsToPlay else { return }
         configureAudioSession()
         // Công tắc chuông/im lặng chỉ đổi audio route. Giữ nguyên item và
         // vị trí hiện tại, không replace/reload để tránh màn hình đen.
         player.play()
+        wantsToPlay = true
         isPlaying = true
     }
     func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, allowSubtitledPlaylist: Bool = true) {
@@ -118,6 +136,7 @@ final class PlaybackController: ObservableObject {
         seekRequestID = UUID()
         isSeeking = false
         suppressLoadingUntil = .distantPast
+        wantsToPlay = false
         player.pause()
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
@@ -181,6 +200,7 @@ final class PlaybackController: ObservableObject {
                 }
             }
             self.player.replaceCurrentItem(with: item)
+            self.wantsToPlay = true
             self.player.play()
             self.player.defaultRate = self.playbackRate
             self.player.rate = self.playbackRate
@@ -265,11 +285,13 @@ final class PlaybackController: ObservableObject {
     func recoverAfterForeground() {
         guard resumeAfterOverlay, activeURL != nil else { return }
         // Resume the same item; never reload HLS or seek on this path.
+        wantsToPlay = true
         player.play()
         isPlaying = true
         resumeAfterOverlay = false
     }
     private func handleReachedEnd() {
+        wantsToPlay = false
         player.pause()
         isPlaying = false
         isLoading = false
@@ -279,20 +301,28 @@ final class PlaybackController: ObservableObject {
     }
 
     func togglePlayback() {
-        if player.timeControlStatus == .playing { player.pause(); isPlaying = false; return }
+        if wantsToPlay || player.timeControlStatus == .playing {
+            wantsToPlay = false
+            player.pause()
+            isPlaying = false
+            return
+        }
         // Pressing play on a finished item starts it over instead of doing nothing.
         if didReachEnd {
             didReachEnd = false
+            wantsToPlay = true
             seek(to: 0)
             player.play()
             isPlaying = true
             return
         }
+        wantsToPlay = true
         player.play()
         isPlaying = true
     }
 
     func pause() {
+        wantsToPlay = false
         player.pause()
         isPlaying = false
     }
@@ -314,7 +344,7 @@ final class PlaybackController: ObservableObject {
 
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
-        let target = max(0, seconds)
+        let target = max(0, duration.isFinite && duration > 0 ? min(seconds, duration) : seconds)
         seekRequestID = UUID()
         let requestID = seekRequestID
         didReachEnd = false
@@ -322,7 +352,13 @@ final class PlaybackController: ObservableObject {
         isLoading = false
         suppressLoadingUntil = Date().addingTimeInterval(1.2)
         currentTime = target
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+        // A new button press or scrub release supersedes the previous request.
+        // Cancelling first prevents AVPlayer from walking through every queued
+        // target, which is the main source of seek stutter on HLS streams.
+        player.cancelPendingSeeks()
+        let seekTime = CMTime(seconds: target, preferredTimescale: 600)
+        let seekTolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
+        player.seek(to: seekTime, toleranceBefore: seekTolerance, toleranceAfter: seekTolerance) { [weak self] finished in
             guard let self else { return }
             Task { @MainActor in
                 guard self.seekRequestID == requestID else { return }
@@ -332,6 +368,16 @@ final class PlaybackController: ObservableObject {
                 }
                 self.isSeeking = false
                 self.isLoading = false
+                if self.wantsToPlay {
+                    // Some items remain paused after a cancelled/replaced seek;
+                    // restore the user's intent without changing a deliberate
+                    // pause that happened while the seek was in flight.
+                    if self.player.timeControlStatus != .playing { self.player.play() }
+                    self.isPlaying = true
+                } else {
+                    self.player.pause()
+                    self.isPlaying = false
+                }
             }
         }
     }
@@ -1718,11 +1764,16 @@ struct CinemaPlayerScreen: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.82))
                     .frame(width: 44, alignment: .leading)
-                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { scrubValue = $0; isScrubbing = true }), in: 0...max(1, playback.duration), onEditingChanged: { editing in
+                Slider(value: Binding(get: { isScrubbing ? scrubValue : playback.currentTime }, set: { value in
+                    // SwiftUI may write the binding during ordinary view
+                    // updates; those writes must not start a scrub implicitly.
+                    guard isScrubbing else { return }
+                    scrubValue = value
+                }), in: 0...max(1, playback.duration), onEditingChanged: { editing in
                     if editing {
                         scrubValue = playback.currentTime
                         isScrubbing = true
-                    } else {
+                    } else if isScrubbing {
                         let target = scrubValue
                         isScrubbing = false
                         playback.seek(to: target)

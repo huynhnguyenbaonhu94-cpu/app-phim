@@ -8,6 +8,7 @@ struct SpecialAccountChatScreen: View {
     @Environment(CinemaStore.self) private var store
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var messages: [RemoteSpecialChatMessage] = []
     @State private var loadedUserID: Int?
@@ -78,7 +79,7 @@ struct SpecialAccountChatScreen: View {
                     .foregroundStyle(Color.auroraAccent)
             }
         }
-        .task(id: chatTaskKey) {
+        .task(id: "\(chatTaskKey)-\(scenePhase)") {
             guard let account = store.accountUser, account.hasSpecialPrivileges else {
                 messages = []
                 loadedUserID = nil
@@ -97,9 +98,10 @@ struct SpecialAccountChatScreen: View {
                 isLoading = true
                 actionErrorVisible = false
             }
-            await refreshMessages(initial: true)
+            await refreshMessages(initial: messages.isEmpty)
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                let interval: Duration = scenePhase == .active ? .seconds(1) : .seconds(10)
+                try? await Task.sleep(for: interval)
                 if !Task.isCancelled { await refreshMessages(initial: false) }
             }
         }
@@ -120,7 +122,7 @@ struct SpecialAccountChatScreen: View {
             Group {
                 switch viewer.content {
                 case .image(let image): SpecialChatImageViewer(image: image)
-                case .video(let fileURL): SpecialChatVideoPlayerSheet(fileURL: fileURL)
+                case .video(let fileURL, let aspectRatio): SpecialChatVideoPlayerSheet(fileURL: fileURL, initialAspectRatio: aspectRatio)
                 }
             }
             .preferredColorScheme(.dark)
@@ -179,8 +181,8 @@ struct SpecialAccountChatScreen: View {
                                 rowWidth: rowWidth,
                                 maxBubbleWidth: bubbleWidth,
                                 maxMediaWidth: max(140, bubbleWidth - 24)
-                            ) { fileURL in
-                                mediaViewer = SpecialChatMediaViewerItem(content: .video(fileURL))
+                            ) { fileURL, aspectRatio in
+                                mediaViewer = SpecialChatMediaViewerItem(content: .video(fileURL, aspectRatio: aspectRatio))
                             } onViewImage: { image in
                                 mediaViewer = SpecialChatMediaViewerItem(content: .image(image))
                             }
@@ -453,9 +455,9 @@ struct SpecialAccountChatScreen: View {
             guard let track = tracks.first else { return (nil, nil) }
             let naturalSize = try await track.load(.naturalSize)
             let transform = try await track.load(.preferredTransform)
-            let displayedSize = naturalSize.applying(transform)
-            let width = abs(displayedSize.width)
-            let height = abs(displayedSize.height)
+            let displayedRect = CGRect(origin: .zero, size: naturalSize).applying(transform).standardized
+            let width = displayedRect.width
+            let height = displayedRect.height
             guard width.isFinite, height.isFinite, width >= 1, height >= 1, width <= 16384, height <= 16384 else { return (nil, nil) }
             return (Int(width.rounded()), Int(height.rounded()))
         } catch {
@@ -470,7 +472,7 @@ private struct SpecialChatMessageBubble: View {
     let rowWidth: CGFloat
     let maxBubbleWidth: CGFloat
     let maxMediaWidth: CGFloat
-    let onPlayVideo: (URL) -> Void
+    let onPlayVideo: (URL, CGFloat?) -> Void
     let onViewImage: (UIImage) -> Void
     private var outgoing: Bool { !message.isFromAdmin }
 
@@ -516,14 +518,13 @@ private struct SpecialChatMediaPreview: View {
     let mediaWidth: Double?
     let mediaHeight: Double?
     let maxWidth: CGFloat
-    let onPlayVideo: (URL) -> Void
+    let onPlayVideo: (URL, CGFloat?) -> Void
     let onViewImage: (UIImage) -> Void
     @State private var image: UIImage?
     @State private var isLoading = false
     @State private var error = false
     @State private var errorMessage: String?
     @State private var retryToken = 0
-    @State private var discoveredVideoAspectRatio: CGFloat?
 
     private var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
     private var cacheKey: String { "\(userID):\(path)" }
@@ -531,7 +532,7 @@ private struct SpecialChatMediaPreview: View {
         if let width = mediaWidth, let height = mediaHeight, width > 0, height > 0 {
             return CGFloat(width / height)
         }
-        return discoveredVideoAspectRatio ?? SpecialChatMediaCache.shared.aspectRatio(for: cacheKey)
+        return nil
     }
     private var videoDisplaySize: CGSize {
         let ratio = mediaAspectRatio ?? (16.0 / 9.0)
@@ -672,12 +673,10 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathComponent("cinemora-chat-\(UUID().uuidString)")
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
-            if mediaWidth == nil || mediaHeight == nil,
-               let measuredRatio = await Self.videoAspectRatio(at: fileURL) {
-                discoveredVideoAspectRatio = measuredRatio
-                SpecialChatMediaCache.shared.insertAspectRatio(measuredRatio, for: cacheKey)
-            }
-            onPlayVideo(fileURL)
+            let measuredRatio = await Self.videoAspectRatio(at: fileURL)
+            // The measured ratio is passed to the full-screen viewer only. Mutating
+            // preview state here caused its bubble to jump orientation on dismissal.
+            onPlayVideo(fileURL, measuredRatio ?? mediaAspectRatio)
         } catch {
             self.error = true
             errorMessage = "Không tải được video · chạm để thử lại"
@@ -692,9 +691,9 @@ private struct SpecialChatMediaPreview: View {
             guard let track = tracks.first else { return nil }
             let naturalSize = try await track.load(.naturalSize)
             let transform = try await track.load(.preferredTransform)
-            let displayedSize = naturalSize.applying(transform)
-            let width = abs(displayedSize.width)
-            let height = abs(displayedSize.height)
+            let displayedRect = CGRect(origin: .zero, size: naturalSize).applying(transform).standardized
+            let width = displayedRect.width
+            let height = displayedRect.height
             guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
             return width / height
         } catch {
@@ -706,7 +705,7 @@ private struct SpecialChatMediaPreview: View {
 private struct SpecialChatMediaViewerItem: Identifiable {
     enum Content {
         case image(UIImage)
-        case video(URL)
+        case video(URL, aspectRatio: CGFloat?)
     }
     let id = UUID()
     let content: Content
@@ -769,17 +768,27 @@ private struct SpecialChatImageViewer: View {
 
 private struct SpecialChatVideoPlayerSheet: View {
     let fileURL: URL
+    let initialAspectRatio: CGFloat?
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
-    @State private var playerLooper: AVPlayerLooper?
     @State private var currentTime = 0.0
     @State private var duration = 0.0
     @State private var isPlaying = true
     @State private var isSeeking = false
     @State private var isMuted = false
     @State private var timeObserver: Any?
+    @State private var endObserver: NSObjectProtocol?
+    @State private var seekRequestID = UUID()
+    @State private var pendingSeekTarget: Double?
+    @State private var wantsToPlay = true
     @State private var playbackError: String?
-    @State private var videoAspectRatio: CGFloat = 9.0 / 16.0
+    @State private var videoAspectRatio: CGFloat
+
+    init(fileURL: URL, initialAspectRatio: CGFloat?) {
+        self.fileURL = fileURL
+        self.initialAspectRatio = initialAspectRatio
+        _videoAspectRatio = State(initialValue: initialAspectRatio ?? (16.0 / 9.0))
+    }
 
     var body: some View {
         ZStack {
@@ -828,8 +837,12 @@ private struct SpecialChatVideoPlayerSheet: View {
                         .padding(.bottom, 8)
                 }
                 Slider(value: $currentTime, in: 0...max(duration, 1), onEditingChanged: { editing in
-                    isSeeking = editing
-                    if !editing { seek(to: currentTime) }
+                    if editing {
+                        isSeeking = true
+                        pendingSeekTarget = currentTime
+                    } else {
+                        seek(to: currentTime)
+                    }
                 })
                 .tint(Color.auroraAccent)
                 .disabled(duration <= 0 || playbackError != nil)
@@ -887,15 +900,13 @@ private struct SpecialChatVideoPlayerSheet: View {
                 if let track = tracks.first {
                     let naturalSize = try await track.load(.naturalSize)
                     let preferredTransform = try await track.load(.preferredTransform)
-                    let displayedSize = naturalSize.applying(preferredTransform)
-                    let width = abs(displayedSize.width)
-                    let height = abs(displayedSize.height)
-                    if width > 0, height > 0 {
-                        videoAspectRatio = width / height
+                    let displayedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform).standardized
+                    if displayedRect.width > 0, displayedRect.height > 0 {
+                        videoAspectRatio = displayedRect.width / displayedRect.height
                     }
                 }
             } catch {
-                // Keep a portrait-friendly fallback; playback does not depend on metadata.
+                // Keep the supplied aspect-ratio fallback; playback does not depend on metadata.
             }
         }
         .onDisappear(perform: stopPlayback)
@@ -903,43 +914,81 @@ private struct SpecialChatVideoPlayerSheet: View {
 
     private func startPlayback() {
         let item = AVPlayerItem(url: fileURL)
-        let queuePlayer = AVQueuePlayer()
-        playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: item)
-        player = queuePlayer
-        queuePlayer.play()
-        timeObserver = queuePlayer.addPeriodicTimeObserver(
+        let playerInstance = AVPlayer(playerItem: item)
+        player = playerInstance
+        wantsToPlay = true
+        playerInstance.play()
+        isPlaying = true
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                guard let activePlayer = self.player, activePlayer === playerInstance else { return }
+                self.seekRequestID = UUID()
+                let requestID = self.seekRequestID
+                activePlayer.currentItem?.cancelPendingSeeks()
+                self.pendingSeekTarget = 0
+                self.isSeeking = true
+                activePlayer.seek(
+                    to: .zero,
+                    toleranceBefore: CMTime(seconds: 0.12, preferredTimescale: 600),
+                    toleranceAfter: CMTime(seconds: 0.12, preferredTimescale: 600)
+                ) { finished in
+                    Task { @MainActor in
+                        guard self.seekRequestID == requestID, let currentPlayer = self.player, currentPlayer === playerInstance else { return }
+                        self.isSeeking = false
+                        self.pendingSeekTarget = nil
+                        if finished { self.currentTime = 0 }
+                        if self.wantsToPlay {
+                            playerInstance.play()
+                            self.isPlaying = true
+                        }
+                    }
+                }
+            }
+        }
+        timeObserver = playerInstance.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
             queue: .main
         ) { time in
             if !isSeeking, time.seconds.isFinite, time.seconds >= 0 { currentTime = time.seconds }
-            let itemDuration = queuePlayer.currentItem?.duration.seconds ?? 0
+            let itemDuration = playerInstance.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite && itemDuration > 0 { duration = itemDuration }
-            isPlaying = queuePlayer.timeControlStatus == .playing
+            isPlaying = wantsToPlay
         }
     }
 
     private func stopPlayback() {
+        seekRequestID = UUID()
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
         player?.pause()
         if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
-        playerLooper = nil
         player = nil
         try? FileManager.default.removeItem(at: fileURL)
     }
 
     private func togglePlayback() {
         guard let player else { return }
-        if player.timeControlStatus == .playing {
+        if wantsToPlay {
+            wantsToPlay = false
             player.pause()
             isPlaying = false
         } else {
+            if duration > 0, player.currentTime().seconds >= duration - 0.05 {
+                seek(to: 0)
+            }
+            wantsToPlay = true
             player.play()
             isPlaying = true
         }
     }
 
     private func seek(by offset: Double) {
-        let base = player?.currentTime().seconds ?? currentTime
+        let base = pendingSeekTarget ?? currentTime
         guard base.isFinite else { return }
         seek(to: base + offset)
     }
@@ -949,11 +998,34 @@ private struct SpecialChatVideoPlayerSheet: View {
         let upperBound = duration > 0 ? duration : max(0, seconds)
         let bounded = min(max(0, seconds), upperBound)
         currentTime = bounded
-        player?.seek(
+        pendingSeekTarget = bounded
+        isSeeking = true
+        guard let player else {
+            isSeeking = false
+            pendingSeekTarget = nil
+            return
+        }
+        seekRequestID = UUID()
+        let requestID = seekRequestID
+        player.currentItem?.cancelPendingSeeks()
+        player.seek(
             to: CMTime(seconds: bounded, preferredTimescale: 600),
-            toleranceBefore: .positiveInfinity,
-            toleranceAfter: .positiveInfinity
-        )
+            toleranceBefore: CMTime(seconds: 0.12, preferredTimescale: 600),
+            toleranceAfter: CMTime(seconds: 0.12, preferredTimescale: 600)
+        ) { finished in
+            Task { @MainActor in
+                guard self.seekRequestID == requestID, let activePlayer = self.player, activePlayer === player else { return }
+                if finished {
+                    let actual = activePlayer.currentTime().seconds
+                    self.currentTime = actual.isFinite ? actual : bounded
+                }
+                self.pendingSeekTarget = nil
+                self.isSeeking = false
+                self.isPlaying = self.wantsToPlay
+                if self.wantsToPlay { activePlayer.play() }
+                else { activePlayer.pause() }
+            }
+        }
     }
 
     private static func timeLabel(_ seconds: Double) -> String {
@@ -1120,9 +1192,18 @@ private extension String {
             ?? Self.utcNaiveDateFormatter.date(from: self)
         guard let date else { return "" }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")
-        formatter.dateFormat = "HH:mm"
+        formatter.locale = Locale(identifier: "vi_VN")
+        let vietnamTimeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh") ?? TimeZone(secondsFromGMT: 7 * 60 * 60) ?? .current
+        formatter.timeZone = vietnamTimeZone
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = vietnamTimeZone
+        if calendar.isDateInToday(date) {
+            formatter.dateFormat = "HH:mm:ss"
+        } else if calendar.isDateInYesterday(date) {
+            formatter.dateFormat = "'Hôm qua' HH:mm:ss"
+        } else {
+            formatter.dateFormat = "dd/MM/yyyy HH:mm:ss"
+        }
         return formatter.string(from: date)
     }
 
@@ -1141,7 +1222,6 @@ private final class SpecialChatMediaCache {
     static let shared = SpecialChatMediaCache()
     private let images = NSCache<NSString, UIImage>()
     private let videos = NSCache<NSString, NSData>()
-    private let aspectRatios = NSCache<NSString, NSNumber>()
 
     private init() {
         images.totalCostLimit = 48 * 1024 * 1024
@@ -1157,14 +1237,6 @@ private final class SpecialChatMediaCache {
     func insertVideoData(_ data: Data, for key: String) {
         guard data.count <= videos.totalCostLimit else { return }
         videos.setObject(data as NSData, forKey: key as NSString, cost: data.count)
-    }
-    func aspectRatio(for key: String) -> CGFloat? {
-        guard let value = aspectRatios.object(forKey: key as NSString)?.doubleValue, value.isFinite, value > 0 else { return nil }
-        return CGFloat(value)
-    }
-    func insertAspectRatio(_ ratio: CGFloat, for key: String) {
-        guard ratio.isFinite, ratio > 0 else { return }
-        aspectRatios.setObject(NSNumber(value: Double(ratio)), forKey: key as NSString)
     }
 }
 

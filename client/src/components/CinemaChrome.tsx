@@ -104,7 +104,9 @@ export function SiteHeader() {
             aria-expanded={mobileSearchOpen}
             aria-controls="mobile-search-panel"
           >
-            <Search size={19} />
+            {mobileSearchOpen ? <X size={17} /> : <Search size={17} />}
+            <span className="mobile-search-label">Tìm phim, diễn viên</span>
+            <span className="mobile-search-label-compact">Tìm phim</span>
           </button>
 
           {/* Mobile: hamburger */}
@@ -119,7 +121,14 @@ export function SiteHeader() {
       )}
 
       {mobileSearchOpen && (
-        <form id="mobile-search-panel" className="mobile-search-panel" onSubmit={submit} role="search" aria-label="Tìm phim trên điện thoại">
+        <form id="mobile-search-panel" className="mobile-search-panel" onSubmit={submit} role="search" aria-labelledby="mobile-search-title">
+          <div className="mobile-search-panel-head">
+            <div>
+              <span id="mobile-search-title" className="mobile-search-panel-title">Tìm phim</span>
+              <span className="mobile-search-panel-caption">Tên phim, tên gốc hoặc diễn viên</span>
+            </div>
+            <button type="button" className="mobile-search-close" onClick={() => setMobileSearchOpen(false)} aria-label="Đóng tìm kiếm"><X size={17} /></button>
+          </div>
           <div className="mobile-search-field">
             <Search size={19} aria-hidden="true" />
             <input
@@ -137,7 +146,6 @@ export function SiteHeader() {
             {value && <button type="button" className="mobile-search-clear" onClick={() => setValue("")} aria-label="Xóa từ khóa"><X size={16} /></button>}
           </div>
           <button type="submit" className="mobile-search-submit" disabled={value.trim().length < 2}>Tìm</button>
-          <button type="button" className="mobile-search-close" onClick={() => setMobileSearchOpen(false)} aria-label="Đóng tìm kiếm"><X size={17} /></button>
         </form>
       )}
 
