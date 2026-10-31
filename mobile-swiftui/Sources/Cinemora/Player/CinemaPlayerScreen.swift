@@ -355,7 +355,7 @@ final class PlaybackController: ObservableObject {
         // A new button press or scrub release supersedes the previous request.
         // Cancelling first prevents AVPlayer from walking through every queued
         // target, which is the main source of seek stutter on HLS streams.
-        player.cancelPendingSeeks()
+        player.currentItem?.cancelPendingSeeks()
         let seekTime = CMTime(seconds: target, preferredTimescale: 600)
         let seekTolerance = CMTime(seconds: 0.25, preferredTimescale: 600)
         player.seek(to: seekTime, toleranceBefore: seekTolerance, toleranceAfter: seekTolerance) { [weak self] finished in
