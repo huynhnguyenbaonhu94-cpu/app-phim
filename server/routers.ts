@@ -30,6 +30,7 @@ import {
   importMovieImageFromUrl,
   saveMovieImage,
   updateCustomMovie,
+  withAbsoluteMovieArtwork,
 } from "./customMovies";
 import { actorSearchStatus, searchActors } from "./actorSearch";
 import { fetchMovieCredits } from "./movieCredits";
@@ -636,20 +637,20 @@ export const appRouter = router({
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({
-    list: adminProcedure.query(() => listCustomMovies()),
+    list: adminProcedure.query(async () => (await listCustomMovies()).map(withAbsoluteMovieArtwork)),
     get: adminProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .query(async ({ input }) => {
         const row = await getCustomMovieById(input.id);
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Không tìm thấy phim này." });
-        return { ...row, sources: await customMovieSources(row.slug) };
+        return { ...withAbsoluteMovieArtwork(row), sources: await customMovieSources(row.slug) };
       }),
-    create: adminProcedure.input(customMovieForm).mutation(({ input }) => createCustomMovie(input)),
+    create: adminProcedure.input(customMovieForm).mutation(async ({ input }) => withAbsoluteMovieArtwork(await createCustomMovie(input))),
     update: adminProcedure
       .input(customMovieForm.extend({ id: z.number().int().positive() }))
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
         const { id, ...rest } = input;
-        return updateCustomMovie(id, rest);
+        return withAbsoluteMovieArtwork(await updateCustomMovie(id, rest));
       }),
     remove: adminProcedure
       .input(z.object({ id: z.number().int().positive() }))

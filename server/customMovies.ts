@@ -16,6 +16,7 @@ import type { Movie, MovieDetail } from "./cinema";
 import { registerStreamSource } from "./cinema";
 import { listMovieSources, listSourceNamesBySlug } from "./movieSources";
 import { storagePutPublic } from "./storage";
+import { absoluteMovieArtworkUrl } from "./publicUrls";
 
 export type CustomMovieTag = { name: string; slug: string };
 /** Đầu vào từ biểu mẫu quản trị: slug có thể thiếu, sẽ tự sinh từ tên. */
@@ -132,8 +133,8 @@ export function toApiMovie(row: CustomMovieRow): Movie {
     slug: row.slug,
     name: row.name,
     originName: row.originName ?? "",
-    poster: row.posterUrl ?? row.thumbUrl ?? null,
-    backdrop: row.thumbUrl ?? row.posterUrl ?? null,
+    poster: absoluteMovieArtworkUrl(row.posterUrl ?? row.thumbUrl),
+    backdrop: absoluteMovieArtworkUrl(row.thumbUrl ?? row.posterUrl),
     year: row.year ?? null,
     quality: row.quality ?? "FHD",
     episodeCurrent: row.episodeCurrent ?? (row.movieType === "single" ? "Full" : ""),
@@ -159,6 +160,15 @@ export function toApiMovie(row: CustomMovieRow): Movie {
     // Ngày cập nhật luôn là mốc thật của bản ghi (tự đổi mỗi lần admin lưu),
     // không dùng cột updatedDate do admin nhập tay trước đây nữa.
     updatedAt: iso(row.updatedAt) ?? row.updatedDate,
+  };
+}
+
+/** Return admin movie fields with absolute artwork links while keeping storage unchanged. */
+export function withAbsoluteMovieArtwork(row: CustomMovieRow): CustomMovieRow {
+  return {
+    ...row,
+    posterUrl: absoluteMovieArtworkUrl(row.posterUrl),
+    thumbUrl: absoluteMovieArtworkUrl(row.thumbUrl),
   };
 }
 
@@ -286,7 +296,7 @@ export async function getCustomMovieDetail(slug: string): Promise<MovieDetail | 
   const people = actorList(row);
   return {
     ...movie,
-    actorProfiles: people.map((person) => ({ name: person.name, image: person.image ?? null })),
+    actorProfiles: people.map((person) => ({ name: person.name, image: absoluteMovieArtworkUrl(person.image) })),
     servers: await mergeCustomSources(row.slug, []),
   };
 }
@@ -462,7 +472,7 @@ async function storeImageBuffer(buffer: Buffer): Promise<{ url: string; mimeType
   const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${kind}`;
   const mimeType = kind === "jpg" ? "image/jpeg" : `image/${kind}`;
   const stored = await storagePutPublic(`movie-images/${name}`, buffer, mimeType);
-  return { url: stored.url, mimeType };
+  return { url: absoluteMovieArtworkUrl(stored.url) ?? stored.url, mimeType };
 }
 
 /** Lưu ảnh poster/thumbnail/diễn viên admin tải lên, trả về URL công khai. */

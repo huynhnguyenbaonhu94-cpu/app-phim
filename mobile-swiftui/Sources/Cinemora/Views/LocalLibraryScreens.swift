@@ -69,7 +69,7 @@ struct WatchHistoryScreen: View {
         HStack(spacing: 12) {
             NavigationLink(destination: ResumeMovieScreen(record: record)) {
                 HStack(spacing: 13) {
-                    PosterArt(url: record.movie.movie.posterURL)
+                    PosterArt(url: record.movie.movie.posterURL, fallbackURL: record.movie.movie.backdropURL)
                         .frame(width: 86, height: 120)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay {
@@ -207,7 +207,7 @@ struct FavoritesScreen: View {
         ZStack(alignment: .topTrailing) {
             NavigationLink(destination: MovieDetailScreen(slug: record.slug)) {
                 VStack(alignment: .leading, spacing: 9) {
-                    PosterArt(url: record.movie.posterURL)
+                    PosterArt(url: record.movie.posterURL, fallbackURL: record.movie.backdropURL)
                         .aspectRatio(0.69, contentMode: .fit)
                         .overlay(alignment: .topLeading) {
                             if let quality = record.quality, !quality.isEmpty {

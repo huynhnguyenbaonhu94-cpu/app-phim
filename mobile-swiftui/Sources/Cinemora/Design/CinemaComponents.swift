@@ -106,6 +106,7 @@ private final class PosterImageCache {
 
 struct PosterArt: View {
     let url: URL?
+    var fallbackURL: URL? = nil
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var isLoading = false
@@ -128,7 +129,7 @@ struct PosterArt: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
-            .task(id: url) {
+            .task(id: "\(url?.absoluteString ?? "")|\(fallbackURL?.absoluteString ?? "")") {
                 await loadImage(targetWidth: proxy.size.width)
             }
         }
@@ -136,7 +137,11 @@ struct PosterArt: View {
     }
 
     private func loadImage(targetWidth: CGFloat) async {
-        guard let url else {
+        var candidates: [URL] = []
+        for candidate in [url, fallbackURL].compactMap({ $0 }) where !candidates.contains(candidate) {
+            candidates.append(candidate)
+        }
+        guard !candidates.isEmpty else {
             image = nil
             isLoading = false
             return
@@ -148,40 +153,52 @@ struct PosterArt: View {
         let width = targetWidth > 1 ? targetWidth : 300
         let neededPixels = min(max(width * displayScale, 240), 1400)
 
-        if let cached = PosterImageCache.shared.object(forKey: url as NSURL),
-           cached.size.width * cached.scale >= neededPixels * 0.9 {
-            // `.task` re-runs whenever the view re-appears, so never write a
-            // value that is already set: each write would invalidate this view
-            // again immediately after a tab switch.
-            if image !== cached { image = cached }
-            if isLoading { isLoading = false }
-            return
+        for candidate in candidates {
+            if let cached = PosterImageCache.shared.object(forKey: candidate as NSURL),
+               cached.size.width * cached.scale >= neededPixels * 0.9 {
+                // `.task` re-runs whenever the view re-appears, so never write a
+                // value that is already set: each write would invalidate this view
+                // again immediately after a tab switch.
+                if image !== cached { image = cached }
+                if isLoading { isLoading = false }
+                return
+            }
         }
 
         image = nil
         isLoading = true
         defer { isLoading = false }
         let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(700), .seconds(1.5)]
-        for attempt in 0..<retryDelays.count {
-            do {
-                var request = URLRequest(url: url)
-                request.cachePolicy = .returnCacheDataElseLoad
-                request.timeoutInterval = 20
-                let (data, response) = try await PosterImageCache.session.data(for: request)
-                guard !Task.isCancelled,
-                      let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode) else { continue }
-                guard let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { continue }
-                guard !Task.isCancelled else { return }
-                let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
-                PosterImageCache.shared.setObject(decoded, forKey: url as NSURL, cost: cost)
-                withAnimation(.easeOut(duration: 0.3)) { image = decoded }
-                return
-            } catch is CancellationError {
-                return
-            } catch {
-                guard attempt < retryDelays.count - 1, !Task.isCancelled else { return }
-                try? await Task.sleep(for: retryDelays[attempt])
+        for candidate in candidates {
+            for attempt in 0..<retryDelays.count {
+                do {
+                    var request = URLRequest(url: candidate)
+                    request.cachePolicy = .returnCacheDataElseLoad
+                    request.timeoutInterval = 20
+                    request.httpShouldHandleCookies = true
+                    request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                    let (data, response) = try await PosterImageCache.session.data(for: request)
+                    guard !Task.isCancelled else { return }
+                    guard let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode),
+                          (http.mimeType?.lowercased().hasPrefix("image/") == true) else {
+                        // A missing legacy upload can return the website's HTML
+                        // shell with status 200. Do not treat that as artwork;
+                        // move on to the thumbnail/poster alternative immediately.
+                        break
+                    }
+                    guard let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { break }
+                    guard !Task.isCancelled else { return }
+                    let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+                    PosterImageCache.shared.setObject(decoded, forKey: candidate as NSURL, cost: cost)
+                    withAnimation(.easeOut(duration: 0.3)) { image = decoded }
+                    return
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard attempt < retryDelays.count - 1, !Task.isCancelled else { break }
+                    try? await Task.sleep(for: retryDelays[attempt])
+                }
             }
         }
     }
@@ -217,7 +234,7 @@ struct MoviePosterCard: View {
         NavigationLink(value: movie) {
             VStack(alignment: .leading, spacing: 9) {
                 ZStack(alignment: .topLeading) {
-                    PosterArt(url: movie.posterURL)
+                    PosterArt(url: movie.posterURL, fallbackURL: movie.backdropURL)
                     LinearGradient.auroraScrim
                     if let quality = movie.quality, !quality.isEmpty {
                         Text(quality.uppercased())
@@ -286,7 +303,7 @@ struct MovieShelfCard: View {
         NavigationLink(value: movie) {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack(alignment: .bottomLeading) {
-                    PosterArt(url: movie.backdropURL)
+                    PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL)
                     LinearGradient.auroraScrim
                     VStack(alignment: .leading, spacing: 5) {
                         Text(movie.name)
@@ -360,7 +377,7 @@ struct FeaturedMovieCard: View {
     var body: some View {
         NavigationLink(value: movie) {
             ZStack(alignment: .bottomLeading) {
-                PosterArt(url: movie.backdropURL)
+                PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL)
                     .frame(height: 430)
 
                 // Hai lớp mờ: lớp trên giữ cho nhãn và thanh trạng thái đọc được,

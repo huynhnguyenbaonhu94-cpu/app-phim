@@ -188,6 +188,7 @@ function ImagePicker({
   const [linkState, setLinkState] = useState<"idle" | "loading" | "importing" | "ready" | "error">("idle");
   const [note, setNote] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewNonce, setPreviewNonce] = useState(() => Date.now());
 
   const [cropOpen, setCropOpen] = useState(false);
   const [cropAspect, setCropAspect] = useState<CropAspect>(aspect);
@@ -202,6 +203,7 @@ function ImagePicker({
     setSource(value);
     setLinkDraft(isRemoteLink(value) ? value : "");
     setPreviewFailed(false);
+    setPreviewNonce(Date.now());
   }, [value]);
 
   useEffect(
@@ -436,6 +438,19 @@ function ImagePicker({
   }
 
   const showPreview = Boolean(source) && !previewFailed;
+  const previewSource = useMemo(() => {
+    if (!source || source.startsWith("data:")) return source;
+    try {
+      const previewUrl = new URL(source, window.location.origin);
+      if (previewUrl.pathname.startsWith("/uploads/movie-images/")) {
+        // Bust legacy image cache so deleted local files do not look valid in
+        // the editor just because the admin browser still has an old copy.
+        previewUrl.searchParams.set("_cinemora_preview", String(previewNonce));
+        return previewUrl.toString();
+      }
+    } catch { /* Keep the original URL; the image error handler remains authoritative. */ }
+    return source;
+  }, [source, previewNonce]);
 
   return (
     <div className={`image-picker ${className}`}>
@@ -447,9 +462,9 @@ function ImagePicker({
         <div className={busy ? "image-picker-preview is-loading" : "image-picker-preview"}>
           {showPreview ? (
             <img
-              src={source}
+              src={previewSource}
               alt="Xem trước"
-              key={source}
+              key={previewSource}
               onError={() => setPreviewFailed(true)}
             />
           ) : (
@@ -487,7 +502,7 @@ function ImagePicker({
             />
           </div>
           <div className="image-picker-actions">
-            {source && (
+            {source && !previewFailed && (
               <button type="button" className="button button-ghost" onClick={openCrop} disabled={busy}>
                 <Crop size={14} /> Chỉnh sửa
               </button>
@@ -508,7 +523,7 @@ function ImagePicker({
       </div>
 
       {previewFailed && source && (
-        <p className="image-picker-error">Không hiện được ảnh xem trước từ link này. Kiểm tra lại link ảnh.</p>
+        <p className="image-picker-error">Không tải được ảnh từ máy chủ. Nếu đây là ảnh cũ trong /uploads, tệp có thể đã bị thiếu — hãy chọn lại ảnh gốc để tải lên.</p>
       )}
       {note && !error && <p className="image-picker-note">{note}</p>}
       {error && <p className="image-picker-error">{error}</p>}

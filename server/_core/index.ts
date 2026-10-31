@@ -2,7 +2,9 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { movieSubtitleFallbackUrl, movieSubtitleTrackVtt, movieSubtitleVtt } from "../movieSources";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -20,6 +22,24 @@ import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../stor
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
 const tvProxyOrigin = "https://baothanhhoa.vn";
+
+function legacyUploadsRoots(): string[] {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const configured = process.env.UPLOADS_DIR?.trim();
+  const candidates = [
+    configured ? path.resolve(configured) : null,
+    path.resolve(process.cwd(), "uploads"),
+    // The server is bundled to dist/index.js in production, but can also run
+    // directly from server/_core during development.
+    path.resolve(moduleDirectory, "../uploads"),
+    path.resolve(moduleDirectory, "../../uploads"),
+  ].filter((root): root is string => Boolean(root));
+  const roots: string[] = [];
+  for (const root of candidates) {
+    if (existsSync(root) && !roots.includes(root)) roots.push(root);
+  }
+  return roots;
+}
 
 function getAllowedTvSource(raw: string | undefined) {
   if (!raw) return null;
@@ -139,7 +159,13 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads"), { maxAge: "7d", fallthrough: true }));
+  const uploadRoots = legacyUploadsRoots();
+  if (uploadRoots.length === 0) {
+    console.warn("[Uploads] Legacy /uploads directory not found; configure UPLOADS_DIR if it is stored outside the app root.");
+  }
+  for (const root of uploadRoots) {
+    app.use("/uploads", express.static(root, { maxAge: "7d", fallthrough: true }));
+  }
   app.get("/api/tv/events", async (req, res) => {
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");

@@ -499,7 +499,7 @@ struct MovieDetailScreen: View {
 
     private func heroSection(_ movie: Movie, width: CGFloat) -> some View {
         ZStack(alignment: .bottomLeading) {
-            PosterArt(url: movie.backdropURL).frame(width: width, height: 440)
+            PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL).frame(width: width, height: 440)
             LinearGradient(
                 colors: [Color.clear, Color.auroraInk.opacity(0.3), Color.auroraInk],
                 startPoint: .center,

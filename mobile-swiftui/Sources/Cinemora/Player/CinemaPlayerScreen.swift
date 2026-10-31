@@ -785,7 +785,7 @@ struct CinemaPlayerScreen: View {
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else {
-                    PosterArt(url: movie.backdropURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
+                    PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
                 }
 
                 if playback.activeURL != nil {
@@ -1857,7 +1857,7 @@ struct CinemaPlayerScreen: View {
                                     openRelatedMovie(related)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 8) {
-                                        PosterArt(url: related.posterURL)
+                                        PosterArt(url: related.posterURL, fallbackURL: related.backdropURL)
                                             .frame(height: 180)
                                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                             .overlay {
