@@ -175,6 +175,7 @@ struct SpecialAccountChatScreen: View {
                             let bubbleWidth = min(420, rowWidth * 0.82)
                             SpecialChatMessageBubble(
                                 message: message,
+                                userID: store.accountUser?.id ?? 0,
                                 rowWidth: rowWidth,
                                 maxBubbleWidth: bubbleWidth,
                                 maxMediaWidth: max(140, bubbleWidth - 24)
@@ -347,7 +348,7 @@ struct SpecialAccountChatScreen: View {
         }
         do {
             let prepared = try await loadPickedMedia(item)
-            let uploaded = try await api.uploadSpecialChatMedia(data: prepared.data, filename: prepared.filename, mimeType: prepared.mimeType)
+            let uploaded = try await api.uploadSpecialChatMedia(data: prepared.data, filename: prepared.filename, mimeType: prepared.mimeType, mediaWidth: prepared.mediaWidth, mediaHeight: prepared.mediaHeight)
             guard store.accountUser?.id == ownerUserID, store.accountUser?.hasSpecialPrivileges == true else {
                 actionErrorVisible = true
                 errorNote = "Tài khoản đã thay đổi trong lúc tải tệp; tệp chưa được gửi."
@@ -397,18 +398,19 @@ struct SpecialAccountChatScreen: View {
         messages.append(message)
     }
 
-    private func prepareMedia(_ data: Data, contentType: UTType?) throws -> (data: Data, filename: String, mimeType: String) {
+    private func prepareMedia(_ data: Data, contentType: UTType?, mediaWidth: Int? = nil, mediaHeight: Int? = nil) throws -> (data: Data, filename: String, mimeType: String, mediaWidth: Int?, mediaHeight: Int?) {
         if contentType?.conforms(to: .movie) == true || contentType?.conforms(to: .video) == true {
             let mime = contentType?.preferredMIMEType ?? "video/mp4"
             guard ["video/mp4", "video/quicktime"].contains(mime) else { throw SpecialChatClientError.unsupportedVideo }
             guard data.count <= 32 * 1024 * 1024 else { throw SpecialChatClientError.videoTooLarge }
             let ext = contentType?.preferredFilenameExtension ?? (mime == "video/quicktime" ? "mov" : "mp4")
-            return (data, "video.\(ext)", mime)
+            return (data, "video.\(ext)", mime, mediaWidth, mediaHeight)
         }
 
         if contentType?.preferredMIMEType == "image/gif" {
             guard data.count <= 8 * 1024 * 1024 else { throw SpecialChatClientError.imageTooLarge }
-            return (data, "image.gif", "image/gif")
+            let image = UIImage(data: data)
+            return (data, "image.gif", "image/gif", image.map { Int($0.size.width.rounded()) }, image.map { Int($0.size.height.rounded()) })
         }
         guard let image = UIImage(data: data) else { throw SpecialChatClientError.invalidFile }
         let maxDimension: CGFloat = 1800
@@ -418,11 +420,13 @@ struct SpecialAccountChatScreen: View {
         let normalized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         guard let jpeg = normalized.jpegData(compressionQuality: 0.82) else { throw SpecialChatClientError.invalidFile }
         guard jpeg.count <= 8 * 1024 * 1024 else { throw SpecialChatClientError.imageTooLarge }
-        return (jpeg, "image.jpg", "image/jpeg")
+        return (jpeg, "image.jpg", "image/jpeg", Int(size.width.rounded()), Int(size.height.rounded()))
     }
 
-    private func loadPickedMedia(_ item: SpecialChatPickedItem) async throws -> (data: Data, filename: String, mimeType: String) {
+    private func loadPickedMedia(_ item: SpecialChatPickedItem) async throws -> (data: Data, filename: String, mimeType: String, mediaWidth: Int?, mediaHeight: Int?) {
         let data: Data
+        var mediaWidth: Int?
+        var mediaHeight: Int?
         if let pickedData = item.data {
             data = pickedData
         } else if let temporaryURL = item.localURL {
@@ -431,17 +435,38 @@ struct SpecialAccountChatScreen: View {
             let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
             let isVideo = item.contentType.conforms(to: .movie) || item.contentType.conforms(to: .video)
             if isVideo && byteCount > 32 * 1024 * 1024 { throw SpecialChatClientError.videoTooLarge }
+            if isVideo {
+                (mediaWidth, mediaHeight) = await videoDisplayDimensions(at: temporaryURL)
+            }
             data = try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
         } else {
             throw SpecialChatClientError.invalidFile
         }
         guard !data.isEmpty else { throw SpecialChatClientError.invalidFile }
-        return try prepareMedia(data, contentType: item.contentType)
+        return try prepareMedia(data, contentType: item.contentType, mediaWidth: mediaWidth, mediaHeight: mediaHeight)
+    }
+
+    private func videoDisplayDimensions(at url: URL) async -> (Int?, Int?) {
+        do {
+            let asset = AVURLAsset(url: url)
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { return (nil, nil) }
+            let naturalSize = try await track.load(.naturalSize)
+            let transform = try await track.load(.preferredTransform)
+            let displayedSize = naturalSize.applying(transform)
+            let width = abs(displayedSize.width)
+            let height = abs(displayedSize.height)
+            guard width.isFinite, height.isFinite, width >= 1, height >= 1, width <= 16384, height <= 16384 else { return (nil, nil) }
+            return (Int(width.rounded()), Int(height.rounded()))
+        } catch {
+            return (nil, nil)
+        }
     }
 }
 
 private struct SpecialChatMessageBubble: View {
     let message: RemoteSpecialChatMessage
+    let userID: Int
     let rowWidth: CGFloat
     let maxBubbleWidth: CGFloat
     let maxMediaWidth: CGFloat
@@ -456,7 +481,7 @@ private struct SpecialChatMessageBubble: View {
                 .tracking(0.5)
                 .foregroundStyle(outgoing ? Color.auroraAmber : Color.auroraMint)
             if let mediaUrl = message.mediaUrl, let mediaType = message.mediaType {
-                SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
+                SpecialChatMediaPreview(path: mediaUrl, mimeType: mediaType, userID: userID, mediaWidth: message.mediaWidth, mediaHeight: message.mediaHeight, maxWidth: maxMediaWidth, onPlayVideo: onPlayVideo, onViewImage: onViewImage)
             }
             if let text = message.text, !text.isEmpty {
                 Text(text)
@@ -487,6 +512,9 @@ private struct SpecialChatMessageBubble: View {
 private struct SpecialChatMediaPreview: View {
     let path: String
     let mimeType: String
+    let userID: Int
+    let mediaWidth: Double?
+    let mediaHeight: Double?
     let maxWidth: CGFloat
     let onPlayVideo: (URL) -> Void
     let onViewImage: (UIImage) -> Void
@@ -495,10 +523,23 @@ private struct SpecialChatMediaPreview: View {
     @State private var error = false
     @State private var errorMessage: String?
     @State private var retryToken = 0
+    @State private var discoveredVideoAspectRatio: CGFloat?
 
     private var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
+    private var cacheKey: String { "\(userID):\(path)" }
+    private var mediaAspectRatio: CGFloat? {
+        if let width = mediaWidth, let height = mediaHeight, width > 0, height > 0 {
+            return CGFloat(width / height)
+        }
+        return discoveredVideoAspectRatio ?? SpecialChatMediaCache.shared.aspectRatio(for: cacheKey)
+    }
+    private var videoDisplaySize: CGSize {
+        let ratio = mediaAspectRatio ?? (16.0 / 9.0)
+        let width = min(max(1, maxWidth), 320 * ratio)
+        return CGSize(width: width, height: width / ratio)
+    }
     private var imageDisplaySize: CGSize {
-        guard let image, image.size.width > 0, image.size.height > 0 else {
+        guard let image = image ?? SpecialChatMediaCache.shared.image(for: cacheKey), image.size.width > 0, image.size.height > 0 else {
             return CGSize(width: min(maxWidth, 220), height: 160)
         }
         let factor = min(1, min(maxWidth / image.size.width, 280 / image.size.height))
@@ -532,11 +573,11 @@ private struct SpecialChatMediaPreview: View {
                             }
                         }
                     }
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .frame(width: videoDisplaySize.width, height: videoDisplaySize.height)
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: maxWidth)
-            } else if let image {
+                .frame(width: videoDisplaySize.width, height: videoDisplaySize.height)
+            } else if let image = image ?? SpecialChatMediaCache.shared.image(for: cacheKey) {
                 Button { onViewImage(image) } label: {
                     ZStack(alignment: .bottomTrailing) {
                         Image(uiImage: image)
@@ -578,13 +619,20 @@ private struct SpecialChatMediaPreview: View {
             }
         }
         .task(id: "\(path)-\(retryToken)") {
-            guard !isVideo, image == nil else { return }
+            guard !isVideo else { return }
+            if let cached = SpecialChatMediaCache.shared.image(for: cacheKey) {
+                image = cached
+                isLoading = false
+                return
+            }
+            guard image == nil else { return }
             isLoading = true
             error = false
             errorMessage = nil
             do {
                 let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
                 image = UIImage(data: data)
+                if let image { SpecialChatMediaCache.shared.insert(image, for: cacheKey) }
                 error = image == nil
                 if error { errorMessage = "Dữ liệu ảnh không hợp lệ · chạm để thử lại" }
             } catch {
@@ -607,7 +655,13 @@ private struct SpecialChatMediaPreview: View {
         error = false
         errorMessage = nil
         do {
-            let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
+            let data: Data
+            if let cached = SpecialChatMediaCache.shared.videoData(for: cacheKey) {
+                data = cached
+            } else {
+                data = try await CinemaAPI.shared.specialChatMediaData(path: path)
+                SpecialChatMediaCache.shared.insertVideoData(data, for: cacheKey)
+            }
             let ext: String
             switch mimeType.lowercased() {
             case "video/quicktime": ext = "mov"
@@ -618,12 +672,34 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathComponent("cinemora-chat-\(UUID().uuidString)")
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
+            if mediaWidth == nil || mediaHeight == nil,
+               let measuredRatio = await Self.videoAspectRatio(at: fileURL) {
+                discoveredVideoAspectRatio = measuredRatio
+                SpecialChatMediaCache.shared.insertAspectRatio(measuredRatio, for: cacheKey)
+            }
             onPlayVideo(fileURL)
         } catch {
             self.error = true
             errorMessage = "Không tải được video · chạm để thử lại"
         }
         isLoading = false
+    }
+
+    private static func videoAspectRatio(at url: URL) async -> CGFloat? {
+        do {
+            let asset = AVURLAsset(url: url)
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { return nil }
+            let naturalSize = try await track.load(.naturalSize)
+            let transform = try await track.load(.preferredTransform)
+            let displayedSize = naturalSize.applying(transform)
+            let width = abs(displayedSize.width)
+            let height = abs(displayedSize.height)
+            guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+            return width / height
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -1039,13 +1115,56 @@ private enum SpecialChatClientError: LocalizedError {
 private extension String {
     var chatTimeLabel: String {
         let iso = ISO8601DateFormatter()
+        iso.timeZone = TimeZone(secondsFromGMT: 0)
         let date = iso.date(from: self) ?? ISO8601DateFormatter.withFractionalSeconds.date(from: self)
+            ?? Self.utcNaiveDateFormatter.date(from: self)
         guard let date else { return "" }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "vi_VN")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+
+    static let utcNaiveDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.isLenient = false
+        return formatter
+    }()
+}
+
+private final class SpecialChatMediaCache {
+    static let shared = SpecialChatMediaCache()
+    private let images = NSCache<NSString, UIImage>()
+    private let videos = NSCache<NSString, NSData>()
+    private let aspectRatios = NSCache<NSString, NSNumber>()
+
+    private init() {
+        images.totalCostLimit = 48 * 1024 * 1024
+        videos.totalCostLimit = 64 * 1024 * 1024
+    }
+
+    func image(for key: String) -> UIImage? { images.object(forKey: key as NSString) }
+    func insert(_ image: UIImage, for key: String) {
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale)
+        images.setObject(image, forKey: key as NSString, cost: max(1, cost))
+    }
+    func videoData(for key: String) -> Data? { videos.object(forKey: key as NSString) as Data? }
+    func insertVideoData(_ data: Data, for key: String) {
+        guard data.count <= videos.totalCostLimit else { return }
+        videos.setObject(data as NSData, forKey: key as NSString, cost: data.count)
+    }
+    func aspectRatio(for key: String) -> CGFloat? {
+        guard let value = aspectRatios.object(forKey: key as NSString)?.doubleValue, value.isFinite, value > 0 else { return nil }
+        return CGFloat(value)
+    }
+    func insertAspectRatio(_ ratio: CGFloat, for key: String) {
+        guard ratio.isFinite, ratio > 0 else { return }
+        aspectRatios.setObject(NSNumber(value: Double(ratio)), forKey: key as NSString)
     }
 }
 
@@ -1053,6 +1172,7 @@ private extension ISO8601DateFormatter {
     static let withFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return formatter
     }()
 }

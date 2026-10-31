@@ -201,6 +201,8 @@ export async function ensureSpecialChatCompatibility(db: ReturnType<typeof drizz
     updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
   for (const statement of [
+    "ALTER TABLE `special_chat_attachments` ADD COLUMN `mediaWidth` int NULL",
+    "ALTER TABLE `special_chat_attachments` ADD COLUMN `mediaHeight` int NULL",
     "ALTER TABLE `special_chat_messages` ADD COLUMN `clientRequestId` varchar(120) NULL",
     "ALTER TABLE `special_chat_messages` ADD UNIQUE INDEX `special_chat_messages_user_request_unique` (`userId`, `clientRequestId`)",
   ]) { try { await db.execute(sql.raw(statement)); } catch { /* cột/index đã có */ } }
@@ -544,6 +546,7 @@ export async function ensureUsersProfileCompatibility(db: ReturnType<typeof driz
     // Nhiều nhãn cho một tài khoản (JSON) và kiểu chữ tên người dùng.
     ["badges", "mediumtext"],
     ["nameStyle", "varchar(255)"],
+    ["subtitlePreferences", "mediumtext"],
   ];
   for (const [column, type] of columnsToEnsure) {
     const definition = `${type} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL`;
@@ -863,6 +866,19 @@ export async function setUserBadge(userId: number, badge: string | null): Promis
 }
 
 /** Đặt hoặc xoá ảnh đại diện của một tài khoản. */
+export async function getUserSubtitlePreferences(userId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.select({ subtitlePreferences: users.subtitlePreferences }).from(users).where(eq(users.id, userId)).limit(1);
+  return rows[0]?.subtitlePreferences ?? null;
+}
+
+export async function setUserSubtitlePreferences(userId: number, preferences: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.update(users).set({ subtitlePreferences: preferences }).where(eq(users.id, userId));
+}
+
 export async function setUserAvatar(userId: number, avatar: string | null): Promise<void> {
   await ensureUsersProfileReady();
   const db = await getDb();

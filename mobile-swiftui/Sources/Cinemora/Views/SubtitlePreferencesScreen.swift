@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SubtitlePreferencesEditor: View {
     @Binding var preferences: SubtitlePreferences
+    @Environment(CinemaStore.self) private var store
     var compact = false
 
     var body: some View {
@@ -9,14 +10,26 @@ struct SubtitlePreferencesEditor: View {
             if !compact {
                 SectionEyebrow(text: "SUBTITLE")
                 AuroraGradientText(text: "Tùy chỉnh phụ đề", font: .auroraDisplay(26))
-                Text("Thay đổi sẽ áp dụng ngay khi đang xem và được lưu trên thiết bị.")
+                Text(store.accountUser == nil ? "Thay đổi áp dụng ngay và được lưu trên thiết bị này." : "Thay đổi áp dụng ngay và đồng bộ với tài khoản của bạn trên các thiết bị.")
                     .font(.auroraBody(11))
                     .foregroundStyle(Color.auroraTextSecondary)
+                if let message = store.subtitlePreferencesSyncMessage {
+                    Text(message)
+                        .font(.auroraBody(compact ? 8 : 9))
+                        .foregroundStyle(message.localizedCaseInsensitiveContains("chưa đồng bộ") ? Color.auroraAmber : Color.auroraMint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 preview
                 fullControls
             } else {
                 // Fullscreen dùng cùng một bộ điều khiển với mục Lưu để mọi
                 // thay đổi đều có hiệu lực và được phản ánh ngay trong player.
+                if let message = store.subtitlePreferencesSyncMessage {
+                    Text(message)
+                        .font(.auroraBody(8))
+                        .foregroundStyle(message.localizedCaseInsensitiveContains("chưa đồng bộ") ? Color.auroraAmber : Color.auroraMint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 fullControls
             }
         }
@@ -34,7 +47,7 @@ struct SubtitlePreferencesEditor: View {
             Toggle("", isOn: $preferences.bold).labelsHidden().tint(Color.auroraViolet)
         }
         sliderRow(icon: "textformat.size", tint: .auroraViolet, title: "Cỡ chữ", value: $preferences.fontSize, range: 12...34, suffix: "pt")
-        sliderRow(icon: "arrow.down.to.line", tint: .auroraSky, title: "Khoảng cách phía dưới", value: $preferences.bottomSpacing, range: 20...180, suffix: "pt")
+        sliderRow(icon: "arrow.down.to.line", tint: .auroraSky, title: "Khoảng cách phụ đề", value: $preferences.bottomSpacing, range: 20...180, suffix: "pt")
         alignmentRow
         colorRow(icon: "paintpalette.fill", tint: .auroraPink, title: "Màu chữ", value: preferences.textColorHex) {
             ColorPicker("", selection: colorBinding(for: \.textColorHex)).labelsHidden()
@@ -43,6 +56,14 @@ struct SubtitlePreferencesEditor: View {
             ColorPicker("", selection: colorBinding(for: \.outlineColorHex)).labelsHidden()
         }
         sliderRow(icon: "lineweight", tint: .auroraAmber, title: "Độ dày viền chữ", value: $preferences.outlineWidth, range: 0...5, suffix: "px")
+        row(icon: "rectangle.fill", tint: .auroraSky, title: "Nền phụ đề", detail: "Bật hoặc tắt nền") { Toggle("", isOn: $preferences.backgroundEnabled).labelsHidden().tint(Color.auroraViolet) }
+        if preferences.backgroundEnabled {
+            colorRow(icon: "paintpalette.fill", tint: .auroraSky, title: "Màu nền", value: preferences.backgroundColorHex) { ColorPicker("", selection: colorBinding(for: \.backgroundColorHex)).labelsHidden() }
+            sliderRow(icon: "circle.lefthalf.filled", tint: .auroraSky, title: "Độ mờ nền", value: $preferences.backgroundOpacity, range: 0...1, suffix: "%")
+            sliderRow(icon: "rectangle.roundedtop", tint: .auroraSky, title: "Bo góc nền", value: $preferences.cornerRadius, range: 0...18, suffix: "pt")
+        }
+        sliderRow(icon: "textformat.abc", tint: .auroraMint, title: "Khoảng cách chữ", value: $preferences.letterSpacing, range: -1...3, suffix: "pt")
+        sliderRow(icon: "text.alignleft", tint: .auroraMint, title: "Khoảng cách dòng", value: $preferences.lineSpacing, range: 0...12, suffix: "pt")
         resetButton
     }
 
@@ -59,7 +80,7 @@ struct SubtitlePreferencesEditor: View {
 
     private var fontPicker: some View {
         Picker("Phông chữ", selection: $preferences.fontName) {
-            ForEach(["System", "Avenir Next", "Georgia", "Menlo"], id: \.self) { Text($0).tag($0) }
+            ForEach(["System", "Avenir Next", "Avenir", "Arial", "Arial Rounded MT Bold", "Helvetica Neue", "Helvetica", "Georgia", "Times New Roman", "Palatino", "Baskerville", "Cochin", "Courier New", "Menlo", "Monaco", "Trebuchet MS", "Verdana"], id: \.self) { Text($0).tag($0) }
         }
         .labelsHidden()
         .pickerStyle(.menu)
@@ -109,10 +130,14 @@ struct SubtitlePreferencesEditor: View {
     private var subtitleSample: some View {
         Text("Đây là phụ đề xem trước")
             .font(preferences.font)
+            .tracking(preferences.letterSpacing)
+            .lineSpacing(preferences.lineSpacing)
             .foregroundStyle(preferences.textColor)
             .multilineTextAlignment(preferences.textAlignment)
-            .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
             .padding(.horizontal, 12)
+            .padding(.vertical, preferences.backgroundEnabled ? 5 : 0)
+            .background { if preferences.backgroundEnabled { RoundedRectangle(cornerRadius: preferences.cornerRadius).fill(preferences.backgroundColor.opacity(preferences.backgroundOpacity)) } }
+            .frame(maxWidth: .infinity, alignment: preferences.frameAlignment)
             .shadow(color: preferences.outlineColor, radius: 0, x: preferences.outlineWidth, y: 0)
             .shadow(color: preferences.outlineColor, radius: 0, x: -preferences.outlineWidth, y: 0)
             .shadow(color: preferences.outlineColor, radius: 0, x: 0, y: preferences.outlineWidth)
@@ -155,11 +180,11 @@ struct SubtitlePreferencesEditor: View {
                     .font(.auroraLabel(11, weight: .bold))
                     .foregroundStyle(.white)
                 Spacer()
-                Text("\(Int(value.wrappedValue))\(suffix)")
+                Text("\(suffix == "%" ? value.wrappedValue * 100 : value.wrappedValue, specifier: "%.1f")\(suffix)")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(Color.auroraViolet)
             }
-            Slider(value: value, in: range, step: 1)
+            Slider(value: value, in: range, step: 0.1)
                 .tint(Color.auroraViolet)
                 .padding(.leading, compact ? 0 : 43)
         }
@@ -191,6 +216,12 @@ struct SubtitlePreferencesScreen: View {
         // Vuốt từ mép trái sang phải để trở ra, giống màn chi tiết phim.
         .modifier(EdgeBackDrag { dismiss() })
         .onAppear { preferences = store.playbackDefaults.subtitlePreferences }
+        .task(id: store.accountUser?.id) {
+            guard store.accountUser != nil else { return }
+            await store.synchronizeSubtitlePreferencesForCurrentAccount()
+            guard !Task.isCancelled else { return }
+            preferences = store.playbackDefaults.subtitlePreferences
+        }
         .onChange(of: preferences) { _, value in
             // Đợi SwiftUI hoàn tất transaction của Toggle/Slider rồi mới
             // cập nhật EnvironmentObject, tránh lỗi văng khi bật nền.
@@ -198,8 +229,7 @@ struct SubtitlePreferencesScreen: View {
             // traps if the screen has already been dismissed.
             let store = self.store
             DispatchQueue.main.async {
-                store.playbackDefaults.subtitlePreferences = value
-                store.savePlaybackDefaults()
+                store.updateSubtitlePreferences(value)
             }
         }
     }

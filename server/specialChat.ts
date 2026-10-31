@@ -20,6 +20,8 @@ export type SpecialChatMessage = {
   text: string | null;
   mediaUrl: string | null;
   mediaType: string | null;
+  mediaWidth: number | null;
+  mediaHeight: number | null;
   createdAt: string;
 };
 export type SpecialChatConversation = {
@@ -43,7 +45,13 @@ function mediaUrl(attachmentId: number | null): string | null {
 }
 function asIso(value: Date | string | null | undefined): string {
   if (!value) return new Date(0).toISOString();
-  const date = value instanceof Date ? value : new Date(value);
+  // MySQL DATETIME values have no timezone marker. Treat them as UTC rather
+  // than letting the cPanel host's local timezone shift the message clock.
+  const raw = typeof value === "string" ? value.trim() : value;
+  const naiveMySqlDateTime = typeof raw === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
+    ? `${raw.replace(" ", "T")}Z`
+    : raw;
+  const date = value instanceof Date ? value : new Date(naiveMySqlDateTime);
   return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString();
 }
 function normalizeFilename(filename: string | undefined, mimeType: string) {
@@ -86,7 +94,7 @@ async function attachmentForUser(attachmentId: number, userId: number) {
   return rows[0];
 }
 
-export async function uploadSpecialChatMedia(input: { userId: number; base64: string; filename?: string; mimeType: string; allowUnprivileged?: boolean }) {
+export async function uploadSpecialChatMedia(input: { userId: number; base64: string; filename?: string; mimeType: string; mediaWidth?: number; mediaHeight?: number; allowUnprivileged?: boolean }) {
   await ensureUserCanChat(input.userId, input.allowUnprivileged);
   const declaredMime = input.mimeType.trim().toLowerCase();
   const declaredKind = declaredMime.startsWith("image/") ? SPECIAL_CHAT_MEDIA_RULES.image : declaredMime.startsWith("video/") ? SPECIAL_CHAT_MEDIA_RULES.video : null;
@@ -97,12 +105,16 @@ export async function uploadSpecialChatMedia(input: { userId: number; base64: st
   const mimeType = validateMedia(input.mimeType, bytes.byteLength);
   const extension = extensionForMime(mimeType);
   if (!extension) throw new Error("MIME không được hỗ trợ.");
+  if ((input.mediaWidth === undefined) !== (input.mediaHeight === undefined)) throw new Error("Chiều rộng và chiều cao phải được gửi cùng nhau.");
+  const mediaWidth = input.mediaWidth ?? null;
+  const mediaHeight = input.mediaHeight ?? null;
+  if (mediaWidth !== null && (!Number.isInteger(mediaWidth) || mediaWidth < 1 || mediaWidth > 16384 || mediaHeight! < 1 || mediaHeight! > 16384)) throw new Error("Kích thước media không hợp lệ.");
   const filename = normalizeFilename(input.filename, mimeType);
   const storageKey = `special-chat/${input.userId}/${randomUUID()}.${extension}`;
   const stored = await storagePut(storageKey, bytes, mimeType);
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
-  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey: stored.key, originalFilename: filename, mimeType, byteSize: bytes.byteLength }).$returningId();
+  const result = await db.insert(specialChatAttachments).values({ userId: input.userId, storageKey: stored.key, originalFilename: filename, mimeType, byteSize: bytes.byteLength, mediaWidth, mediaHeight }).$returningId();
   const attachmentId = Number(result[0]?.id);
   if (!Number.isFinite(attachmentId) || attachmentId <= 0) throw new Error("Không tạo được attachment.");
   return { attachmentId, mimeType, byteSize: bytes.byteLength, mediaUrl: mediaUrl(attachmentId) };
@@ -116,6 +128,8 @@ async function mapMessages(rows: Array<{ message: typeof specialChatMessages.$in
     text: message.text ?? null,
     mediaUrl: mediaUrl(attachment?.id ?? null),
     mediaType: attachment?.mimeType ?? null,
+    mediaWidth: attachment?.mediaWidth ?? null,
+    mediaHeight: attachment?.mediaHeight ?? null,
     createdAt: asIso(message.createdAt),
   }));
 }

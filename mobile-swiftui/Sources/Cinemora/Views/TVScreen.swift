@@ -1174,6 +1174,7 @@ private struct TVVideoRow: View {
 
 private struct TVVideoFullscreenPlayer: View {
     let video: TvVideo
+    @Environment(CinemaStore.self) private var store
     @Binding var episodeIndex: Int
     @ObservedObject var playback: TVPlaybackController
     let pipCoordinator: PictureInPictureCoordinator
@@ -1215,10 +1216,14 @@ private struct TVVideoFullscreenPlayer: View {
                     Spacer()
                     Text(text)
                         .font(subtitlePreferences.font)
+                        .tracking(subtitlePreferences.letterSpacing)
+                        .lineSpacing(subtitlePreferences.lineSpacing)
                         .foregroundStyle(subtitlePreferences.textColor)
                         .multilineTextAlignment(subtitlePreferences.textAlignment)
-                        .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
                         .padding(.horizontal, 24)
+                        .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+                        .background { if subtitlePreferences.backgroundEnabled { RoundedRectangle(cornerRadius: subtitlePreferences.cornerRadius).fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity)) } }
+                        .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
                         .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
                         .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
                         .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
@@ -1267,6 +1272,12 @@ private struct TVVideoFullscreenPlayer: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear { loadCurrent(); scheduleHide() }
+        .task(id: store.accountUser?.id) {
+            guard store.accountUser != nil else { return }
+            await store.synchronizeSubtitlePreferencesForCurrentAccount()
+            guard !Task.isCancelled else { return }
+            subtitlePreferences = store.playbackDefaults.subtitlePreferences
+        }
         .animation(Motion.sheet, value: settingsOpen)
         .animation(.easeOut(duration: 0.26), value: advancedSettings)
         .onDisappear {
@@ -1281,6 +1292,7 @@ private struct TVVideoFullscreenPlayer: View {
         }
         .onChange(of: episodeIndex) { _, _ in qualityIndex = 0; loadCurrent() }
         .onChange(of: playback.currentTime) { _, time in subtitles.update(time: time, bilingual: subtitlePreferences.bilingual) }
+        .onChange(of: subtitlePreferences) { _, value in store.updateSubtitlePreferences(value) }
         .onChange(of: stopTimer) { _, _ in scheduleStop() }
         .onChange(of: stopAtEpisode) { _, _ in scheduleStop() }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
@@ -1504,10 +1516,14 @@ private struct TVVideoFullscreenPlayer: View {
                     .frame(height: 96)
                 Text(subtitlePreferences.bilingual ? "Đây là phụ đề xem trước\nThis is a bilingual preview" : "Đây là phụ đề xem trước")
                     .font(subtitlePreferences.font)
+                    .tracking(subtitlePreferences.letterSpacing)
+                    .lineSpacing(subtitlePreferences.lineSpacing)
                     .foregroundStyle(subtitlePreferences.textColor)
                     .multilineTextAlignment(subtitlePreferences.textAlignment)
-                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
                     .padding(.horizontal, 12)
+                    .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+                    .background { if subtitlePreferences.backgroundEnabled { RoundedRectangle(cornerRadius: subtitlePreferences.cornerRadius).fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity)) } }
+                    .frame(maxWidth: .infinity, alignment: subtitlePreferences.textAlignment == .leading ? .leading : subtitlePreferences.textAlignment == .trailing ? .trailing : .center)
                     .padding(.bottom, 10)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)

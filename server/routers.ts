@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
-import { setUserBadges, setUserNameStyle, addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, pinMovieComment, recordWatchHistory, removeFavorite, removeWatchHistory, setUserAvatar, setUserBadge, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
+import { setUserBadges, setUserNameStyle, addFavorite, addMovieComment, clearWatchHistory, createLocalUser, deleteMovieComment, findMovieComment, getUserByEmail, getUserById, isFavorite, listFavorites, listMovieComments, listWatchHistory, pinMovieComment, recordWatchHistory, removeFavorite, removeWatchHistory, setUserAvatar, setUserBadge, getUserSubtitlePreferences, setUserSubtitlePreferences, updateLocalAccountByAdmin, updateLocalPassword } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -104,6 +104,20 @@ const movieSnapshot = z.object({
   posterUrl: z.string().startsWith("/api/cinema/image/").max(160).nullable().optional(),
   year: z.number().int().min(1900).max(2100).nullable().optional(),
 });
+const subtitlePreferencesInput = z.object({
+  enabled: z.boolean(), fontName: z.string().trim().min(1).max(80), bold: z.boolean(),
+  fontSize: z.number().finite().min(8).max(96), bottomSpacing: z.number().finite().min(0).max(300),
+  alignment: z.enum(["left", "center", "right"]), textColorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  outlineColorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/), outlineWidth: z.number().finite().min(0).max(10),
+  bilingual: z.boolean(), backgroundEnabled: z.boolean(), backgroundColorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  backgroundOpacity: z.number().finite().min(0).max(1), backgroundCornerRadius: z.number().finite().min(0).max(100),
+  letterSpacing: z.number().finite().min(-10).max(20), lineSpacing: z.number().finite().min(0).max(12),
+}).strict();
+const mediaDimensions = { mediaWidth: z.number().int().min(1).max(16384).optional(), mediaHeight: z.number().int().min(1).max(16384).optional() };
+const mediaDimensionsRefine = (input: { mediaWidth?: number; mediaHeight?: number }, ctx: z.RefinementCtx) => {
+  if ((input.mediaWidth === undefined) !== (input.mediaHeight === undefined)) ctx.addIssue({ code: "custom", message: "Chiều rộng và chiều cao phải được gửi cùng nhau." });
+};
+
 const emailInput = z.string().trim().email().max(320).transform((value) => value.toLowerCase());
 const passwordInput = z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự").max(128);
 const changePasswordInput = z.object({
@@ -460,6 +474,15 @@ export const appRouter = router({
     removeVideo: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => deleteTvVideo(input.id)),
   }),
   account: router({
+    getSubtitlePreferences: protectedProcedure.query(async ({ ctx }) => {
+      const value = await getUserSubtitlePreferences(ctx.user.id);
+      if (value === null) return null;
+      try { return subtitlePreferencesInput.parse(JSON.parse(value)); } catch { return null; }
+    }),
+    setSubtitlePreferences: protectedProcedure.input(subtitlePreferencesInput).mutation(async ({ ctx, input }) => {
+      await setUserSubtitlePreferences(ctx.user.id, JSON.stringify(input));
+      return { success: true } as const;
+    }),
     devices: protectedProcedure.query(({ ctx }) => listAccountDevices(ctx.user.id)),
     // Ảnh đại diện: app gửi lên dạng data URL base64 đã thu nhỏ sẵn.
     setAvatar: protectedProcedure
@@ -535,7 +558,7 @@ export const appRouter = router({
       try { return await sendSpecialChatMessage({ userId: ctx.user.id, sender: "user", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
-    uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ ctx, input }) => {
+    uploadSpecialChatMedia: protectedProcedure.input(z.object({ base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80), ...mediaDimensions }).superRefine(mediaDimensionsRefine)).mutation(async ({ ctx, input }) => {
       if (!ctx.user.hasSpecialPrivileges) throw new TRPCError({ code: "FORBIDDEN", message: "Tài khoản chưa được cấp quyền chat đặc biệt." });
       enforceRateLimit(ctx.req, "account.specialChat.upload", 10, 60_000, String(ctx.user.id));
       try { return await uploadSpecialChatMedia({ userId: ctx.user.id, ...input }); }
@@ -550,7 +573,7 @@ export const appRouter = router({
       try { return await sendSpecialChatMessage({ userId: input.userId, sender: "admin", text: input.text, attachmentId: input.attachmentId, clientRequestId: input.clientRequestId, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không gửi được tin nhắn." }); }
     }),
-    uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80) })).mutation(async ({ input }) => {
+    uploadMedia: adminProcedure.input(z.object({ userId: z.number().int().positive(), base64: z.string().min(1).max(45_000_000), filename: z.string().trim().max(180).optional(), mimeType: z.string().trim().max(80), ...mediaDimensions }).superRefine(mediaDimensionsRefine)).mutation(async ({ input }) => {
       try { return await uploadSpecialChatMedia({ ...input, allowUnprivileged: true }); }
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
     }),

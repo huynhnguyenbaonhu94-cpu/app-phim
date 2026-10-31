@@ -18,6 +18,8 @@ export const users = mysqlTable("users", {
   badges: mediumtext("badges"),
   /** Kiểu tên người dùng (JSON): màu và hiệu ứng làm nổi bật tên. */
   nameStyle: varchar("nameStyle", { length: 255 }),
+  /** Nullable JSON payload for per-account subtitle rendering preferences. */
+  subtitlePreferences: mediumtext("subtitlePreferences"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -104,6 +106,8 @@ export const specialChatAttachments = mysqlTable("special_chat_attachments", {
   originalFilename: varchar("originalFilename", { length: 180 }).notNull(),
   mimeType: varchar("mimeType", { length: 80 }).notNull(),
   byteSize: int("byteSize").notNull(),
+  mediaWidth: int("mediaWidth"),
+  mediaHeight: int("mediaHeight"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ userCreatedIndex: index("special_chat_attachments_user_created_idx").on(table.userId, table.createdAt) }));
 

@@ -4,6 +4,7 @@ struct HomeScreen: View {
     @Environment(CinemaStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var scrollToTopRequest = 0
+    @State private var loadingBreath = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
@@ -107,8 +108,42 @@ struct HomeScreen: View {
     private var content: some View {
         if store.homeLoading && store.homeSections.isEmpty {
             VStack(alignment: .leading, spacing: 18) {
-                SectionHeading(eyebrow: "CINEMORA", title: "Đang tải phim")
-                    .auroraReveal(2)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center, spacing: 11) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.auroraViolet.opacity(loadingBreath ? 0.19 : 0.10))
+                                .frame(width: 34, height: 34)
+                                .scaleEffect(loadingBreath ? 1.08 : 0.94)
+                            Image(systemName: "sparkles.tv.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(LinearGradient.auroraPrimary)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("CINEMORA")
+                                .font(.auroraLabel(9, weight: .heavy))
+                                .tracking(2.2)
+                                .foregroundStyle(Color.auroraViolet)
+                            Text("Đang tải phim")
+                                .font(.auroraDisplay(23))
+                                .foregroundStyle(.white)
+                        }
+                        Spacer()
+                        ProgressView()
+                            .tint(.auroraViolet)
+                            .scaleEffect(0.85)
+                    }
+                    SkeletonBlock(cornerRadius: 2)
+                        .frame(height: 2)
+                        .frame(maxWidth: 88, alignment: .leading)
+                        .opacity(loadingBreath ? 0.72 : 0.42)
+                }
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                        loadingBreath = true
+                    }
+                }
+                .auroraReveal(2)
                 SkeletonPosterGrid(count: 6)
             }
         } else if !store.homeSections.isEmpty {

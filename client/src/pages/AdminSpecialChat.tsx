@@ -13,14 +13,48 @@ function formatDate(value: string | Date | null | undefined) {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("vi-VN");
 }
 const MEDIA_LIMITS: Record<string, number> = { "image/jpeg": 8, "image/png": 8, "image/webp": 8, "image/gif": 8, "video/mp4": 32, "video/quicktime": 32, "video/webm": 32 };
+async function inspectMediaDimensions(file: File): Promise<{ mediaWidth?: number; mediaHeight?: number }> {
+  const valid = (width: number, height: number) => Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 && width <= 16384 && height <= 16384
+    ? { mediaWidth: Math.round(width), mediaHeight: Math.round(height) }
+    : {};
+  if (file.type.startsWith("image/")) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const dimensions = valid(bitmap.width, bitmap.height);
+      bitmap.close();
+      return dimensions;
+    } catch { return {}; }
+  }
+  if (!file.type.startsWith("video/")) return {};
+  return await new Promise(resolve => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let completed = false;
+    const finish = (dimensions: { mediaWidth?: number; mediaHeight?: number }) => {
+      if (completed) return;
+      completed = true;
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(objectUrl);
+      resolve(dimensions);
+    };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => finish(valid(video.videoWidth, video.videoHeight));
+    video.onerror = () => finish({});
+    video.src = objectUrl;
+    video.load();
+  });
+}
 async function readMedia(file: File) {
-  const base64 = await new Promise<string>((resolve, reject) => {
+  const [base64, dimensions] = await Promise.all([new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
     reader.onerror = () => reject(new Error("Không đọc được tệp media."));
     reader.readAsDataURL(file);
-  });
-  return { base64, filename: file.name, mimeType: file.type };
+  }), inspectMediaDimensions(file)]);
+  return { base64, filename: file.name, mimeType: file.type, ...dimensions };
 }
 
 function AdminChatAttachment({ url, mimeType }: { url: string; mimeType: string | null }) {
@@ -71,7 +105,7 @@ function AdminChatAttachment({ url, mimeType }: { url: string; mimeType: string 
   }
   if (failed) return <button type="button" className="admin-chat-media-fallback" onClick={retry}><RefreshCw size={15} /> Không tải được tệp · thử lại</button>;
   return <>
-    {isVideo ? <button type="button" className={`admin-chat-video-preview${previewSize ? " has-dimensions" : ""}`} style={previewSize ? { width: `${previewSize.width}px`, aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined} onClick={() => { setViewerOpen(true); setIsPlaying(true); }} aria-label="Mở trình phát video">
+    {isVideo ? <button type="button" className={`admin-chat-video-preview${previewSize ? " has-dimensions" : ""}`} style={previewSize ? { width: `min(${previewSize.width}px, 100%)`, aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined} onClick={() => { setViewerOpen(true); setIsPlaying(true); }} aria-label="Mở trình phát video">
       <video key={source} muted preload="metadata" playsInline src={source} onLoadedMetadata={event => { const { videoWidth, videoHeight } = event.currentTarget; if (videoWidth > 0 && videoHeight > 0) { const scale = Math.min(320 / videoWidth, 320 / videoHeight, 1); setPreviewSize({ width: videoWidth * scale, height: videoHeight * scale }); } }} onError={() => setFailed(true)} />
       <span className="admin-chat-video-play"><Play size={21} fill="currentColor" /></span><span className="admin-chat-video-caption">Mở video</span>
     </button> : <button type="button" className="admin-chat-image-preview" onClick={() => { setViewerOpen(true); setZoom(1); }} aria-label="Phóng to ảnh">
@@ -117,6 +151,8 @@ export default function AdminSpecialChat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textRequestRef = useRef<{ text: string; id: string } | null>(null);
   const incomingMessageIdsRef = useRef<Map<number, number> | null>(null);
+  const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
+  const soundEnabledRef = useRef(soundEnabled);
   const audioContextRef = useRef<AudioContext | null>(null);
   const conversations = trpc.adminSpecialChat.conversations.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: 3_000, retry: false });
   const messages = trpc.adminSpecialChat.messages.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: 3_000, retry: false });
@@ -135,11 +171,16 @@ export default function AdminSpecialChat() {
     }
     return audioContextRef.current;
   }
-  function playNotification() {
-    if (!soundEnabled) return;
+  function playNotification(messageKeys: string[]) {
+    const unseenKeys = messageKeys.filter(key => !notifiedMessageIdsRef.current.has(key));
+    unseenKeys.forEach(key => notifiedMessageIdsRef.current.add(key));
+    if (!soundEnabledRef.current || unseenKeys.length === 0) return;
     const context = ensureAudioContext();
     if (!context) return;
+    let played = false;
     const playTone = () => {
+      if (played || !soundEnabledRef.current) return;
+      played = true;
       const now = context.currentTime;
       [880, 1174].forEach((frequency, index) => {
         const start = now + index * 0.12;
@@ -159,6 +200,7 @@ export default function AdminSpecialChat() {
   }
   function toggleNotificationSound() {
     const enabled = !soundEnabled;
+    soundEnabledRef.current = enabled;
     setSoundEnabled(enabled);
     window.localStorage.setItem("cinemora-admin-chat-sound", String(enabled));
     if (enabled) {
@@ -180,15 +222,20 @@ export default function AdminSpecialChat() {
     };
   }, [soundEnabled]);
   useEffect(() => {
-    if (!soundEnabled || !conversations.data) return;
+    if (!conversations.data) return;
     const current = new Map(conversations.data.map(item => [item.userId, item.latestUserMessageId]));
     const previous = incomingMessageIdsRef.current;
+    const newMessageKeys: string[] = [];
     if (previous) {
-      const hasIncoming = conversations.data.some(item => item.latestUserMessageId > (previous.get(item.userId) ?? 0));
-      if (hasIncoming) playNotification();
+      for (const item of conversations.data) {
+        if (item.latestUserMessageId > (previous.get(item.userId) ?? 0)) {
+          newMessageKeys.push(`${item.userId}:${item.latestUserMessageId}`);
+        }
+      }
     }
     incomingMessageIdsRef.current = current;
-  }, [conversations.data, soundEnabled]);
+    if (newMessageKeys.length) playNotification(newMessageKeys);
+  }, [conversations.data]);
   const latestLoadedMessage = messages.data?.length ? messages.data[messages.data.length - 1] : null;
   useEffect(() => {
     if (!selectedUserId || !messages.data || messages.data.some(message => message.userId !== selectedUserId)) return;

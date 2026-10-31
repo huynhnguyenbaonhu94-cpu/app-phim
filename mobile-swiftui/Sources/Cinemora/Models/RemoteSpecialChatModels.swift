@@ -7,6 +7,8 @@ struct RemoteSpecialChatMessage: Decodable, Identifiable, Hashable {
     let text: String?
     let mediaUrl: String?
     let mediaType: String?
+    let mediaWidth: Double?
+    let mediaHeight: Double?
     let createdAt: String
 
     var isFromAdmin: Bool { sender == "admin" }

@@ -185,6 +185,19 @@ struct CinemoraTabShell: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: connectivity.isConnected)
+        .onChange(of: connectivity.isConnected) { wasConnected, isConnected in
+            guard !wasConnected, isConnected else { return }
+            Task { @MainActor in
+                // An offline request may still be unwinding. Wait for its loading
+                // flag to clear before retrying, otherwise refreshHome's guard
+                // would silently discard the recovery refresh.
+                while connectivity.isConnected && store.homeLoading {
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+                guard connectivity.isConnected else { return }
+                await store.refreshHome()
+            }
+        }
         .task {
             try? await Task.sleep(for: .milliseconds(1500))
             withAnimation(.easeOut(duration: 0.45)) { showLaunchLoader = false }
@@ -442,7 +455,7 @@ struct NetworkUnavailableOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.auroraVoid.opacity(0.97).ignoresSafeArea()
+            Color.auroraVoid.ignoresSafeArea()
             RadialGradient(
                 colors: [Color.auroraAmber.opacity(0.14), Color.auroraViolet.opacity(0.07), .clear],
                 center: .center,
@@ -507,6 +520,8 @@ struct NetworkUnavailableOverlay: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .background(Color.auroraVoid.ignoresSafeArea())
+        .allowsHitTesting(true)
         .onTapGesture { }
         .onAppear(perform: startAnimation)
         .onChange(of: reduceMotion) { _, shouldReduce in

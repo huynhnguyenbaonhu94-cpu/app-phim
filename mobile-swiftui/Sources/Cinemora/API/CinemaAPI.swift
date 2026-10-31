@@ -300,6 +300,20 @@ struct CinemaAPI {
     func accountFavorites() async throws -> [RemoteFavorite] { try await query("account.favorites", input: nil) }
     func accountHistory() async throws -> [RemoteHistory] { try await query("account.history", input: nil) }
 
+    func accountSubtitlePreferences() async throws -> SubtitlePreferences? {
+        let payload: AccountSubtitlePreferencesPayload? = try await query("account.getSubtitlePreferences", input: nil)
+        return payload?.localValue
+    }
+
+    func setAccountSubtitlePreferences(_ preferences: SubtitlePreferences) async throws {
+        let payload = AccountSubtitlePreferencesPayload(preferences)
+        let encoded = try JSONEncoder().encode(payload)
+        guard let input = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            throw APIError.invalidResponse
+        }
+        let _: SuccessResponse = try await mutate("account.setSubtitlePreferences", input: input)
+    }
+
     // MARK: - Chat riêng tài khoản đặc quyền
 
     func specialChatMessages(afterId: Int? = nil) async throws -> [RemoteSpecialChatMessage] {
@@ -316,12 +330,16 @@ struct CinemaAPI {
         return try await mutate("account.sendSpecialChatMessage", input: input)
     }
 
-    func uploadSpecialChatMedia(data: Data, filename: String, mimeType: String) async throws -> RemoteSpecialChatMedia {
-        let input: [String: Any] = [
+    func uploadSpecialChatMedia(data: Data, filename: String, mimeType: String, mediaWidth: Int? = nil, mediaHeight: Int? = nil) async throws -> RemoteSpecialChatMedia {
+        var input: [String: Any] = [
             "base64": data.base64EncodedString(),
             "filename": filename,
             "mimeType": mimeType,
         ]
+        if let mediaWidth, let mediaHeight {
+            input["mediaWidth"] = mediaWidth
+            input["mediaHeight"] = mediaHeight
+        }
         return try await mutate("account.uploadSpecialChatMedia", input: input, timeoutInterval: 90)
     }
 
@@ -515,6 +533,73 @@ struct CinemaAPI {
 
 private struct MovieRequestResponse: Decodable {
     let success: Bool
+}
+
+private struct AccountSubtitlePreferencesPayload: Codable {
+    var enabled: Bool
+    var fontName: String
+    var bold: Bool
+    var fontSize: Double
+    var bottomSpacing: Double
+    var alignment: String
+    var textColorHex: String
+    var outlineColorHex: String
+    var outlineWidth: Double
+    var bilingual: Bool
+    var backgroundEnabled: Bool
+    var backgroundColorHex: String
+    var backgroundOpacity: Double
+    var backgroundCornerRadius: Double
+    var letterSpacing: Double
+    var lineSpacing: Double
+
+    init(_ local: SubtitlePreferences) {
+        enabled = local.enabled
+        fontName = local.fontName
+        bold = local.bold
+        fontSize = local.fontSize
+        bottomSpacing = local.bottomSpacing
+        switch local.alignment {
+        case "Trái", "left": alignment = "left"
+        case "Phải", "right": alignment = "right"
+        default: alignment = "center"
+        }
+        textColorHex = local.textColorHex
+        outlineColorHex = local.outlineColorHex
+        outlineWidth = local.outlineWidth
+        bilingual = local.bilingual
+        backgroundEnabled = local.backgroundEnabled
+        backgroundColorHex = local.backgroundColorHex
+        backgroundOpacity = local.backgroundOpacity
+        backgroundCornerRadius = local.cornerRadius
+        letterSpacing = local.letterSpacing
+        lineSpacing = local.lineSpacing
+    }
+
+    var localValue: SubtitlePreferences {
+        var local = SubtitlePreferences()
+        local.enabled = enabled
+        local.fontName = fontName
+        local.bold = bold
+        local.fontSize = fontSize
+        local.bottomSpacing = bottomSpacing
+        switch alignment {
+        case "left": local.alignment = "Trái"
+        case "right": local.alignment = "Phải"
+        default: local.alignment = "Giữa"
+        }
+        local.textColorHex = textColorHex
+        local.outlineColorHex = outlineColorHex
+        local.outlineWidth = outlineWidth
+        local.bilingual = bilingual
+        local.backgroundEnabled = backgroundEnabled
+        local.backgroundColorHex = backgroundColorHex
+        local.backgroundOpacity = backgroundOpacity
+        local.cornerRadius = backgroundCornerRadius
+        local.letterSpacing = letterSpacing
+        local.lineSpacing = lineSpacing
+        return local
+    }
 }
 
 enum APIError: LocalizedError {

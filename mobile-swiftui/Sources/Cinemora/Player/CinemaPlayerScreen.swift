@@ -925,6 +925,12 @@ struct CinemaPlayerScreen: View {
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
+            .task(id: store.accountUser?.id) {
+                guard store.accountUser != nil else { return }
+                await store.synchronizeSubtitlePreferencesForCurrentAccount()
+                guard !Task.isCancelled else { return }
+                subtitlePreferences = store.playbackDefaults.subtitlePreferences
+            }
             .onDisappear { handlePlayerDisappear() }
             .statusBarHidden(true)
         }
@@ -1214,9 +1220,13 @@ struct CinemaPlayerScreen: View {
     private func subtitleText(_ text: String) -> some View {
         Text(text)
             .font(subtitlePreferences.font)
+            .tracking(subtitlePreferences.letterSpacing)
+            .lineSpacing(subtitlePreferences.lineSpacing)
             .foregroundStyle(subtitlePreferences.textColor)
             .multilineTextAlignment(subtitlePreferences.textAlignment)
             .padding(.horizontal, 24)
+            .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+            .background { if subtitlePreferences.backgroundEnabled { RoundedRectangle(cornerRadius: subtitlePreferences.cornerRadius).fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity)) } }
             .frame(maxWidth: .infinity, alignment: subtitlePreferences.frameAlignment)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
             .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
@@ -1475,6 +1485,8 @@ struct CinemaPlayerScreen: View {
                     .frame(height: 96)
                 Text("Đây là phụ đề xem trước")
                     .font(subtitlePreferences.font)
+                    .tracking(subtitlePreferences.letterSpacing)
+                    .lineSpacing(subtitlePreferences.lineSpacing)
                     .foregroundStyle(subtitlePreferences.textColor)
                     .multilineTextAlignment(subtitlePreferences.textAlignment)
                     .padding(.horizontal, 12)
@@ -1482,6 +1494,8 @@ struct CinemaPlayerScreen: View {
                     // Preview dùng tỷ lệ thu nhỏ, nhưng luôn di chuyển cùng
                     // chiều với subtitle thật khi đổi khoảng cách phía dưới.
                     .padding(.bottom, min(max(subtitlePreferences.bottomSpacing * 0.55, 4), 72))
+                    .padding(.vertical, subtitlePreferences.backgroundEnabled ? 5 : 0)
+                    .background { if subtitlePreferences.backgroundEnabled { RoundedRectangle(cornerRadius: subtitlePreferences.cornerRadius).fill(subtitlePreferences.backgroundColor.opacity(subtitlePreferences.backgroundOpacity)) } }
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: subtitlePreferences.outlineWidth, y: 0)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: -subtitlePreferences.outlineWidth, y: 0)
                     .shadow(color: subtitlePreferences.outlineColor, radius: 0, x: 0, y: subtitlePreferences.outlineWidth)
@@ -2256,8 +2270,7 @@ struct CinemaPlayerScreen: View {
         guard subtitleCustomizationEnabled else { return }
         let store = self.store
         DispatchQueue.main.async {
-            store.playbackDefaults.subtitlePreferences = value
-            store.savePlaybackDefaults()
+            store.updateSubtitlePreferences(value)
         }
         subtitles.update(time: playback.currentTime, bilingual: false)
     }

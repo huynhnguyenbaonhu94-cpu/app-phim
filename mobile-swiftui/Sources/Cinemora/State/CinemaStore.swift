@@ -69,11 +69,14 @@ final class CinemaStore {
     private(set) var movieRequestsLoading = false
     private(set) var movieRequestsError: String?
     var playbackDefaults = PlaybackDefaults()
+    private(set) var subtitlePreferencesSyncMessage: String?
     private(set) var hasNewHomeContent = false
 
     private let api = CinemaAPI.shared
     private let localDefaults = UserDefaults.standard
     private let playbackDefaultsKey = "cinemora.playback.defaults.v1"
+    private let deviceSubtitlePreferencesKey = "cinemora.subtitle.preferences.device.v1"
+    private var deviceSubtitlePreferences = SubtitlePreferences()
     @ObservationIgnored private var homePage = 1
     @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var catalogTask: Task<Void, Never>?
@@ -82,6 +85,9 @@ final class CinemaStore {
     @ObservationIgnored private var nextAuthAttemptAt = Date.distantPast
     @ObservationIgnored private var sessionMissCount = 0
     @ObservationIgnored private var lastHomeRefreshAt: Date?
+    @ObservationIgnored private var subtitlePreferencesSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var subtitlePreferencesLoadedUserID: Int?
+    @ObservationIgnored private var subtitlePreferencesRevision = 0
     private let accountUserCacheKey = "cinemora.account.user.cache.v1"
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
@@ -109,6 +115,17 @@ final class CinemaStore {
         }
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
+        }
+        if let data = localDefaults.data(forKey: deviceSubtitlePreferencesKey),
+           let preferences = try? decoder.decode(SubtitlePreferences.self, from: data) {
+            deviceSubtitlePreferences = preferences
+        } else {
+            // Migrate the former device-only preference once; subsequent account
+            // changes must not overwrite this anonymous-device fallback.
+            deviceSubtitlePreferences = playbackDefaults.subtitlePreferences
+            if let data = try? JSONEncoder().encode(deviceSubtitlePreferences) {
+                localDefaults.set(data, forKey: deviceSubtitlePreferencesKey)
+            }
         }
     }
 
@@ -433,7 +450,13 @@ final class CinemaStore {
     }
 
     private func clearAccountState() {
+        subtitlePreferencesSaveTask?.cancel()
+        subtitlePreferencesLoadedUserID = nil
+        subtitlePreferencesRevision += 1
         accountUser = nil
+        playbackDefaults.subtitlePreferences = deviceSubtitlePreferences
+        savePlaybackDefaults()
+        subtitlePreferencesSyncMessage = nil
         CinemoraAppIconController.resetIfNotPrivileged(false)
         localDefaults.removeObject(forKey: accountUserCacheKey)
         sessionMissCount = 0
@@ -447,7 +470,16 @@ final class CinemaStore {
     }
 
     private func setAccountUser(_ user: RemoteAccountUser?) {
+        let previousID = accountUser?.id
         accountUser = user
+        if previousID != user?.id {
+            subtitlePreferencesSaveTask?.cancel()
+            subtitlePreferencesLoadedUserID = nil
+            subtitlePreferencesRevision += 1
+            playbackDefaults.subtitlePreferences = deviceSubtitlePreferences
+            savePlaybackDefaults()
+            subtitlePreferencesSyncMessage = nil
+        }
         CinemoraAppIconController.resetIfNotPrivileged(user?.hasSpecialPrivileges == true)
         if let user, let data = try? JSONEncoder().encode(user) {
             localDefaults.set(data, forKey: accountUserCacheKey)
@@ -460,6 +492,68 @@ final class CinemaStore {
         let encoder = JSONEncoder()
         if let data = try? encoder.encode(playbackDefaults) {
             localDefaults.set(data, forKey: playbackDefaultsKey)
+        }
+    }
+
+    /// Tài khoản đăng nhập là nguồn chuẩn cho thiết lập phụ đề trên nhiều thiết bị.
+    /// Nếu server chưa có thiết lập, chỉ lần đầu mới nhập cấu hình hiện có trên máy.
+    func synchronizeSubtitlePreferencesForCurrentAccount() async {
+        guard let userID = accountUser?.id else { return }
+        guard subtitlePreferencesLoadedUserID != userID else { return }
+        let revisionAtStart = subtitlePreferencesRevision
+        subtitlePreferencesSyncMessage = "Đang tải tùy chỉnh phụ đề từ tài khoản…"
+        do {
+            let remote = try await api.accountSubtitlePreferences()
+            guard accountUser?.id == userID else { return }
+            // Người dùng có thể đã sửa slider trong lúc request chạy; không ghi đè
+            // thao tác mới hơn bằng phản hồi cũ.
+            guard subtitlePreferencesRevision == revisionAtStart else { return }
+            if let remote {
+                playbackDefaults.subtitlePreferences = remote
+                subtitlePreferencesSyncMessage = "Đã áp dụng tùy chỉnh phụ đề từ tài khoản."
+            } else {
+                try await api.setAccountSubtitlePreferences(deviceSubtitlePreferences)
+                guard accountUser?.id == userID else { return }
+                playbackDefaults.subtitlePreferences = deviceSubtitlePreferences
+                subtitlePreferencesSyncMessage = "Đã lưu thiết lập hiện có lên tài khoản."
+            }
+            savePlaybackDefaults()
+            subtitlePreferencesLoadedUserID = userID
+        } catch {
+            guard accountUser?.id == userID else { return }
+            subtitlePreferencesSyncMessage = "Chưa đồng bộ được; hiện đang dùng thiết lập gần nhất trên thiết bị."
+        }
+    }
+
+    /// Lưu cục bộ ngay để thay đổi trong player phản hồi tức thì; khi có tài khoản,
+    /// gửi lên server sau một nhịp debounce để tránh gọi API cho từng bước slider.
+    func updateSubtitlePreferences(_ preferences: SubtitlePreferences) {
+        playbackDefaults.subtitlePreferences = preferences
+        savePlaybackDefaults()
+        subtitlePreferencesRevision += 1
+        guard let userID = accountUser?.id else {
+            deviceSubtitlePreferences = preferences
+            if let data = try? JSONEncoder().encode(preferences) {
+                localDefaults.set(data, forKey: deviceSubtitlePreferencesKey)
+            }
+            subtitlePreferencesSyncMessage = "Đã lưu tùy chỉnh trên thiết bị này."
+            return
+        }
+
+        subtitlePreferencesSaveTask?.cancel()
+        subtitlePreferencesSyncMessage = "Đang đồng bộ tùy chỉnh phụ đề với tài khoản…"
+        subtitlePreferencesSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self, self.accountUser?.id == userID else { return }
+            do {
+                try await self.api.setAccountSubtitlePreferences(preferences)
+                guard self.accountUser?.id == userID else { return }
+                self.subtitlePreferencesLoadedUserID = userID
+                self.subtitlePreferencesSyncMessage = "Đã đồng bộ tùy chỉnh phụ đề với tài khoản."
+            } catch {
+                guard self.accountUser?.id == userID else { return }
+                self.subtitlePreferencesSyncMessage = "Chưa đồng bộ được; thiết lập vẫn đang áp dụng trên thiết bị này."
+            }
         }
     }
 

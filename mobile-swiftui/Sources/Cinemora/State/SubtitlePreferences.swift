@@ -12,10 +12,17 @@ struct SubtitlePreferences: Codable, Equatable {
     var outlineColorHex = "#000000"
     var outlineWidth: Double = 2
     var bilingual = false
+    var backgroundEnabled = false
+    var backgroundColorHex = "#000000"
+    var backgroundOpacity: Double = 0.65
+    var cornerRadius: Double = 6
+    var letterSpacing: Double = 0
+    var lineSpacing: Double = 0
 
     static let `default` = SubtitlePreferences()
     var textColor: Color { Color(hex: textColorHex) }
     var outlineColor: Color { Color(hex: outlineColorHex) }
+    var backgroundColor: Color { Color(hex: backgroundColorHex) }
     var textAlignment: TextAlignment {
         switch alignment { case "Trái": return .leading; case "Phải": return .trailing; default: return .center }
     }
@@ -29,7 +36,8 @@ struct SubtitlePreferences: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case enabled, fontName, bold, fontSize, bottomSpacing, alignment
         case textColorHex, outlineColorHex, outlineWidth
-        case bilingual
+        case bilingual, backgroundEnabled, backgroundColorHex, backgroundOpacity
+        case cornerRadius, letterSpacing, lineSpacing
     }
     init() {}
     init(from decoder: Decoder) throws {
@@ -44,6 +52,12 @@ struct SubtitlePreferences: Codable, Equatable {
         outlineColorHex = try container.decodeIfPresent(String.self, forKey: .outlineColorHex) ?? "#000000"
         outlineWidth = try container.decodeIfPresent(Double.self, forKey: .outlineWidth) ?? 2
         bilingual = try container.decodeIfPresent(Bool.self, forKey: .bilingual) ?? false
+        backgroundEnabled = try container.decodeIfPresent(Bool.self, forKey: .backgroundEnabled) ?? false
+        backgroundColorHex = try container.decodeIfPresent(String.self, forKey: .backgroundColorHex) ?? "#000000"
+        backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? 0.65
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? 6
+        letterSpacing = try container.decodeIfPresent(Double.self, forKey: .letterSpacing) ?? 0
+        lineSpacing = try container.decodeIfPresent(Double.self, forKey: .lineSpacing) ?? 0
     }
     mutating func reset() { self = .default }
 }
