@@ -42,6 +42,7 @@ import { createMovieRequest, listAllMovieRequests, listMovieRequestsForUser, upd
 import { listSpecialChatConversations, listSpecialChatMessages, markSpecialChatConversationRead, sendSpecialChatMessage, uploadSpecialChatMedia } from "./specialChat";
 import { checkR2Connection, getBackupStatus, runR2Backup } from "./r2Backup";
 import { getR2PublicSettings, saveR2Settings } from "./r2Storage";
+import { getAdminDashboardStats } from "./adminDashboard";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -578,6 +579,43 @@ export const appRouter = router({
       catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Không tải được media." }); }
     }),
   }),
+  adminDashboard: router({
+    overview: adminProcedure.query(async () => {
+      const [stats, r2, backup] = await Promise.all([
+        getAdminDashboardStats(),
+        getR2PublicSettings(),
+        getBackupStatus(),
+      ]);
+      const latest = backup.latest;
+      const iso = (value: Date | string | null | undefined) => {
+        if (!value) return null;
+        const raw = typeof value === "string" ? value.trim() : value;
+        const mysqlDate = typeof raw === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
+          ? `${raw.replace(" ", "T")}Z`
+          : raw;
+        const date = value instanceof Date ? value : new Date(mysqlDate);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString();
+      };
+      return {
+        ...stats,
+        latestBackup: latest ? {
+          status: latest.status,
+          startedAt: iso(latest.startedAt),
+          completedAt: iso(latest.completedAt),
+          byteSize: latest.byteSize,
+          errorMessage: latest.errorMessage,
+        } : null,
+        r2: {
+          configured: r2.configured,
+          backupEnabled: r2.backupEnabled,
+          backupFrequency: r2.backupFrequency,
+          scheduleHourVietnam: r2.scheduleHourVietnam,
+          latestStatus: latest?.status ?? null,
+          running: backup.running,
+        },
+      };
+    }),
+  }),
   adminR2: router({
     getSettings: adminProcedure.query(() => getR2PublicSettings()),
     saveSettings: adminProcedure.input(z.object({
@@ -589,12 +627,12 @@ export const appRouter = router({
       publicBaseUrl: z.string().trim().url().max(1000).nullable().optional(),
       backupEnabled: z.boolean().optional(),
       backupFrequency: z.enum(["daily", "weekly"]).optional(),
-      scheduleHourUtc: z.number().int().min(0).max(23).optional(),
+      scheduleHourVietnam: z.number().int().min(0).max(23).optional(),
     })).mutation(({ input }) => saveR2Settings(input)),
     testConnection: adminProcedure.input(z.object({}).optional()).mutation(() => checkR2Connection()),
     runBackup: adminProcedure.input(z.object({}).optional()).mutation(() => runR2Backup()),
     getBackupStatus: adminProcedure.query(() => getBackupStatus()),
-    updateBackupSchedule: adminProcedure.input(z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), scheduleHourUtc: z.number().int().min(0).max(23) })).mutation(({ input }) => saveR2Settings({ backupEnabled: input.enabled, backupFrequency: input.frequency, scheduleHourUtc: input.scheduleHourUtc })),
+    updateBackupSchedule: adminProcedure.input(z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), scheduleHourVietnam: z.number().int().min(0).max(23) })).mutation(({ input }) => saveR2Settings({ backupEnabled: input.enabled, backupFrequency: input.frequency, scheduleHourVietnam: input.scheduleHourVietnam })),
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({

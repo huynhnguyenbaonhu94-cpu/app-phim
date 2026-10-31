@@ -197,17 +197,8 @@ struct MovieDetailScreen: View {
     }
 
     private func loadingState(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 9) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.auroraAccent)
-                Text("Đang tải chi tiết phim…")
-                    .font(.auroraLabel(12, weight: .bold))
-                    .foregroundStyle(Color.auroraTextSecondary)
-            }
-            .padding(.bottom, 2)
-
+        let heroHeight = min(max(width * 1.08, 300), 390)
+        VStack(alignment: .leading, spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 30, style: .continuous)
                     .fill(LinearGradient(
@@ -218,7 +209,7 @@ struct MovieDetailScreen: View {
                 Circle()
                     .fill(RadialGradient(colors: [Color.auroraSky.opacity(0.26), .clear], center: .center, startRadius: 4, endRadius: width * 0.48))
                     .frame(width: width * 0.92, height: width * 0.92)
-                    .offset(x: width * 0.34, y: -110)
+                    .offset(x: width * 0.34, y: -heroHeight * 0.25)
                 AuroraShimmerOverlay()
                     .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
 
@@ -241,7 +232,7 @@ struct MovieDetailScreen: View {
                             .background(Color.auroraAccent.opacity(0.12), in: Capsule())
                     }
 
-                    Spacer(minLength: 20)
+                    Spacer(minLength: 14)
 
                     HStack(spacing: 13) {
                         DetailLoadingMark()
@@ -259,7 +250,7 @@ struct MovieDetailScreen: View {
                         }
                     }
 
-                    Spacer(minLength: 20)
+                    Spacer(minLength: 14)
 
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
                         .fill(Color.white.opacity(0.22))
@@ -288,10 +279,10 @@ struct MovieDetailScreen: View {
                         }
                         .padding(.top, 15)
                 }
-                .padding(22)
+                .padding(18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            .frame(width: width, height: 430)
+            .frame(width: width, height: heroHeight)
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -300,7 +291,7 @@ struct MovieDetailScreen: View {
 
             HStack(spacing: 10) {
                 ForEach(0..<3, id: \.self) { _ in
-                    SkeletonBlock(cornerRadius: 16).frame(height: 58)
+                    SkeletonBlock(cornerRadius: 16).frame(height: 52)
                 }
             }
 
@@ -310,7 +301,7 @@ struct MovieDetailScreen: View {
                 SkeletonBlock(cornerRadius: 6).frame(width: width * 0.83, height: 11)
                 SkeletonBlock(cornerRadius: 6).frame(width: width * 0.59, height: 11)
             }
-            .padding(16)
+            .padding(14)
             .auroraCard(cornerRadius: 22, tint: .auroraViolet, fill: 0.5)
 
             HStack {

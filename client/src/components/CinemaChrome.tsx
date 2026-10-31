@@ -1,11 +1,13 @@
-import { Film, Heart, Home, Layers, List, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
+import { Film, Heart, Home, Layers, LayoutDashboard, List, Menu, MonitorPlay, Play, Search, Star, TvMinimal, X } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { CINEMORA_LOGO_URL } from "@/const";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 export function SiteHeader() {
   const [location, navigate] = useLocation();
+  const { user } = useAuth();
   const [value, setValue] = useState(location.startsWith("/search") ? new URLSearchParams(window.location.search).get("q") || "" : "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
@@ -68,6 +70,7 @@ export function SiteHeader() {
                 const active = item.exact ? location === item.href : location.startsWith(item.href);
                 return <Link key={item.href} href={item.href} role="menuitem" className={`desktop-menu-link${active ? " active" : ""}`} onClick={() => setDesktopMenuOpen(false)}><span className="desktop-menu-link-icon">{item.icon}</span><span>{item.label}</span>{active && <span className="desktop-menu-link-dot" />}</Link>;
               })}
+              {user?.role === "admin" && <Link href="/admin" role="menuitem" className={`desktop-menu-link desktop-menu-link--admin${location.startsWith("/admin") ? " active" : ""}`} onClick={() => setDesktopMenuOpen(false)}><span className="desktop-menu-link-icon"><LayoutDashboard size={16} /></span><span>Dashboard quản trị</span>{location.startsWith("/admin") && <span className="desktop-menu-link-dot" />}</Link>}
             </div>
           </div>
 
@@ -86,6 +89,7 @@ export function SiteHeader() {
             <Heart size={15} fill={location.startsWith("/account") ? "currentColor" : "none"} />
             <span>Thư viện</span>
           </Link>
+          {user?.role === "admin" && <Link href="/admin" className={`header-admin-link${location.startsWith("/admin") ? " is-active" : ""}`} aria-label="Mở Dashboard quản trị"><LayoutDashboard size={15} /><span>Quản trị</span></Link>}
 
           {/* Mobile search trigger — intentionally outside the hamburger menu */}
           <button
@@ -169,6 +173,7 @@ export function SiteHeader() {
               </Link>
             );
           })}
+          {user?.role === "admin" && <><div className="mm-nav-divider" /><Link href="/admin" className={`mm-link mm-link--admin${location.startsWith("/admin") ? " mm-link--active" : ""}`} onClick={() => setMenuOpen(false)}><span className="mm-link-icon"><LayoutDashboard size={16} /></span><span className="mm-link-label">Dashboard quản trị</span>{location.startsWith("/admin") && <span className="mm-link-dot" />}</Link></>}
         </nav>
       </div>
     </>

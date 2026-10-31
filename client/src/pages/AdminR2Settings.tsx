@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Cloud, DatabaseBackup, KeyRound, Link as LinkIcon, RefreshCw, Save, ShieldCheck, TestTube2 } from "lucide-react";
+import { CheckCircle2, Clock3, Cloud, DatabaseBackup, KeyRound, Link as LinkIcon, RefreshCw, Save, ShieldCheck, TestTube2 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 
 type BackupFrequency = "daily" | "weekly";
-type BackupSchedule = { enabled: boolean; frequency: BackupFrequency; scheduleHourUtc: number };
+type BackupSchedule = { enabled: boolean; frequency: BackupFrequency; scheduleHourVietnam: number };
 type R2SettingsDraft = {
   accountId: string;
   bucket: string;
@@ -54,7 +55,7 @@ export default function AdminR2Settings() {
   const { user, loading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [form, setForm] = useState<R2SettingsDraft>(emptyForm);
-  const [schedule, setSchedule] = useState<BackupSchedule>({ enabled: false, frequency: "daily", scheduleHourUtc: 2 });
+  const [schedule, setSchedule] = useState<BackupSchedule>({ enabled: false, frequency: "daily", scheduleHourVietnam: 9 });
   const settings = trpc.adminR2.getSettings.useQuery(undefined, { enabled: user?.role === "admin", retry: false });
   const backupStatusQuery = trpc.adminR2.getBackupStatus.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 10_000 });
   const saveSettings = trpc.adminR2.saveSettings.useMutation();
@@ -75,7 +76,7 @@ export default function AdminR2Settings() {
       region: value.region || "auto",
       publicBaseUrl: value.publicBaseUrl || "",
     }));
-    setSchedule({ enabled: Boolean(value.backupEnabled), frequency: value.backupFrequency === "weekly" ? "weekly" : "daily", scheduleHourUtc: value.scheduleHourUtc ?? 2 });
+    setSchedule({ enabled: Boolean(value.backupEnabled), frequency: value.backupFrequency === "weekly" ? "weekly" : "daily", scheduleHourVietnam: value.scheduleHourVietnam ?? 9 });
   }, [settings.data]);
 
   useEffect(() => {
@@ -127,7 +128,7 @@ export default function AdminR2Settings() {
       publicBaseUrl: form.publicBaseUrl.trim() || null,
       backupEnabled: schedule.enabled,
       backupFrequency: schedule.frequency,
-      scheduleHourUtc: Math.min(23, Math.max(0, Number(schedule.scheduleHourUtc) || 0)),
+      scheduleHourVietnam: Math.min(23, Math.max(0, Number(schedule.scheduleHourVietnam) || 0)),
       ...(form.accessKeyId.trim() ? { accessKeyId: form.accessKeyId.trim() } : {}),
       ...(form.secretAccessKey.trim() ? { secretAccessKey: form.secretAccessKey.trim() } : {}),
     };
@@ -165,7 +166,7 @@ export default function AdminR2Settings() {
       return;
     }
     try {
-      await updateBackupSchedule.mutateAsync({ enabled: schedule.enabled, frequency: schedule.frequency, scheduleHourUtc: schedule.scheduleHourUtc });
+      await updateBackupSchedule.mutateAsync({ enabled: schedule.enabled, frequency: schedule.frequency, scheduleHourVietnam: schedule.scheduleHourVietnam });
       await backupStatusQuery.refetch();
       toast.success("Đã cập nhật lịch backup.");
     } catch (error) {
@@ -220,14 +221,15 @@ export default function AdminR2Settings() {
           <label className="is-wide">Public base URL <span className="optional-label">(tuỳ chọn)</span><input value={form.publicBaseUrl} onChange={event => updateField("publicBaseUrl", event.target.value)} placeholder="https://cdn.example.com/cinemora" autoComplete="url" /></label>
         </div>
         <p className="admin-r2-field-hint">Để trống Public base URL nếu chưa cấu hình custom domain/public bucket; ảnh public sẽ được phục vụ qua endpoint của website. Chỉ điền khi domain đã trỏ đến vùng public của R2. Media chat và bản backup luôn ở vùng private, không dùng public URL.</p>
-        <div className="admin-r2-guide"><strong>Thiết lập backup tự động trên cPanel</strong><ol><li>Trong <b>Setup Node.js App → Environment variables</b>, thêm <code>R2_SETTINGS_ENCRYPTION_KEY</code> là chuỗi ngẫu nhiên ổn định ít nhất 32 byte; restart Node.js app sau khi lưu.</li><li>Nhập endpoint, bucket và R2 API credentials ở bên trái, sau đó bấm <b>Lưu &amp; kiểm tra kết nối</b>. Kiểm tra sẽ upload, đọc lại và xóa một object tạm.</li><li>Bật lịch hàng ngày/hàng tuần, chọn giờ UTC rồi bấm <b>Lưu lịch</b>. Tiến trình Node.js phải tiếp tục chạy để scheduler thực thi.</li><li>Nút <b>Backup ngay</b> dùng <code>mysqldump</code> có sẵn trên máy chủ, nén SQL và ghi backup private vào prefix <code>backups/</code>.</li></ol></div>
+        <div className="admin-r2-guide"><strong>Thiết lập backup tự động trên cPanel</strong><ol><li>Trong <b>Setup Node.js App → Environment variables</b>, thêm <code>R2_SETTINGS_ENCRYPTION_KEY</code> là chuỗi ngẫu nhiên ổn định ít nhất 32 byte; restart Node.js app sau khi lưu.</li><li>Nhập endpoint, bucket và R2 API credentials ở bên trái, sau đó bấm <b>Lưu &amp; kiểm tra kết nối</b>. Kiểm tra sẽ upload, đọc lại và xóa một object tạm.</li><li>Bật lịch hàng ngày/hàng tuần, chọn giờ Việt Nam (GMT+7) rồi bấm <b>Lưu lịch</b>. Tiến trình Node.js phải tiếp tục chạy để scheduler thực thi.</li><li>Nút <b>Backup ngay</b> dùng <code>mysqldump</code> có sẵn trên máy chủ, nén SQL và ghi backup private vào prefix <code>backups/</code>.</li></ol></div>
         <div className="admin-r2-schedule">
-          <div><strong>Lịch tự động</strong><small>Thời gian được tính theo UTC.</small></div>
+          <div className="admin-r2-schedule-title"><strong>Lịch tự động</strong><small>Giờ Việt Nam · GMT+7 · Asia/Ho_Chi_Minh</small></div>
           <label className="admin-switch"><input type="checkbox" checked={schedule.enabled} disabled={!r2Ready} onChange={event => setSchedule(current => ({ ...current, enabled: event.target.checked }))} /><span /></label>
-          <select value={schedule.frequency} onChange={event => setSchedule(current => ({ ...current, frequency: event.target.value as BackupFrequency }))} disabled={!schedule.enabled || !r2Ready}><option value="daily">Hàng ngày</option><option value="weekly">Hàng tuần</option></select>
-          <label className="admin-r2-hour">Giờ UTC<input type="number" min={0} max={23} value={schedule.scheduleHourUtc} disabled={!schedule.enabled || !r2Ready} onChange={event => setSchedule(current => ({ ...current, scheduleHourUtc: Number(event.target.value) }))} /></label>
+          <div className="admin-r2-select-wrap"><span className="admin-r2-select-label">Tần suất</span><Select value={schedule.frequency} onValueChange={value => setSchedule(current => ({ ...current, frequency: value as BackupFrequency }))} disabled={!schedule.enabled || !r2Ready}><SelectTrigger className="admin-r2-select-trigger" aria-label="Tần suất backup"><SelectValue placeholder="Chọn tần suất" /></SelectTrigger><SelectContent className="admin-r2-select-content"><SelectItem value="daily">Hàng ngày</SelectItem><SelectItem value="weekly">Hàng tuần</SelectItem></SelectContent></Select></div>
+          <div className="admin-r2-hour"><span>Giờ backup</span><Select value={String(schedule.scheduleHourVietnam)} onValueChange={value => setSchedule(current => ({ ...current, scheduleHourVietnam: Number(value) }))} disabled={!schedule.enabled || !r2Ready}><SelectTrigger className="admin-r2-select-trigger" aria-label="Giờ backup theo GMT+7"><Clock3 size={15} /><SelectValue placeholder="Chọn giờ" /></SelectTrigger><SelectContent className="admin-r2-select-content">{Array.from({ length: 24 }, (_, hour) => <SelectItem key={hour} value={String(hour)}>{String(hour).padStart(2, "0")}:00</SelectItem>)}</SelectContent></Select></div>
           <button type="button" className="button button-ghost" disabled={updateBackupSchedule.isPending || !r2Ready} onClick={() => void saveSchedule()}><Save size={13} /> Lưu lịch</button>
         </div>
+        <div className="admin-r2-timezone-note"><Clock3 size={14} /><span>Lịch chạy theo giờ địa phương Việt Nam (UTC+7), không phụ thuộc múi giờ trên máy chủ. Giờ cũ đã được quy đổi để giữ nguyên thời điểm chạy tương đương.</span></div>
         <div className="admin-r2-retention"><strong>Giữ lại backup</strong><span>Backup không tự xóa để tránh mất dữ liệu. Nếu muốn giới hạn thời gian lưu, tạo lifecycle rule trong cài đặt bucket Cloudflare R2 cho prefix <code>backups/</code>; kiểm tra chính sách khôi phục trước khi bật xóa tự động.</span><a href="https://developers.cloudflare.com/r2/buckets/object-lifecycles/" target="_blank" rel="noreferrer">Hướng dẫn R2 Object Lifecycle</a></div>
       </div>
     </section>

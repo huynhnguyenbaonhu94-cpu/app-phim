@@ -221,6 +221,7 @@ export async function ensureR2Compatibility(db: ReturnType<typeof drizzle>) {
     backupEnabled tinyint(1) NOT NULL DEFAULT 0,
     backupFrequency varchar(20) NOT NULL DEFAULT 'daily',
     scheduleHourUtc int NOT NULL DEFAULT 2,
+    scheduleHourVietnam int NOT NULL DEFAULT 9,
     createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
@@ -235,6 +236,17 @@ export async function ensureR2Compatibility(db: ReturnType<typeof drizzle>) {
     errorMessage text NULL,
     INDEX r2_backup_runs_status_started_idx (status, startedAt)
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+  const [rawColumns] = await db.execute(sql`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'r2_settings'
+  `);
+  const existingColumns = new Set(((rawColumns as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => String(row.COLUMN_NAME || "")));
+  if (!existingColumns.has("scheduleHourVietnam")) {
+    await db.execute(sql.raw("ALTER TABLE `r2_settings` ADD COLUMN `scheduleHourVietnam` int NOT NULL DEFAULT 9"));
+    if (existingColumns.has("scheduleHourUtc")) {
+      await db.execute(sql.raw("UPDATE `r2_settings` SET `scheduleHourVietnam` = MOD(COALESCE(`scheduleHourUtc`, 2) + 7, 24)"));
+    }
+  }
   for (const statement of [
     "ALTER TABLE `r2_settings` ADD COLUMN `backupFrequency` varchar(20) NOT NULL DEFAULT 'daily'",
     "ALTER TABLE `r2_settings` ADD COLUMN `scheduleHourUtc` int NOT NULL DEFAULT 2",

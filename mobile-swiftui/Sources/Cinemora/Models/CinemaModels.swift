@@ -158,8 +158,8 @@ struct Movie: Decodable, Identifiable, Hashable {
     var episodeGroups: [MovieServer]?
 
     var id: String { apiID ?? slug }
-    var posterURL: URL? { CinemaAPI.absoluteURL(poster ?? backdrop) }
-    var backdropURL: URL? { CinemaAPI.absoluteURL(backdrop ?? poster) }
+    var posterURL: URL? { CinemaAPI.absoluteURL(poster) ?? CinemaAPI.absoluteURL(backdrop) }
+    var backdropURL: URL? { CinemaAPI.absoluteURL(backdrop) ?? CinemaAPI.absoluteURL(poster) }
     var displayTitle: String { originName.map { "\(name) · \($0)" } ?? name }
     var availableServers: [MovieServer] {
         if let servers, !servers.isEmpty { return servers }
@@ -167,10 +167,106 @@ struct Movie: Decodable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case apiID = "id", slug, name, originName, poster, backdrop, year, quality
+        case apiID = "id", slug, name, originName, poster, backdrop
+        case posterUrl, thumbUrl, backdropUrl
+        case posterSnake = "poster_url", thumbSnake = "thumb_url", backdropSnake = "backdrop_url"
+        case year, quality
         case episodeCurrent, episodeTotal, time, lang, description, rating, categories
         case countries, actors, actorProfiles, directors, views, alternativeNames, status
         case tmdbId, imdbId, createdAt, updatedAt, servers, episodeGroups = "episodes", allowPip
+    }
+
+    init(
+        apiID: String?, slug: String, name: String, originName: String?, poster: String?, backdrop: String?,
+        year: Int?, quality: String?, episodeCurrent: String?, episodeTotal: Int?, time: String?, lang: String?,
+        description: String?, rating: Double?, categories: [MovieTag]?, countries: [MovieTag]?, actors: [String]?,
+        actorProfiles: [MovieActorProfile]?, directors: [String]?, views: Int?, alternativeNames: [String]?,
+        status: String?, tmdbId: String?, imdbId: String?, createdAt: String?, updatedAt: String?,
+        servers: [MovieServer]?, allowPip: Bool?, episodeGroups: [MovieServer]?
+    ) {
+        self.apiID = apiID
+        self.slug = slug
+        self.name = name
+        self.originName = originName
+        self.poster = poster
+        self.backdrop = backdrop
+        self.year = year
+        self.quality = quality
+        self.episodeCurrent = episodeCurrent
+        self.episodeTotal = episodeTotal
+        self.time = time
+        self.lang = lang
+        self.description = description
+        self.rating = rating
+        self.categories = categories
+        self.countries = countries
+        self.actors = actors
+        self.actorProfiles = actorProfiles
+        self.directors = directors
+        self.views = views
+        self.alternativeNames = alternativeNames
+        self.status = status
+        self.tmdbId = tmdbId
+        self.imdbId = imdbId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.servers = servers
+        self.allowPip = allowPip
+        self.episodeGroups = episodeGroups
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        func string(for keys: [CodingKeys]) -> String? {
+            for key in keys {
+                if let value = try? container.decode(String.self, forKey: key) { return value }
+            }
+            return nil
+        }
+
+        func nonEmptyString(for keys: [CodingKeys]) -> String? {
+            for key in keys {
+                if let value = try? container.decode(String.self, forKey: key),
+                   !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return value
+                }
+            }
+            return nil
+        }
+
+        apiID = string(for: [.apiID])
+        slug = try container.decode(String.self, forKey: .slug)
+        name = try container.decode(String.self, forKey: .name)
+        originName = string(for: [.originName])
+        // Keep the established fields first, then accept the camelCase fields
+        // emitted by manually-added movies. The snake_case aliases are harmless
+        // for older payloads and do not manufacture an API route.
+        poster = nonEmptyString(for: [.poster, .posterUrl, .thumbUrl, .posterSnake, .thumbSnake])
+        backdrop = nonEmptyString(for: [.backdrop, .backdropUrl, .thumbUrl, .backdropSnake, .thumbSnake])
+        year = try? container.decodeIfPresent(Int.self, forKey: .year)
+        quality = string(for: [.quality])
+        episodeCurrent = string(for: [.episodeCurrent])
+        episodeTotal = try? container.decodeIfPresent(Int.self, forKey: .episodeTotal)
+        time = string(for: [.time])
+        lang = string(for: [.lang])
+        description = string(for: [.description])
+        rating = try? container.decodeIfPresent(Double.self, forKey: .rating)
+        categories = try? container.decodeIfPresent([MovieTag].self, forKey: .categories)
+        countries = try? container.decodeIfPresent([MovieTag].self, forKey: .countries)
+        actors = try? container.decodeIfPresent([String].self, forKey: .actors)
+        actorProfiles = try? container.decodeIfPresent([MovieActorProfile].self, forKey: .actorProfiles)
+        directors = try? container.decodeIfPresent([String].self, forKey: .directors)
+        views = try? container.decodeIfPresent(Int.self, forKey: .views)
+        alternativeNames = try? container.decodeIfPresent([String].self, forKey: .alternativeNames)
+        status = string(for: [.status])
+        tmdbId = string(for: [.tmdbId])
+        imdbId = string(for: [.imdbId])
+        createdAt = string(for: [.createdAt])
+        updatedAt = string(for: [.updatedAt])
+        servers = try? container.decodeIfPresent([MovieServer].self, forKey: .servers)
+        allowPip = try? container.decodeIfPresent(Bool.self, forKey: .allowPip)
+        episodeGroups = try? container.decodeIfPresent([MovieServer].self, forKey: .episodeGroups)
     }
 }
 

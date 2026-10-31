@@ -33,7 +33,7 @@ export type R2PublicSettings = {
   encryptionKeyConfigured: boolean;
   backupEnabled: boolean;
   backupFrequency: "daily" | "weekly";
-  scheduleHourUtc: number;
+  scheduleHourVietnam: number;
   updatedAt: string | null;
 };
 
@@ -46,7 +46,7 @@ export type SaveR2SettingsInput = {
   publicBaseUrl?: string | null;
   backupEnabled?: boolean;
   backupFrequency?: "daily" | "weekly";
-  scheduleHourUtc?: number;
+  scheduleHourVietnam?: number;
 };
 
 function clean(value: string | null | undefined) {
@@ -359,7 +359,7 @@ export async function getR2PublicSettings(): Promise<R2PublicSettings> {
     encryptionKeyConfigured,
     backupEnabled: Boolean(row?.backupEnabled),
     backupFrequency: row?.backupFrequency === "weekly" ? "weekly" : "daily",
-    scheduleHourUtc: Math.min(23, Math.max(0, Number(row?.scheduleHourUtc ?? 2))),
+    scheduleHourVietnam: Math.min(23, Math.max(0, Number(row?.scheduleHourVietnam ?? ((Number(row?.scheduleHourUtc ?? 2) + 7) % 24)))),
     updatedAt: row?.updatedAt ? new Date(row.updatedAt).toISOString() : null,
   };
 }
@@ -380,6 +380,8 @@ export async function saveR2Settings(input: SaveR2SettingsInput): Promise<R2Publ
   }
   const encryptedAccess = accessKeyId ? encryptSecret(accessKeyId) : null;
   const encryptedSecret = secretAccessKey ? encryptSecret(secretAccessKey) : null;
+  const scheduleHourVietnam = Math.min(23, Math.max(0, Math.floor(input.scheduleHourVietnam ?? Number(current?.scheduleHourVietnam ?? ((Number(current?.scheduleHourUtc ?? 2) + 7) % 24)))));
+  const scheduleHourUtc = (scheduleHourVietnam + 17) % 24;
   const values = {
     id: SETTINGS_ID,
     endpoint,
@@ -390,8 +392,9 @@ export async function saveR2Settings(input: SaveR2SettingsInput): Promise<R2Publ
     publicBaseUrl: input.publicBaseUrl !== undefined ? validatePublicBaseUrl(clean(input.publicBaseUrl)) : validatePublicBaseUrl(clean(current?.publicBaseUrl) ?? environment?.publicBaseUrl ?? null),
     backupEnabled: input.backupEnabled ?? Boolean(current?.backupEnabled),
     backupFrequency: input.backupFrequency ?? (current?.backupFrequency === "weekly" ? "weekly" : "daily"),
-    scheduleHourUtc: input.scheduleHourUtc ?? Number(current?.scheduleHourUtc ?? 2),
+    scheduleHourUtc,
+    scheduleHourVietnam,
   } as const;
-  await db.insert(r2Settings).values(values).onDuplicateKeyUpdate({ set: { endpoint: values.endpoint, bucket: values.bucket, region: values.region, accessKeyIdEncrypted: values.accessKeyIdEncrypted, secretAccessKeyEncrypted: values.secretAccessKeyEncrypted, publicBaseUrl: values.publicBaseUrl, backupEnabled: values.backupEnabled, backupFrequency: values.backupFrequency, scheduleHourUtc: values.scheduleHourUtc } });
+  await db.insert(r2Settings).values(values).onDuplicateKeyUpdate({ set: { endpoint: values.endpoint, bucket: values.bucket, region: values.region, accessKeyIdEncrypted: values.accessKeyIdEncrypted, secretAccessKeyEncrypted: values.secretAccessKeyEncrypted, publicBaseUrl: values.publicBaseUrl, backupEnabled: values.backupEnabled, backupFrequency: values.backupFrequency, scheduleHourUtc: values.scheduleHourUtc, scheduleHourVietnam: values.scheduleHourVietnam } });
   return getR2PublicSettings();
 }

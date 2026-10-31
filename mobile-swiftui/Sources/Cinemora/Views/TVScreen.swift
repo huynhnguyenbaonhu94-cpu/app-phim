@@ -1506,10 +1506,6 @@ private struct TVVideoFullscreenPlayer: View {
 
     private var subtitlePreview: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("XEM TRƯỚC REALTIME")
-                .font(.system(size: 8, weight: .black, design: .rounded))
-                .tracking(1)
-                .foregroundStyle(Color.auroraViolet)
             ZStack(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(LinearGradient(colors: [Color.auroraSky.opacity(0.4), .black.opacity(0.92)], startPoint: .topLeading, endPoint: .bottomTrailing))

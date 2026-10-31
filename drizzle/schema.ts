@@ -143,10 +143,13 @@ export const r2Settings = mysqlTable("r2_settings", {
 	accessKeyIdEncrypted: mediumtext("accessKeyIdEncrypted"),
 	secretAccessKeyEncrypted: mediumtext("secretAccessKeyEncrypted"),
 	publicBaseUrl: text("publicBaseUrl"),
-	backupEnabled: boolean("backupEnabled").default(false).notNull(),
-	backupFrequency: varchar("backupFrequency", { length: 20 }).default("daily").notNull(),
-	scheduleHourUtc: int("scheduleHourUtc").default(2).notNull(),
-	createdAt: timestamp("createdAt").defaultNow().notNull(),
+  backupEnabled: boolean("backupEnabled").default(false).notNull(),
+  backupFrequency: varchar("backupFrequency", { length: 20 }).default("daily").notNull(),
+  /** Legacy UTC schedule field retained for old deployments and clients. */
+  scheduleHourUtc: int("scheduleHourUtc").default(2).notNull(),
+  /** Scheduled local clock hour in Asia/Ho_Chi_Minh (GMT+7). */
+  scheduleHourVietnam: int("scheduleHourVietnam").default(9).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 

@@ -88,8 +88,33 @@ struct CinemaAPI {
     }
 
     static func absoluteURL(_ value: String?) -> URL? {
-        guard let value, !value.isEmpty else { return nil }
-        return URL(string: value, relativeTo: baseURL)?.absoluteURL
+        guard let value else { return nil }
+        let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+
+        // Some storage providers return protocol-relative artwork URLs. Use
+        // HTTPS rather than weakening ATS for the whole app.
+        if raw.hasPrefix("//") {
+            return URL(string: "https:\(raw)")
+        }
+
+        guard var components = URLComponents(string: raw) else { return nil }
+        if let scheme = components.scheme?.lowercased() {
+            guard (scheme == "http" || scheme == "https"), components.host != nil else { return nil }
+            // Cleartext image URLs are commonly returned by older manual-entry
+            // forms. Prefer the secure equivalent; if that host does not serve
+            // HTTPS, the request fails normally instead of bypassing ATS.
+            if scheme == "http" { components.scheme = "https" }
+            return components.url
+        }
+
+        // Relative paths remain relative to the configured API host. This is
+        // resolution only: no upload or API endpoint is inferred or invented.
+        guard let resolved = URL(string: raw, relativeTo: baseURL)?.absoluteURL,
+              let resolvedScheme = resolved.scheme?.lowercased(),
+              (resolvedScheme == "http" || resolvedScheme == "https"),
+              resolved.host != nil else { return nil }
+        return resolved
     }
 
     /// DHCN requires a baothanhhoa.vn Origin/Referer and cannot be opened

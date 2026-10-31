@@ -15,13 +15,15 @@ import AdminMovies from "./pages/AdminMovies";
 import AdminMovieSources from "./pages/AdminMovieSources";
 import AdminCustomMovie from "./pages/AdminCustomMovie";
 import AdminSpecialChat from "./pages/AdminSpecialChat";
-import AdminR2Settings from "./pages/AdminR2Settings";
+import AdminR2Settings from "@/pages/AdminR2Settings";
+import AdminDashboard from "@/pages/AdminDashboard";
 
 function Router() {
   return <Switch>
     <Route path="/" component={Home} />
     <Route path="/search" component={SearchPage} />
     <Route path="/account" component={AccountPage} />
+    <Route path="/admin" component={AdminDashboard} />
     <Route path="/admin/tv" component={AdminTvStreams} />
     <Route path="/admin/accounts" component={AdminAccounts} />
     <Route path="/admin/special-chat" component={AdminSpecialChat} />

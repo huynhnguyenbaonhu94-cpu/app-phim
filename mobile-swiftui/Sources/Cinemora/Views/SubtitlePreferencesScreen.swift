@@ -10,29 +10,32 @@ struct SubtitlePreferencesEditor: View {
             if !compact {
                 SectionEyebrow(text: "SUBTITLE")
                 AuroraGradientText(text: "Tùy chỉnh phụ đề", font: .auroraDisplay(26))
-                Text(store.accountUser == nil ? "Thay đổi áp dụng ngay và được lưu trên thiết bị này." : "Thay đổi áp dụng ngay và đồng bộ với tài khoản của bạn trên các thiết bị.")
-                    .font(.auroraBody(11))
-                    .foregroundStyle(Color.auroraTextSecondary)
-                if let message = store.subtitlePreferencesSyncMessage {
-                    Text(message)
-                        .font(.auroraBody(compact ? 8 : 9))
-                        .foregroundStyle(message.localizedCaseInsensitiveContains("chưa đồng bộ") ? Color.auroraAmber : Color.auroraMint)
+                preview
+                if let subtitleSyncWarning {
+                    Text(subtitleSyncWarning)
+                        .font(.auroraBody(9))
+                        .foregroundStyle(Color.auroraAmber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                preview
                 fullControls
             } else {
                 // Fullscreen dùng cùng một bộ điều khiển với mục Lưu để mọi
                 // thay đổi đều có hiệu lực và được phản ánh ngay trong player.
-                if let message = store.subtitlePreferencesSyncMessage {
-                    Text(message)
+                if let subtitleSyncWarning {
+                    Text(subtitleSyncWarning)
                         .font(.auroraBody(8))
-                        .foregroundStyle(message.localizedCaseInsensitiveContains("chưa đồng bộ") ? Color.auroraAmber : Color.auroraMint)
+                        .foregroundStyle(Color.auroraAmber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 fullControls
             }
         }
+    }
+
+    private var subtitleSyncWarning: String? {
+        guard let message = store.subtitlePreferencesSyncMessage,
+              message.localizedCaseInsensitiveContains("chưa đồng bộ") else { return nil }
+        return message
     }
 
     @ViewBuilder
@@ -106,10 +109,6 @@ struct SubtitlePreferencesEditor: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("XEM TRƯỚC REALTIME")
-                .font(.system(size: 8, weight: .black, design: .rounded))
-                .tracking(1)
-                .foregroundStyle(Color.auroraViolet)
             ZStack(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(LinearGradient(colors: [Color.auroraSky.opacity(0.34), .black.opacity(0.92)], startPoint: .top, endPoint: .bottom))

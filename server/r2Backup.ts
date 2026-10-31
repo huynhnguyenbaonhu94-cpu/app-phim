@@ -193,9 +193,9 @@ export async function runR2Backup(): Promise<BackupResult> {
 export async function getBackupStatus() {
   const db = await getDb();
   if (!db) return { configured: false, latest: null };
-  const settings = await db.select({ enabled: r2Settings.backupEnabled, frequency: r2Settings.backupFrequency, scheduleHourUtc: r2Settings.scheduleHourUtc }).from(r2Settings).where(eq(r2Settings.id, SETTINGS_ID)).limit(1);
+  const settings = await db.select({ enabled: r2Settings.backupEnabled, frequency: r2Settings.backupFrequency, scheduleHourVietnam: r2Settings.scheduleHourVietnam }).from(r2Settings).where(eq(r2Settings.id, SETTINGS_ID)).limit(1);
   const latest = await db.select().from(r2BackupRuns).orderBy(desc(r2BackupRuns.id)).limit(1);
-  return { configured: (await storageBackend()) === "r2", schedule: settings[0] ? { enabled: Boolean(settings[0].enabled), frequency: settings[0].frequency === "weekly" ? "weekly" : "daily", scheduleHourUtc: settings[0].scheduleHourUtc } : { enabled: false, frequency: "daily" as const, scheduleHourUtc: 2 }, latest: latest[0] ?? null, running: Boolean(runningBackup) };
+  return { configured: (await storageBackend()) === "r2", schedule: settings[0] ? { enabled: Boolean(settings[0].enabled), frequency: settings[0].frequency === "weekly" ? "weekly" : "daily", scheduleHourVietnam: settings[0].scheduleHourVietnam } : { enabled: false, frequency: "daily" as const, scheduleHourVietnam: 9 }, latest: latest[0] ?? null, running: Boolean(runningBackup) };
 }
 
 export async function checkR2Connection() {
@@ -205,28 +205,40 @@ export async function checkR2Connection() {
 async function scheduleSettings() {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select({ enabled: r2Settings.backupEnabled, frequency: r2Settings.backupFrequency, scheduleHourUtc: r2Settings.scheduleHourUtc }).from(r2Settings).where(eq(r2Settings.id, SETTINGS_ID)).limit(1);
+  const rows = await db.select({ enabled: r2Settings.backupEnabled, frequency: r2Settings.backupFrequency, scheduleHourVietnam: r2Settings.scheduleHourVietnam }).from(r2Settings).where(eq(r2Settings.id, SETTINGS_ID)).limit(1);
   return rows[0] ?? null;
+}
+
+/** Vietnam is fixed GMT+7 and does not observe daylight saving time. */
+export function getVietnamBackupClock(now: Date) {
+  const shifted = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const year = shifted.getUTCFullYear();
+  const month = shifted.getUTCMonth() + 1;
+  const day = shifted.getUTCDate();
+  const weekday = shifted.getUTCDay();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const monday = new Date(Date.UTC(year, month - 1, day - ((weekday + 6) % 7)));
+  return {
+    hour: shifted.getUTCHours(),
+    dateKey: `${year}-${pad(month)}-${pad(day)}`,
+    weekKey: monday.toISOString().slice(0, 10),
+  };
 }
 
 async function maybeRunScheduledBackup() {
   if (runningBackup) return;
   const settings = await scheduleSettings();
   if (!settings?.enabled || (await storageBackend()) !== "r2") return;
-  const now = new Date();
-  if (now.getUTCHours() < Number(settings.scheduleHourUtc ?? 2)) return;
-  const day = now.getUTCDay();
-  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((day + 6) % 7)));
-  const slot = settings.frequency === "weekly" ? `weekly:${monday.toISOString().slice(0, 10)}` : `daily:${now.toISOString().slice(0, 10)}`;
+  const now = getVietnamBackupClock(new Date());
+  if (now.hour < Number(settings.scheduleHourVietnam ?? 9)) return;
+  const slot = settings.frequency === "weekly" ? `weekly:${now.weekKey}` : `daily:${now.dateKey}`;
   if (slot === lastScheduledSlot) return;
   const db = await getDb();
   const latest = db ? await db.select({ completedAt: r2BackupRuns.completedAt }).from(r2BackupRuns).where(eq(r2BackupRuns.status, "completed")).orderBy(desc(r2BackupRuns.id)).limit(1) : [];
   const latestDate = latest[0]?.completedAt;
   if (latestDate) {
-    const completed = new Date(latestDate);
-    const completedDay = completed.getUTCDay();
-    const completedMonday = new Date(Date.UTC(completed.getUTCFullYear(), completed.getUTCMonth(), completed.getUTCDate() - ((completedDay + 6) % 7)));
-    const completedSlot = settings.frequency === "weekly" ? `weekly:${completedMonday.toISOString().slice(0, 10)}` : `daily:${completed.toISOString().slice(0, 10)}`;
+    const completed = getVietnamBackupClock(new Date(latestDate));
+    const completedSlot = settings.frequency === "weekly" ? `weekly:${completed.weekKey}` : `daily:${completed.dateKey}`;
     if (completedSlot === slot) {
       lastScheduledSlot = slot;
       return;
