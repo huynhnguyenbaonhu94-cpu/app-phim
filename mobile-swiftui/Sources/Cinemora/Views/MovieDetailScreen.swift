@@ -198,7 +198,7 @@ struct MovieDetailScreen: View {
 
     private func loadingState(width: CGFloat) -> some View {
         let heroHeight = min(max(width * 1.08, 300), 390)
-        VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 30, style: .continuous)
                     .fill(LinearGradient(

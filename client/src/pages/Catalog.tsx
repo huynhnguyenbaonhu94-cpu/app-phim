@@ -1,4 +1,5 @@
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Filter, Search as SearchIcon, SlidersHorizontal } from "lucide-react";
+import type { FormEvent } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { MovieCard, PageShell, SectionHeading, SkeletonCard } from "@/components/CinemaChrome";
 import type { MovieCardMovie } from "@/components/CinemaChrome";
@@ -66,6 +67,78 @@ export function DirectoryPage({ dimension }: { dimension: "categories" | "countr
 }
 
 export function SearchPage() {
-  const search = useSearch(); const keyword = new URLSearchParams(search).get("q") || ""; const query = trpc.cinema.search.useQuery({ keyword }, { enabled: keyword.trim().length >= 2, staleTime: 120_000, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: 1 }); const items: MovieCardMovie[] = query.data?.items || [];
-  return <PageShell><main className="content-wrap inner-page"><div className="page-topline"><Link href="/" className="back-link"><ArrowLeft size={15} /> Trang chủ</Link><span className="result-note">{query.isLoading ? "Đang tìm kiếm..." : `${query.data?.pagination?.totalItems || items.length} kết quả`}</span></div><SectionHeading eyebrow="KẾT QUẢ TÌM KIẾM" title={keyword ? `“${keyword}”` : "Bạn đang tìm gì?"} />{keyword.length < 2 ? <div className="empty-state"><SearchIcon size={30} /><h3>Nhập ít nhất 2 ký tự</h3><p>Tìm theo tên phim tiếng Việt hoặc tên gốc.</p></div> : query.isError ? <div className="empty-state"><SearchIcon size={30} /><h3>Không tìm thấy kết quả</h3><p>Thử một từ khóa khác nhé.</p></div> : <div className="movie-grid catalog-grid">{query.isLoading ? Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />) : items.map((movie, i) => <MovieCard key={movie.id} movie={movie} index={i} />)}</div>}</main></PageShell>;
+  const search = useSearch();
+  const keyword = new URLSearchParams(search).get("q") || "";
+  const [, navigate] = useLocation();
+  const [draft, setDraft] = useState(keyword);
+  useEffect(() => setDraft(keyword), [keyword]);
+  const query = trpc.cinema.search.useQuery(
+    { keyword },
+    {
+      enabled: keyword.trim().length >= 2,
+      staleTime: 120_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
+    },
+  );
+  const items: MovieCardMovie[] = query.data?.items || [];
+  const totalResults = query.data?.pagination?.totalItems ?? items.length;
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const term = draft.trim();
+    if (term.length >= 2) navigate(`/search?q=${encodeURIComponent(term)}`);
+  }
+
+  return (
+    <PageShell>
+      <main className="content-wrap inner-page search-page">
+        <div className="page-topline">
+          <Link href="/" className="back-link"><ArrowLeft size={15} /> Trang chủ</Link>
+          <span className="result-note">
+            {keyword.trim().length < 2 ? "Tìm phim" : query.isLoading ? "Đang tìm kiếm…" : `${totalResults} kết quả`}
+          </span>
+        </div>
+        <SectionHeading
+          eyebrow="KHÁM PHÁ CINEMORA"
+          title={keyword ? `Kết quả cho “${keyword}”` : "Tìm phim bạn muốn xem"}
+        />
+        <form className="search-page-form" onSubmit={submitSearch} role="search" aria-label="Tìm phim">
+          <div className="search-page-input">
+            <SearchIcon size={19} aria-hidden="true" />
+            <input
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              value={draft}
+              onChange={event => setDraft(event.target.value)}
+              placeholder="Tên phim hoặc diễn viên…"
+              aria-label="Nhập tên phim hoặc diễn viên"
+            />
+            {draft && <button type="button" onClick={() => setDraft("")} aria-label="Xóa từ khóa"><span aria-hidden="true">×</span></button>}
+          </div>
+          <button className="search-page-submit" type="submit" disabled={draft.trim().length < 2}>
+            <SearchIcon size={16} /><span>Tìm kiếm</span>
+          </button>
+        </form>
+        <p className="search-page-hint">
+          {draft.trim().length < 2 ? "Nhập ít nhất 2 ký tự để bắt đầu tìm kiếm." : "Tìm theo tên phim tiếng Việt, tên gốc hoặc diễn viên."}
+        </p>
+
+        {keyword.trim().length < 2 ? (
+          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Nhập ít nhất 2 ký tự</h3><p>Dùng ô tìm kiếm phía trên để khám phá phim phù hợp.</p></div>
+        ) : query.isError ? (
+          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Chưa thể tải kết quả</h3><p>Kiểm tra kết nối rồi thử lại sau nhé.</p></div>
+        ) : query.isLoading ? (
+          <div className="movie-grid catalog-grid">{Array.from({ length: 8 }).map((_, index) => <SkeletonCard key={index} />)}</div>
+        ) : items.length === 0 ? (
+          <div className="empty-state search-page-empty"><SearchIcon size={30} /><h3>Chưa tìm thấy phim phù hợp</h3><p>Thử tên khác, tên gốc hoặc một từ khóa ngắn hơn.</p></div>
+        ) : (
+          <div className="movie-grid catalog-grid">{items.map((movie, index) => <MovieCard key={movie.id} movie={movie} index={index} />)}</div>
+        )}
+      </main>
+    </PageShell>
+  );
 }

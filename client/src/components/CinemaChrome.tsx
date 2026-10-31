@@ -29,14 +29,18 @@ export function SiteHeader() {
 
   useEffect(() => { setMenuOpen(false); setDesktopMenuOpen(false); setMobileSearchOpen(false); }, [location]);
   useEffect(() => {
-    document.body.style.overflow = menuOpen ? "hidden" : "";
+    document.body.style.overflow = menuOpen || mobileSearchOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
-  }, [menuOpen]);
+  }, [menuOpen, mobileSearchOpen]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const q = value.trim();
-    if (q) { navigate(`/search?q=${encodeURIComponent(q)}`); setMenuOpen(false); }
+    if (q.length >= 2) {
+      navigate(`/search?q=${encodeURIComponent(q)}`);
+      setMenuOpen(false);
+      setMobileSearchOpen(false);
+    }
   }
 
   const navLinks: Array<{ href: string; label: string; exact?: boolean; icon: ReactNode }> = [
@@ -98,6 +102,7 @@ export function SiteHeader() {
             onClick={() => { setMobileSearchOpen(v => !v); setMenuOpen(false); }}
             aria-label={mobileSearchOpen ? "Đóng tìm kiếm" : "Mở tìm kiếm"}
             aria-expanded={mobileSearchOpen}
+            aria-controls="mobile-search-panel"
           >
             <Search size={19} />
           </button>
@@ -114,10 +119,25 @@ export function SiteHeader() {
       )}
 
       {mobileSearchOpen && (
-        <form className="mobile-search-panel" onSubmit={submit} role="search">
-          <Search size={18} />
-          <input autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder="Tìm tên phim, diễn viên..." aria-label="Tìm kiếm phim trên mobile" />
-          {value && <button type="button" className="mobile-search-clear" onClick={() => setValue("")} aria-label="Xóa"><X size={16} /></button>}
+        <form id="mobile-search-panel" className="mobile-search-panel" onSubmit={submit} role="search" aria-label="Tìm phim trên điện thoại">
+          <div className="mobile-search-field">
+            <Search size={19} aria-hidden="true" />
+            <input
+              autoFocus
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              value={value}
+              onChange={e => setValue(e.target.value)}
+              onKeyDown={e => { if (e.key === "Escape") setMobileSearchOpen(false); }}
+              placeholder="Tên phim, diễn viên..."
+              aria-label="Tìm tên phim hoặc diễn viên"
+            />
+            {value && <button type="button" className="mobile-search-clear" onClick={() => setValue("")} aria-label="Xóa từ khóa"><X size={16} /></button>}
+          </div>
+          <button type="submit" className="mobile-search-submit" disabled={value.trim().length < 2}>Tìm</button>
+          <button type="button" className="mobile-search-close" onClick={() => setMobileSearchOpen(false)} aria-label="Đóng tìm kiếm"><X size={17} /></button>
         </form>
       )}
 

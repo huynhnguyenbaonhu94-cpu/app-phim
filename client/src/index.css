@@ -4762,3 +4762,206 @@ select:-webkit-autofill {
 @media (max-width: 680px) { .header-admin-link { display: none; } }
 .mm-link--admin .mm-link-icon { color: #c5b8ff; background: rgba(130,103,255,.14); }
 .mm-link--admin:hover, .mm-link--admin.mm-link--active { color: #e1d8ff; background: rgba(130,103,255,.11); }
+
+
+/* Mobile search refresh: clear hierarchy, safe touch targets, and a real submit action. */
+.search-page { padding-bottom: 64px; }
+.search-page .section-heading { margin-bottom: 18px; }
+.search-page .section-heading h2 { max-width: 100%; overflow-wrap: anywhere; word-break: normal; line-height: 1.16; }
+.search-page-form {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 740px;
+  margin: 18px 0 0;
+  padding: 7px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 17px;
+  background: linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  box-shadow: 0 14px 34px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035);
+}
+.search-page-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  height: 46px;
+  padding: 0 10px 0 13px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--accent);
+  background: rgba(5,7,10,.42);
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+.search-page-input:focus-within {
+  border-color: rgba(210,243,107,.42);
+  background: rgba(5,7,10,.7);
+  box-shadow: 0 0 0 3px rgba(210,243,107,.07);
+}
+.search-page-input > svg { flex: 0 0 auto; opacity: .78; }
+.search-page-input input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: #f2f4f5;
+  background: transparent;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.search-page-input input::placeholder { color: #737d8b; }
+.search-page-input input::-webkit-search-cancel-button { display: none; }
+.search-page-input > button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: #9aa3b0;
+  background: rgba(255,255,255,.08);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.search-page-input > button:hover { color: #fff; background: rgba(255,255,255,.14); }
+.search-page-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 112px;
+  min-height: 46px;
+  padding: 0 16px;
+  border: 1px solid rgba(210,243,107,.35);
+  border-radius: 12px;
+  color: #14180d;
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform .16s ease, filter .16s ease, opacity .16s ease;
+}
+.search-page-submit:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+.search-page-submit:disabled { opacity: .42; cursor: not-allowed; }
+.search-page-hint { margin: 9px 0 25px; color: rgba(214,220,228,.55); font-size: 11px; line-height: 1.5; }
+.search-page-empty { margin-top: 20px; }
+
+@media (max-width: 680px) {
+  .mobile-search-backdrop {
+    z-index: 9998;
+    background: rgba(3,5,9,.64);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+  }
+  .mobile-search-panel {
+    top: calc(68px + env(safe-area-inset-top, 0px) + 8px);
+    right: 12px;
+    left: 12px;
+    z-index: 9999;
+    box-sizing: border-box;
+    height: auto;
+    min-height: 62px;
+    gap: 7px;
+    padding: 7px;
+    border-radius: 17px;
+    background: rgba(13,16,22,.98);
+  }
+  .mobile-search-field {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    height: 46px;
+    flex: 1;
+    padding: 0 8px 0 11px;
+    border: 1px solid rgba(255,255,255,.055);
+    border-radius: 12px;
+    color: var(--accent);
+    background: rgba(255,255,255,.045);
+    transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+  }
+  .mobile-search-field:focus-within {
+    border-color: rgba(210,243,107,.42);
+    background: rgba(255,255,255,.07);
+    box-shadow: 0 0 0 3px rgba(210,243,107,.07);
+  }
+  .mobile-search-field > svg { flex: 0 0 auto; opacity: .85; }
+  .mobile-search-field input {
+    min-width: 0;
+    flex: 1;
+    height: 100%;
+    border: 0;
+    outline: 0;
+    color: #f4f5f7;
+    background: transparent;
+    font-size: 16px !important;
+    letter-spacing: -.01em;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .mobile-search-field input::placeholder { color: #737d8b; }
+  .mobile-search-field input::-webkit-search-cancel-button { display: none; }
+  .mobile-search-panel .mobile-search-clear,
+  .mobile-search-close {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    color: #aab2bd;
+    background: rgba(255,255,255,.075);
+    cursor: pointer;
+  }
+  .mobile-search-panel .mobile-search-clear:hover,
+  .mobile-search-close:hover { color: #fff; background: rgba(255,255,255,.14); }
+  .mobile-search-submit {
+    min-width: 52px;
+    height: 46px;
+    flex: 0 0 auto;
+    padding: 0 12px;
+    border: 1px solid rgba(210,243,107,.35);
+    border-radius: 12px;
+    color: #15190e;
+    background: var(--accent);
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .mobile-search-submit:disabled { opacity: .42; cursor: not-allowed; }
+  .mobile-search-panel button svg { opacity: 1; }
+
+  .search-page { padding-bottom: 48px; }
+  .search-page .section-heading { align-items: flex-start; margin: 17px 0 14px; }
+  .search-page .section-heading h2 { font-size: clamp(21px, 6vw, 29px); line-height: 1.14; }
+  .search-page-form { gap: 6px; margin: 14px 0 0; padding: 6px; border-radius: 15px; }
+  .search-page-input { height: 46px; gap: 8px; padding-left: 10px; }
+  .search-page-input input { font-size: 16px !important; }
+  .search-page-submit { min-width: 86px; min-height: 46px; gap: 6px; padding: 0 10px; border-radius: 11px; font-size: 11px; }
+  .search-page-submit svg { width: 15px; height: 15px; }
+  .search-page-hint { margin: 8px 2px 20px; font-size: 10px; }
+  .search-page-empty { min-height: 190px; padding: 20px; }
+}
+
+@media (max-width: 370px) {
+  .mobile-search-panel { right: 9px; left: 9px; gap: 5px; }
+  .mobile-search-field { gap: 6px; padding-left: 8px; }
+  .mobile-search-submit { min-width: 47px; padding: 0 9px; }
+  .mobile-search-panel .mobile-search-clear,
+  .mobile-search-close { width: 32px; height: 32px; flex-basis: 32px; }
+  .search-page-submit { min-width: 78px; padding: 0 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-search-panel, .search-page-input, .search-page-submit { animation: none !important; transition: none !important; }
+}
