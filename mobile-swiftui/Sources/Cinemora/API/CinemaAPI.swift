@@ -374,7 +374,7 @@ struct CinemaAPI {
 
     /// Lấy tệp chat từ route bảo vệ; backend xác nhận quyền sở hữu trước khi
     /// chuyển hướng ngắn hạn tới vùng lưu trữ media.
-    func specialChatMediaData(path: String) async throws -> Data {
+    func specialChatMediaData(path: String, maximumBytes: Int = 32 * 1024 * 1024) async throws -> Data {
         guard let url = URL(string: path, relativeTo: Self.baseURL)?.absoluteURL,
               url.host?.lowercased() == Self.baseURL.host?.lowercased() else {
             throw APIError.invalidURL
@@ -388,7 +388,10 @@ struct CinemaAPI {
         }
         for attempt in 0...2 {
             do {
-                let (data, response) = try await session.data(for: request)
+                // Buffer on disk first so a large or malformed response cannot
+                // consume unbounded process memory before its size is checked.
+                let (temporaryURL, response) = try await session.download(for: request)
+                defer { try? FileManager.default.removeItem(at: temporaryURL) }
                 guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
                 guard (200..<300).contains(http.statusCode) else {
                     if attempt < 2, http.statusCode >= 500 {
@@ -399,13 +402,15 @@ struct CinemaAPI {
                 }
                 let responseType = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
                     .split(separator: ";", maxSplits: 1).first.map(String.init)?.lowercased() ?? ""
-                guard !data.isEmpty,
+                let attributes = try FileManager.default.attributesOfItem(atPath: temporaryURL.path)
+                let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
+                guard byteCount > 0, byteCount <= maximumBytes,
                       responseType != "text/html",
                       responseType != "application/json",
                       responseType != "text/plain" else {
                     throw APIError.invalidResponse
                 }
-                return data
+                return try Data(contentsOf: temporaryURL, options: .mappedIfSafe)
             } catch {
                 guard attempt < 2, Self.isRetryableMediaError(error) else { throw error }
                 try await Task.sleep(for: .milliseconds(350 * (attempt + 1)))

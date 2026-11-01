@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -418,10 +419,11 @@ struct SpecialAccountChatScreen: View {
 
         if contentType?.preferredMIMEType == "image/gif" {
             guard data.count <= 8 * 1024 * 1024 else { throw SpecialChatClientError.imageTooLarge }
-            let image = UIImage(data: data)
+            let image = downsampledImage(data, maxDimension: 1800)
             return (data, "image.gif", "image/gif", image.map { Int($0.size.width.rounded()) }, image.map { Int($0.size.height.rounded()) })
         }
-        guard let image = UIImage(data: data) else { throw SpecialChatClientError.invalidFile }
+        guard data.count <= 8 * 1024 * 1024 else { throw SpecialChatClientError.imageTooLarge }
+        guard let image = downsampledImage(data, maxDimension: 1800) else { throw SpecialChatClientError.invalidFile }
         let maxDimension: CGFloat = 1800
         let factor = min(1, maxDimension / max(image.size.width, image.size.height))
         let size = CGSize(width: max(1, image.size.width * factor), height: max(1, image.size.height * factor))
@@ -444,6 +446,7 @@ struct SpecialAccountChatScreen: View {
             let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
             let isVideo = item.contentType.conforms(to: .movie) || item.contentType.conforms(to: .video)
             if isVideo && byteCount > 32 * 1024 * 1024 { throw SpecialChatClientError.videoTooLarge }
+            if !isVideo && byteCount > 8 * 1024 * 1024 { throw SpecialChatClientError.imageTooLarge }
             if isVideo {
                 (mediaWidth, mediaHeight) = await videoDisplayDimensions(at: temporaryURL)
             }
@@ -470,6 +473,16 @@ struct SpecialAccountChatScreen: View {
         } catch {
             return (nil, nil)
         }
+    }
+    private func downsampledImage(_ data: Data, maxDimension: CGFloat) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxDimension),
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
     }
 }
 
@@ -655,8 +668,8 @@ private struct SpecialChatMediaPreview: View {
             error = false
             errorMessage = nil
             do {
-                let data = try await CinemaAPI.shared.specialChatMediaData(path: path)
-                image = UIImage(data: data)
+                let data = try await CinemaAPI.shared.specialChatMediaData(path: path, maximumBytes: 8 * 1024 * 1024)
+                image = downsampledChatImage(data)
                 if let image { SpecialChatMediaCache.shared.insert(image, for: cacheKey) }
                 error = image == nil
                 if error { errorMessage = "Dữ liệu ảnh không hợp lệ · chạm để thử lại" }
@@ -685,7 +698,7 @@ private struct SpecialChatMediaPreview: View {
             if let cached = SpecialChatMediaCache.shared.videoData(for: cacheKey) {
                 data = cached
             } else {
-                data = try await CinemaAPI.shared.specialChatMediaData(path: path)
+                data = try await CinemaAPI.shared.specialChatMediaData(path: path, maximumBytes: 32 * 1024 * 1024)
                 SpecialChatMediaCache.shared.insertVideoData(data, for: cacheKey)
             }
             let ext: String
@@ -724,6 +737,17 @@ private struct SpecialChatMediaPreview: View {
         } catch {
             return nil
         }
+    }
+
+    private func downsampledChatImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1800,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
     }
 }
 

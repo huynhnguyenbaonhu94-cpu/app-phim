@@ -66,17 +66,24 @@ final class DownloadManager {
         /// báo trong playlist nhân với tổng thời lượng.
         var estimatedTotalBytes: Int64 {
             if phase == .finished { return max(receivedBytes, 0) }
-            let measured: Int64 = (doneSegments >= 3 && receivedBytes > 0 && totalSegments > 0)
-                ? Int64(Double(receivedBytes) / Double(doneSegments) * Double(totalSegments))
-                : 0
+            var measured: Int64 = 0
+            if doneSegments >= 3, receivedBytes > 0, totalSegments > 0 {
+                let estimate = Double(receivedBytes) / Double(doneSegments) * Double(totalSegments)
+                if estimate.isFinite, estimate > 0, estimate < Double(Int64.max) {
+                    measured = Int64(estimate)
+                }
+            }
             var declared: Int64 = 0
             if let bandwidth, bandwidth > 0, let durationSeconds, durationSeconds > 0 {
-                declared = Int64(Double(bandwidth) / 8 * durationSeconds)
+                let estimate = Double(bandwidth) / 8 * durationSeconds
+                if estimate.isFinite, estimate > 0, estimate < Double(Int64.max) {
+                    declared = Int64(estimate)
+                }
             }
             if measured > 0 && declared > 0 {
                 // Playlist tổng có thể khai băng thông gấp nhiều lần thực tế; khi
                 // hai con số lệch quá xa thì tin vào số đo.
-                return measured > declared * 3 ? measured : max(measured, declared)
+                return Double(measured) > Double(declared) * 3 ? measured : max(measured, declared)
             }
             return measured > 0 ? measured : declared
         }
@@ -92,16 +99,19 @@ final class DownloadManager {
         var percentText: String { "\(Int((progress * 100).rounded()))%" }
 
         var speedText: String {
-            guard let speed, speed > 0 else { return "" }
+            guard let speed, speed.isFinite, speed > 0, speed < Double(Int64.max) else { return "" }
             return "\(auroraByteText(Int64(speed)))/s"
         }
 
         /// Thời gian còn lại ước tính, chỉ hiện khi đã có số đo tốc độ.
         var etaText: String {
-            guard let speed, speed > 0, phase == .downloading else { return "" }
-            let remaining = Double(estimatedTotalBytes) - Double(receivedBytes)
+            guard let speed, speed.isFinite, speed > 0, phase == .downloading else { return "" }
+            let remaining = Double(max(estimatedTotalBytes, 0)) - Double(max(receivedBytes, 0))
             guard remaining > 0 else { return "" }
-            let seconds = Int(remaining / speed)
+            let estimate = remaining / speed
+            guard estimate.isFinite else { return "còn rất lâu" }
+            guard estimate < Double(Int.max) else { return "còn rất lâu" }
+            let seconds = Int(estimate)
             if seconds < 60 { return "còn <1 phút" }
             if seconds < 3600 { return "còn ~\(seconds / 60) phút" }
             let hours = seconds / 3600
@@ -160,7 +170,12 @@ final class DownloadManager {
     /// Dung lượng còn phải tải của mọi bản đang chờ hoặc đang tải dở.
     private var reservedBytes: Int64 {
         items.filter { $0.phase != .finished }
-            .reduce(Int64(0)) { $0 + max(0, $1.estimatedTotalBytes - $1.receivedBytes) }
+            .reduce(Int64(0)) { total, item in
+                let estimated = max(item.estimatedTotalBytes, 0)
+                let received = max(item.receivedBytes, 0)
+                let remaining = estimated > received ? estimated - received : 0
+                return total > Int64.max - remaining ? Int64.max : total + remaining
+            }
     }
 
     init() {
@@ -354,7 +369,12 @@ final class DownloadManager {
 
     var finishedCount: Int { items.filter { $0.phase == .finished }.count }
     var activeCount: Int { items.filter(\.isRunning).count }
-    var totalBytes: Int64 { items.filter { $0.phase == .finished }.reduce(0) { $0 + max($1.receivedBytes, 0) } }
+    var totalBytes: Int64 {
+        items.filter { $0.phase == .finished }.reduce(Int64(0)) { total, item in
+            let size = max(item.receivedBytes, 0)
+            return total > Int64.max - size ? Int64.max : total + size
+        }
+    }
     var totalSizeText: String { auroraByteText(totalBytes) }
 
     // MARK: - Hàng đợi
@@ -525,12 +545,20 @@ final class DownloadManager {
                 base: url,
                 fetch: { try await Self.fetch($0, session: session) }
             ), resolved.bandwidth > 0, resolved.duration > 0 {
-                perEpisode = Int64(Double(resolved.bandwidth) / 8 * resolved.duration)
+                let estimate = Double(resolved.bandwidth) / 8 * resolved.duration
+                if estimate.isFinite, estimate > 0, estimate < Double(Int64.max) {
+                    perEpisode = Int64(estimate)
+                }
             }
         }
-        let needed = perEpisode * Int64(episodes.count)
+        let episodeCount = Int64(episodes.count)
+        let needed = perEpisode > 0 && episodeCount > 0 && perEpisode > Int64.max / episodeCount
+            ? Int64.max
+            : perEpisode * episodeCount
+        let reserved = reservedBytes
+        let totalNeeded = needed > Int64.max - reserved ? Int64.max : needed + reserved
         let available = freeBytes
-        if needed > 0, needed + reservedBytes > available {
+        if needed > 0, totalNeeded > available {
             return "Không đủ dung lượng: \(episodes.count) tập cần khoảng \(auroraByteText(needed)), máy còn \(auroraByteText(available)). Hãy chọn bớt tập, hoặc tải lượng phim thấp hơn dung lượng còn trống."
         }
         for episode in episodes { enqueue(movie: movie, serverName: serverName, episode: episode) }
@@ -550,7 +578,7 @@ final class DownloadManager {
             }
             let playable = try await AVURLAsset(url: target).load(.isPlayable)
             guard playable, OfflinePlaybackSupport.validatePlayableFile(target) else { throw DownloadError.invalidOutput }
-            let bytes = Self.directorySize(target)
+            let bytes = await Self.directorySize(target)
             mutate(id) { $0.fileName = targetName; $0.phase = .finished; $0.doneSegments = 0; $0.totalSegments = 0; $0.receivedBytes = bytes; $0.totalBytes = bytes; $0.message = nil }
             nativeDownloads.forget(id: id); tasks[id]?.cancel(); tasks[id] = nil
             save(force: true); pump()
@@ -562,11 +590,14 @@ final class DownloadManager {
         }
     }
 
-    private nonisolated static func directorySize(_ url: URL) -> Int64 {
-        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
-        return enumerator.compactMap { $0 as? URL }.reduce(Int64(0)) { total, file in
-            total + Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
+    private nonisolated static func directorySize(_ url: URL) async -> Int64 {
+        await Task.detached(priority: .utility) {
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+            return enumerator.compactMap { $0 as? URL }.reduce(Int64(0)) { total, file in
+                let size = Int64(max(0, (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
+                return total > Int64.max - size ? Int64.max : total + size
+            }
+        }.value
     }
 
     /// Hàm tĩnh, chỉ nhận `URLSession` (Sendable) nên tác vụ tải chạy ngoài
@@ -662,7 +693,11 @@ final class DownloadManager {
             guard index + 1 < lines.count else { continue }
             let next = lines[index + 1]
             guard !next.hasPrefix("#"), let url = URL(string: next, relativeTo: base)?.absoluteURL else { continue }
-            if best == nil || bandwidth > best!.bandwidth { best = (bandwidth, url) }
+            if let current = best {
+                if bandwidth > current.bandwidth { best = (bandwidth, url) }
+            } else {
+                best = (bandwidth, url)
+            }
         }
         return best?.url
     }

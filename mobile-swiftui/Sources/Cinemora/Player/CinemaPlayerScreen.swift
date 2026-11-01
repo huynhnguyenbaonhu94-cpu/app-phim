@@ -58,9 +58,8 @@ final class PlaybackController: ObservableObject {
             }
         ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            let requestID = MainActor.assumeIsolated { self?.activeRequestID }
             Task { @MainActor [weak self] in
-                guard let self, let requestID, self.activeRequestID == requestID else { return }
+                guard let self else { return }
                 if time.seconds.isFinite, !self.isSeeking { self.currentTime = time.seconds }
                 if let item = self.player.currentItem, item.duration.seconds.isFinite { self.duration = item.duration.seconds }
                 switch self.player.timeControlStatus {
@@ -211,7 +210,13 @@ final class PlaybackController: ObservableObject {
                     case .readyToPlay:
                         // Phụ đề rời: giữ nhóm phụ đề cho PiP, còn khi xem bình
                         // thường app vẽ phụ đề theo thiết lập của người dùng.
-                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible), !group.options.isEmpty {
+                        let loadedGroup = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+                        // The item can be replaced while AVFoundation loads
+                        // its group; ignore a stale completion on either result.
+                        guard !Task.isCancelled,
+                              self.activeRequestID == requestID,
+                              self.player.currentItem === item else { return }
+                        if let group = loadedGroup, !group.options.isEmpty {
                             self.legibleGroup = group
                             if self.wantsNativeSubtitles {
                                 if self.selectNativeOption(language: self.requestedNativeLanguage, item: item) {

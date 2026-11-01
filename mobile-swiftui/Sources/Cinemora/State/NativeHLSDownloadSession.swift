@@ -10,7 +10,9 @@ final class NativeHLSDownloadSession: NSObject, AVAssetDownloadDelegate {
 
     private var session: AVAssetDownloadURLSession!
     private var observations: [String: NSKeyValueObservation] = [:]
-    private var destinations: [String: URL] = [:]
+    private var idsByToken: [String: String] = [:]
+    private var destinationsByToken: [String: URL] = [:]
+    private var activeTokenByID: [String: String] = [:]
 
     override init() {
         super.init()
@@ -25,33 +27,41 @@ final class NativeHLSDownloadSession: NSObject, AVAssetDownloadDelegate {
     func start(id: String, url: URL, title: String, destination: URL) -> Bool {
         let asset = AVURLAsset(url: url)
         guard let task = session.makeAssetDownloadTask(asset: asset, assetTitle: title, assetArtworkData: nil, options: nil) else { return false }
-        task.taskDescription = id
-        destinations[id] = destination
-        observations[id] = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak self] progress, _ in
-            self?.onProgress?(id, progress.fractionCompleted)
+        let token = UUID().uuidString
+        task.taskDescription = token
+        idsByToken[token] = id
+        destinationsByToken[token] = destination
+        activeTokenByID[id] = token
+        observations[token] = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak self] progress, _ in
+            guard let self, self.idsByToken[token] == id else { return }
+            self.onProgress?(id, progress.fractionCompleted)
         }
         task.resume()
         return true
     }
 
     func cancel(id: String) {
-        observations[id] = nil
-        destinations[id] = nil
+        guard let token = activeTokenByID[id] else { return }
+        retire(id: id)
         session.getAllTasks { tasks in
             tasks.compactMap { $0 as? AVAssetDownloadTask }
-                .filter { $0.taskDescription == id }
+                .filter { $0.taskDescription == token }
                 .forEach { $0.cancel() }
         }
     }
 
-    func forget(id: String) {
-        observations[id] = nil
-        destinations[id] = nil
+    func forget(id: String) { retire(id: id) }
+
+    private func retire(id: String) {
+        guard let token = activeTokenByID.removeValue(forKey: id) else { return }
+        observations[token] = nil
+        idsByToken[token] = nil
+        destinationsByToken[token] = nil
     }
 
     func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let id = assetDownloadTask.taskDescription else { return }
-        guard let destination = destinations[id] else {
+        guard let token = assetDownloadTask.taskDescription, let id = idsByToken[token] else { return }
+        guard let destination = destinationsByToken[token] else {
             onFailure?(id, NSError(domain: "Cinemora.Download", code: 1, userInfo: [NSLocalizedDescriptionKey: "Không có đường dẫn lưu package."]))
             return
         }
@@ -60,15 +70,17 @@ final class NativeHLSDownloadSession: NSObject, AVAssetDownloadDelegate {
             try FileManager.default.moveItem(at: location, to: destination)
             onPackage?(id, destination)
         } catch {
-            destinations[id] = nil
+            retire(id: id)
             onFailure?(id, error)
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let id = task.taskDescription else { return }
-        observations[id] = nil
-        if error != nil { destinations[id] = nil }
-        if let error { onFailure?(id, error) }
+        guard let token = task.taskDescription, let id = idsByToken[token] else { return }
+        observations[token] = nil
+        if let error {
+            retire(id: id)
+            onFailure?(id, error)
+        }
     }
 }
