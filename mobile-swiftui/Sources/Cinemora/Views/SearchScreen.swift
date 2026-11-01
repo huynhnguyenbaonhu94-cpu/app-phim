@@ -12,6 +12,7 @@ private enum SearchSortField: String, CaseIterable, Identifiable {
 struct SearchScreen: View {
     @Environment(CinemaStore.self) private var store
     @State private var submitted = ""
+    @State private var isSearchEntryActive = false
     @State private var language = ""
     @State private var category = ""
     @State private var country = ""
@@ -77,15 +78,20 @@ struct SearchScreen: View {
 
                     SearchField(
                         queryToRun: $queryToRun,
+                        onEditing: { hasQuery in
+                            isSearchEntryActive = hasQuery
+                        },
                         onQuery: { query in
                             submitted = query
                             Task { await store.search(query) }
                         },
                         onSubmitQuery: { query in
+                            isSearchEntryActive = true
                             submitted = query
                             Task { await store.search(query, recordHistory: true) }
                         },
                         onClear: {
+                            isSearchEntryActive = false
                             submitted = ""
                             store.clearSearch()
                         }
@@ -93,7 +99,12 @@ struct SearchScreen: View {
                     .id("search-box")
                         .auroraReveal(1)
 
-                    if store.accountUser != nil, !store.searchHistory.isEmpty {
+                    if !isSearchEntryActive,
+                       submitted.isEmpty,
+                       store.searchResults.isEmpty,
+                       !store.searchLoading,
+                       store.accountUser != nil,
+                       !store.searchHistory.isEmpty {
                         searchHistorySection
                             .auroraReveal(2)
                     }
@@ -382,6 +393,7 @@ struct SearchScreen: View {
 /// query once typing pauses.
 private struct SearchField: View {
     @Binding var queryToRun: String?
+    let onEditing: (Bool) -> Void
     /// Called after typing pauses; this updates results but never saves history.
     let onQuery: (String) -> Void
     /// Called only when the user explicitly submits with Enter or the arrow.
@@ -411,7 +423,10 @@ private struct SearchField: View {
                 .submitLabel(.search)
                 .focused($focused)
                 .onSubmit { searchNow() }
-                .onChange(of: keyword) { _, value in schedule(value) }
+                .onChange(of: keyword) { _, value in
+                    onEditing(!value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    schedule(value)
+                }
             if !keyword.isEmpty {
                 Button {
                     debounce?.cancel()

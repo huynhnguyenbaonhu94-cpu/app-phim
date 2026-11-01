@@ -149,21 +149,27 @@ struct CinemoraTabShell: View {
     @State private var showLaunchLoader = true
     @State private var keyboardVisible = false
 
+    private var networkBlocked: Bool {
+        !connectivity.hasDeterminedStatus || connectivity.isOffline
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity)
                 .ignoresSafeArea()
+                .allowsHitTesting(!networkBlocked)
+                .accessibilityHidden(networkBlocked)
 
             if showLaunchLoader {
                 LaunchLoader()
                     .transition(.opacity.combined(with: .scale(scale: 1.04)))
             }
 
-            // The offline state belongs to the four server-backed tabs. Keep
-            // the tab bar above this gate so Settings and saved lists remain
-            // reachable without a network connection.
-            if connectivity.isOffline && selection != .settings {
-                NetworkUnavailableOverlay()
+            // Do not expose cached pages or settings as interactive content
+            // without a confirmed network path. The same gate also covers the
+            // initial NWPathMonitor check during launch.
+            if networkBlocked {
+                NetworkUnavailableOverlay(isCheckingConnection: !connectivity.hasDeterminedStatus)
                     .transition(.opacity)
                     .zIndex(100)
             }
@@ -178,14 +184,21 @@ struct CinemoraTabShell: View {
                 // moment the keyboard leaves. It is never removed, only moved
                 // aside, and the slide is the same spring as the rest of the app.
                 .offset(y: keyboardVisible ? 140 : 0)
-                .opacity(keyboardVisible ? 0 : 1)
-                .allowsHitTesting(!keyboardVisible)
+                .opacity(keyboardVisible || networkBlocked ? 0 : 1)
+                .allowsHitTesting(!keyboardVisible && !networkBlocked)
+                .accessibilityHidden(networkBlocked)
                 .animation(Motion.sheet, value: keyboardVisible)
                 .opacity(showLaunchLoader ? 0 : 1)
                 .animation(Motion.enter, value: showLaunchLoader)
         }
         .animation(.easeInOut(duration: 0.28), value: connectivity.isConnected)
+        .animation(.easeInOut(duration: 0.28), value: connectivity.hasDeterminedStatus)
         .onChange(of: connectivity.isConnected) { wasConnected, isConnected in
+            if !isConnected {
+                keyboardVisible = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                return
+            }
             guard !wasConnected, isConnected else { return }
             NotificationCenter.default.post(name: .cinemoraConnectivityDidRecover, object: nil)
             Task { @MainActor in
@@ -422,6 +435,7 @@ private struct AuroraTabScreen: View {
 /// view is invalidated, which keeps tab switching smooth.
 private struct AccountSessionWatcher: View {
     @Environment(CinemaStore.self) private var store
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -440,18 +454,23 @@ private struct AccountSessionWatcher: View {
                 // changed, so idle polls cost nothing on screen.
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(5))
-                    if !Task.isCancelled { await store.checkAccountSession() }
+                    if !Task.isCancelled, connectivity.hasDeterminedStatus, connectivity.isConnected {
+                        await store.checkAccountSession()
+                    }
                 }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Picking the device back up is the moment the user notices a
                 // remote logout, so check immediately instead of waiting a tick.
-                if phase == .active { Task { await store.checkAccountSession() } }
+                if phase == .active, connectivity.hasDeterminedStatus, connectivity.isConnected {
+                    Task { await store.checkAccountSession() }
+                }
             }
     }
 }
 
 struct NetworkUnavailableOverlay: View {
+    var isCheckingConnection = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var rotating = false
     @State private var halo = false
@@ -487,22 +506,24 @@ struct NetworkUnavailableOverlay: View {
                     Circle()
                         .fill(Color.auroraRaised)
                         .frame(width: 68, height: 68)
-                    Image(systemName: "wifi.slash")
+                    Image(systemName: isCheckingConnection ? "wifi" : "wifi.slash")
                         .font(.system(size: 27, weight: .semibold))
                         .foregroundStyle(Color.auroraAmber)
                         .symbolEffect(.pulse, value: halo && !reduceMotion)
                 }
 
                 VStack(spacing: 9) {
-                    Text("KHÔNG CÓ KẾT NỐI MẠNG")
+                    Text(isCheckingConnection ? "ĐANG KIỂM TRA KẾT NỐI" : "KHÔNG CÓ KẾT NỐI MẠNG")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                         .tracking(2.1)
                         .foregroundStyle(Color.auroraAmber)
-                    Text("Cinemora đang chờ mạng")
+                    Text(isCheckingConnection ? "Đang kiểm tra mạng…" : "Cinemora đang chờ mạng")
                         .font(.auroraDisplay(23))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                    Text("Các tab nội dung tạm dừng khi thiết bị ngoại tuyến. Bạn vẫn có thể mở Cài Đặt; Cinemora sẽ tự tiếp tục khi có kết nối.")
+                    Text(isCheckingConnection
+                         ? "Vui lòng chờ trong giây lát."
+                         : "Hãy bật Wi‑Fi hoặc dữ liệu di động. Toàn bộ app sẽ tự tiếp tục khi kết nối được khôi phục.")
                         .font(.auroraBody(12))
                         .foregroundStyle(Color.auroraTextSecondary)
                         .multilineTextAlignment(.center)
@@ -513,7 +534,7 @@ struct NetworkUnavailableOverlay: View {
 
                 HStack(spacing: 8) {
                     LivePulse(color: .auroraAmber, size: 6, animated: true)
-                    Text("Đang kiểm tra kết nối…")
+                    Text(isCheckingConnection ? "Đang kiểm tra kết nối…" : "Chờ mạng khôi phục…")
                         .font(.auroraLabel(10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -536,7 +557,9 @@ struct NetworkUnavailableOverlay: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để truy cập app.")
+        .accessibilityLabel(Text(isCheckingConnection
+                                 ? "Đang kiểm tra kết nối Internet. Vui lòng chờ."
+                                 : "Không có kết nối Internet. Bật Wi-Fi hoặc dữ liệu di động để tiếp tục sử dụng app."))
     }
 
     private func startAnimation() {

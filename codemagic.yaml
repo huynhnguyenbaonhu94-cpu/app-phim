@@ -50,6 +50,18 @@ workflows:
           grep -Fq 'store.search(query, recordHistory: true)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           grep -Fq 'func search(_ keyword: String, recordHistory: Bool = false) async' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
           grep -Fq '.frame(maxHeight: 224, alignment: .top)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          grep -Fq 'onEditing: { hasQuery in' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          grep -Fq 'if !isSearchEntryActive,' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          grep -Fq 'store.searchResults.isEmpty,' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          if grep -E 'catalogTotal|catalogMovies[.]count.*phim' mobile-swiftui/Sources/Cinemora/Views/LibraryScreen.swift; then
+            echo 'ERROR: the Library heading must not display a total movie count'; exit 1
+          fi
+          grep -Fq 'private var networkBlocked: Bool {' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
+          grep -Fq 'if networkBlocked {' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
+          grep -Fq 'NetworkUnavailableOverlay(isCheckingConnection: !connectivity.hasDeterminedStatus)' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
+          grep -Fq '.allowsHitTesting(!keyboardVisible && !networkBlocked)' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
+          grep -Fq '.accessibilityHidden(networkBlocked)' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
+          grep -Fq 'connectivity.hasDeterminedStatus, connectivity.isConnected' mobile-swiftui/Sources/Cinemora/CinemoraApp.swift
           if grep -R -n -E 'DownloadManager|NativeHLSDownloadSession|OfflinePlaybackSupport|OfflineFileActivityView|DownloadsScreen|DownloadSheet|DownloadFolderSection|DownloadFolderScreen|AVAssetDownloadURLSession|AVAssetDownloadTask|localFileURL|offlineOnly|Mở bằng VLC|Tải xuống|Đã tải xuống|MOVPKG' mobile-swiftui/Sources/Cinemora mobile-swiftui/Info.plist; then
             echo 'ERROR: retired offline movie download code or UI remains in the iOS target'; exit 1
           fi

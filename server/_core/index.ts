@@ -19,6 +19,7 @@ import { initializeDatabase } from "../db";
 import { registerSpecialChatMediaRoute } from "../specialChat";
 import { startR2BackupScheduler } from "../r2Backup";
 import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
+import { mirrorMovieArtwork } from "../movieArtwork";
 import { attachSidecarSubtitlesToMaster, buildSubtitleMediaPlaylist, buildSubtitledPlaylist } from "../subtitledPlaylist";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
@@ -235,6 +236,14 @@ async function startServer() {
     const source = getImageSource(req.params.token);
     if (!source) return res.status(404).send("Not found");
     try {
+      const mirrored = await mirrorMovieArtwork(source);
+      if (mirrored?.url) return res.redirect(302, mirrored.url);
+      if (mirrored?.bytes && mirrored.contentType) {
+        res.setHeader("Cache-Control", "public, max-age=7200, stale-while-revalidate=86400");
+        res.setHeader("Content-Type", mirrored.contentType);
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        return res.status(200).send(mirrored.bytes);
+      }
       const image = await fetchImageWithRetry(source);
       res.setHeader("Cache-Control", "public, max-age=7200, stale-while-revalidate=86400"); // match 2h token TTL
       res.setHeader("Content-Type", image.contentType);

@@ -4,7 +4,7 @@
  * to a private filesystem directory when R2 is not configured. No Forge token
  * is required for uploads.
  */
-import { storagePut as put, storagePutPublic as putPublic, storageRead, storageDelete, storageGetSignedUrl, storageBackend } from "./r2Storage";
+import { storagePut as put, storagePutPublic as putPublic, storagePutStable as putStable, storagePutPublicStable as putPublicStable, storageRead, storageDelete, storageGetSignedUrl, storageBackend } from "./r2Storage";
 import type { Express } from "express";
 import { authenticateLocalRequest } from "./localAuth";
 
@@ -24,6 +24,24 @@ export async function storagePutPublic(
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string; backend: "r2" | "local" }> {
   return putPublic(relKey, data, contentType);
+}
+
+/** Stable private keys are used only for internal cache manifests. */
+export async function storagePutStable(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream",
+) {
+  return putStable(relKey, data, contentType);
+}
+
+/** Content-addressed public assets can safely use deterministic, immutable keys. */
+export async function storagePutPublicStable(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream",
+) {
+  return putPublicStable(relKey, data, contentType);
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
@@ -70,10 +88,15 @@ export function registerPublicStorageRoute(app: Express) {
     if (!key || !key.startsWith("public-assets/")) return res.status(404).send("Not found");
     const extension = key.split(".").pop()?.toLowerCase();
     const contentType = ({
-      jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", vtt: "text/vtt; charset=utf-8",
+      jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", avif: "image/avif", vtt: "text/vtt; charset=utf-8",
     } as Record<string, string>)[extension || ""] || "application/octet-stream";
     try {
-      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      res.setHeader(
+        "Cache-Control",
+        key.startsWith("public-assets/movie-artwork/")
+          ? "public, max-age=31536000, immutable"
+          : "public, max-age=86400, stale-while-revalidate=604800",
+      );
       res.setHeader("Content-Type", contentType);
       res.setHeader("X-Content-Type-Options", "nosniff");
       return res.status(200).send(await storageRead(key));

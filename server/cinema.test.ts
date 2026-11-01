@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { getStreamSource, MAX_CINEMA_PAGE, registerStreamSource } from "./cinema";
+import { getStreamSource, MAX_CINEMA_PAGE, protectImageSource, registerStreamSource } from "./cinema";
 import type { TrpcContext } from "./_core/context";
 
 function caller() {
@@ -22,6 +22,11 @@ describe("cinema proxy guardrails", () => {
 
   it("rejects a search keyword shorter than two characters", async () => {
     await expect(caller().cinema.search({ keyword: "a" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("keeps canonical public R2 artwork URLs unchanged", async () => {
+    const artwork = "/api/public-storage/public-assets/movie-artwork/abc123/poster.jpg";
+    expect(protectImageSource(artwork)).toBe(artwork);
   });
 
   it("creates stream proxy tokens for the supported HLS CDN hosts", () => {

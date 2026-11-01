@@ -8,6 +8,7 @@ import {
   registerCustomMovieView,
   searchCustomMovies,
 } from "./customMovies";
+import { getRememberedMovieArtworkUrl, mirrorMovieArtwork } from "./movieArtwork";
 
 const API_BASE = "https://phimapi.com";
 const IMAGE_BASE = "https://phimimg.com/";
@@ -105,8 +106,6 @@ function registerImageSource(source: string | null) {
   return apiRoute(`/api/cinema/image/${encodeImageToken(source)}`);
 }
 
-function imageUrl(value: unknown, pathImage?: string) { return registerImageSource(resolveImage(value, pathImage)); }
-
 function embedUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
@@ -139,10 +138,30 @@ export function getStreamSource(token: string) {
 
 export function protectImageSource(value: string | null | undefined) {
   if (!value) return null;
+  const publicPath = publicStoragePath(value);
+  if (publicPath) return apiRoute(publicPath);
   let pathname = value;
   try { pathname = new URL(value).pathname; } catch { /* Keep relative route as-is. */ }
-  if (pathname.startsWith("/api/cinema/image/")) return registerImageSource(getImageSource(pathname.split("/").pop() || ""));
-  return registerImageSource(resolveImage(value));
+  if (pathname.startsWith("/api/cinema/image/")) {
+    const source = getImageSource(pathname.split("/").pop() || "");
+    if (!source) return null;
+    const cached = getRememberedMovieArtworkUrl(source);
+    return cached ? apiRoute(cached) : registerImageSource(source);
+  }
+  const source = resolveImage(value);
+  if (!source) return null;
+  const cached = getRememberedMovieArtworkUrl(source);
+  return cached ? apiRoute(cached) : registerImageSource(source);
+}
+
+function publicStoragePath(value: string): string | null {
+  const prefix = "/api/public-storage/public-assets/";
+  if (value.startsWith(prefix)) return value.split(/[?#]/, 1)[0];
+  try {
+    const url = new URL(value);
+    const expectedOrigin = new URL(PUBLIC_BASE_URL || "https://cungcapicloud.id.vn").origin;
+    return url.origin === expectedOrigin && url.pathname.startsWith(prefix) ? url.pathname : null;
+  } catch { return null; }
 }
 
 export function registerStreamSource(value: string) {
@@ -273,8 +292,14 @@ function stringList(...values: unknown[]) {
   return typeof value === "string" ? value.split(/[,|]/).map((x) => cleanText(x)).filter(Boolean) : [];
 }
 function normalizeMovie(item: any, pathImage?: string): Movie {
-  const poster = imageUrl(item?.poster_url, pathImage) || imageUrl(item?.thumb_url, pathImage);
-  const backdrop = imageUrl(item?.thumb_url, pathImage) || poster;
+  const posterSource = resolveImage(item?.poster_url, pathImage) || resolveImage(item?.thumb_url, pathImage);
+  const backdropSource = resolveImage(item?.thumb_url, pathImage) || posterSource;
+  const cachedPoster = posterSource ? getRememberedMovieArtworkUrl(posterSource) : null;
+  const cachedBackdrop = backdropSource ? getRememberedMovieArtworkUrl(backdropSource) : null;
+  if (posterSource && !cachedPoster) void mirrorMovieArtwork(posterSource).catch(() => undefined);
+  if (backdropSource && backdropSource !== posterSource && !cachedBackdrop) void mirrorMovieArtwork(backdropSource).catch(() => undefined);
+  const poster = cachedPoster ? apiRoute(cachedPoster) : registerImageSource(posterSource);
+  const backdrop = cachedBackdrop ? apiRoute(cachedBackdrop) : registerImageSource(backdropSource);
   return {
     id: String(item?._id || item?.slug || "unknown"), slug: String(item?.slug || ""), name: cleanText(item?.name, "Chưa có tên"), originName: cleanText(item?.origin_name), poster, backdrop,
     year: Number.isFinite(Number(item?.year)) ? Number(item.year) : null, quality: cleanText(item?.quality, "HD"), episodeCurrent: cleanText(item?.episode_current, "Đang cập nhật"), episodeTotal: Number.isFinite(Number(item?.episode_total)) ? Number(item.episode_total) : null,
@@ -333,13 +358,23 @@ function safeFilterSlug(value: string) {
 }
 
 export async function getPersistentPosterSource(slug: string, publicPosterUrl?: string | null) {
-  if (publicPosterUrl?.startsWith("/api/cinema/image/")) {
-    const source = getImageSource(publicPosterUrl.split("/").pop() || "");
-    if (source) return source;
+  const publicPath = publicPosterUrl ? publicStoragePath(publicPosterUrl) : null;
+  if (publicPath) return apiRoute(publicPath);
+
+  let source: string | null = null;
+  if (publicPosterUrl) {
+    let pathname = publicPosterUrl;
+    try { pathname = new URL(publicPosterUrl).pathname; } catch { /* Relative API URL. */ }
+    if (pathname.startsWith("/api/cinema/image/")) source = getImageSource(pathname.split("/").pop() || "");
   }
-  const payload = await getMoviePayload(slug);
-  const item = payload?.data?.item ?? payload?.movie;
-  return resolveImage(item?.poster_url || item?.thumb_url, payload?.pathImage);
+  if (!source) {
+    const payload = await getMoviePayload(slug);
+    const item = payload?.data?.item ?? payload?.movie;
+    source = resolveImage(item?.poster_url || item?.thumb_url, payload?.pathImage);
+  }
+  if (!source) return null;
+  const mirrored = await mirrorMovieArtwork(source);
+  return mirrored?.url ? apiRoute(mirrored.url) : registerImageSource(source);
 }
 
 async function getMoviePayload(rawSlug: string) {

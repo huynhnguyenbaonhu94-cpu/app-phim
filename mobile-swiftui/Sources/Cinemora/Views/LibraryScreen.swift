@@ -64,14 +64,6 @@ struct LibraryScreen: View {
                         Spacer()
                         if store.catalogLoading && !store.catalogMovies.isEmpty {
                             ProgressView().tint(.auroraViolet).scaleEffect(0.8)
-                        } else if let total = store.catalogTotal, total > 0 {
-                            Text("\(total.formatted(.number.grouping(.automatic))) phim")
-                                .font(.auroraBody(10))
-                                .foregroundStyle(Color.auroraTextTertiary)
-                        } else if !store.catalogMovies.isEmpty {
-                            Text("\(store.catalogMovies.count) phim")
-                                .font(.auroraBody(10))
-                                .foregroundStyle(Color.auroraTextTertiary)
                         }
                     }
                     .auroraReveal(3)

@@ -10,6 +10,12 @@ Thông thường chỉ cần cập nhật source, build và restart ứng dụng
 
 Lịch vẫn chỉ thực thi khi tiến trình Node.js đang chạy và R2 đã cấu hình hợp lệ. Scheduler kiểm tra theo chu kỳ khoảng một phút.
 
+## Tự lưu poster và thumbnail phim nguồn API
+
+Khi app iOS hoặc web tải poster/thumbnail của catalog API, backend tự lưu bản ảnh raster hợp lệ vào `public-assets/movie-artwork/` trên R2 bằng khóa theo nội dung. Ảnh đã lưu được phục vụ qua route public-storage; URL proxy cũ cũng sẽ chuyển sang bản R2 khi ảnh đã được mirror. Vì vậy các poster đã mở không còn phụ thuộc việc máy chủ ảnh gốc tiếp tục hoạt động. Mirror chạy nền, giới hạn kích thước và chỉ theo HTTPS từ các host ảnh đã cho phép; không áp dụng lên link video/HLS.
+
+Tính năng dùng chung cấu hình R2 hiện có trong trang quản trị và không cần thêm migration database. Nếu R2 chưa cấu hình/không truy cập được hoặc nguồn trả về dữ liệu không phải ảnh raster hợp lệ, backend giữ fallback proxy hiện tại thay vì trả URL R2 giả. Bản cũ đã lưu vẫn được dùng nếu lần refresh nguồn thất bại.
+
 ## Dashboard
 
 Đăng nhập tài khoản có role `admin`, sau đó mở `/admin` hoặc chọn **Quản trị/Dashboard quản trị** trên menu đầu trang. API `adminDashboard.overview` được bảo vệ bằng `adminProcedure`. Chỉ số tổng hợp đọc từ các bảng hiện có; mục phim hiển thị rõ là phim thủ công để không nhầm với catalog từ nguồn API bên ngoài.

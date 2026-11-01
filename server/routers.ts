@@ -522,7 +522,7 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
-    favorites: protectedProcedure.query(async ({ ctx }) => (await listFavorites(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
+    favorites: protectedProcedure.query(async ({ ctx }) => Promise.all((await listFavorites(ctx.user.id)).map(async (item) => ({ ...item, posterUrl: await protectImageSource(item.posterUrl) })))),
     isFavorite: protectedProcedure.input(z.object({ movieSlug: slugInput })).query(({ ctx, input }) => isFavorite(ctx.user.id, input.movieSlug)),
     addFavorite: protectedProcedure.input(movieSnapshot).mutation(async ({ ctx, input }) => {
       enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
@@ -532,7 +532,7 @@ export const appRouter = router({
       enforceRateLimit(ctx.req, "account.write", SECURITY_LIMITS.accountWritePerUser.limit, SECURITY_LIMITS.accountWritePerUser.windowMs, String(ctx.user.id));
       return removeFavorite(ctx.user.id, input.movieSlug);
     }),
-    history: protectedProcedure.query(async ({ ctx }) => (await listWatchHistory(ctx.user.id)).map((item) => ({ ...item, posterUrl: protectImageSource(item.posterUrl) }))),
+    history: protectedProcedure.query(async ({ ctx }) => Promise.all((await listWatchHistory(ctx.user.id)).map(async (item) => ({ ...item, posterUrl: await protectImageSource(item.posterUrl) })))),
     recordHistory: protectedProcedure.input(movieSnapshot.extend({
       episodeSlug: z.string().trim().max(140).optional(),
       episodeName: z.string().trim().max(255).optional(),

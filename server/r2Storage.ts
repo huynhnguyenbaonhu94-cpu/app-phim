@@ -245,6 +245,46 @@ export async function storagePutPublic(relKey: string, data: Buffer | Uint8Array
   return { ...stored, url };
 }
 
+/** Write a caller-chosen stable key. Use only for content-addressed objects and cache indexes. */
+async function storagePutAtStableKey(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType: string,
+  cacheControl: string,
+): Promise<{ key: string; backend: "r2" | "local" }> {
+  const key = normalizeKey(relKey);
+  const config = await resolveConfig();
+  const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : Buffer.from(data);
+  if (!config) {
+    const file = localPath(key);
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, bytes, { mode: 0o600 });
+    return { key, backend: "local" };
+  }
+  await clientFor(config).send(new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    Body: bytes,
+    ContentType: contentType,
+    CacheControl: cacheControl,
+  }));
+  return { key, backend: "r2" };
+}
+
+/** Private persistent index for mapping an allowlisted upstream image URL to its R2 object. */
+export async function storagePutStable(relKey: string, data: Buffer | Uint8Array | string, contentType = "application/octet-stream") {
+  return storagePutAtStableKey(relKey, data, contentType, "private, no-store");
+}
+
+/** Immutable public artwork object with a deterministic key and backend-proxied URL. */
+export async function storagePutPublicStable(relKey: string, data: Buffer | Uint8Array | string, contentType = "application/octet-stream") {
+  const normalized = normalizeKey(relKey);
+  const publicKey = normalized.startsWith("public-assets/") ? normalized : `public-assets/${normalized}`;
+  const stored = await storagePutAtStableKey(publicKey, data, contentType, "public, max-age=31536000, immutable");
+  const encodedKey = publicKey.split("/").map(encodeURIComponent).join("/");
+  return { ...stored, url: `/api/public-storage/${encodedKey}` };
+}
+
 export async function storageRead(relKey: string): Promise<Buffer> {
   const key = normalizeKey(relKey);
   const config = await resolveConfig();
