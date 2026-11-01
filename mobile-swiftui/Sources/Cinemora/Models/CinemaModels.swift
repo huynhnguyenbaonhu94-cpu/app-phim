@@ -164,6 +164,15 @@ struct Movie: Decodable, Identifiable, Hashable {
     var episodeGroups: [MovieServer]?
 
     var id: String { apiID ?? slug }
+    /// The backend marks movies created from the admin's manual-movie form as
+    /// `custom-<id>`; regular catalog movies and TV entries use other IDs.
+    var isAdminManuallyAdded: Bool { apiID?.hasPrefix("custom-") == true }
+    /// `allowPip` is a TV-video policy field. Cinema catalog/manual movie
+    /// payloads may carry an unrelated or legacy value and must not hide PiP.
+    var isPictureInPictureAllowed: Bool {
+        guard apiID?.hasPrefix("tv-video-") == true else { return true }
+        return allowPip != false
+    }
     var posterURL: URL? { CinemaAPI.absoluteURL(poster) ?? CinemaAPI.absoluteURL(backdrop) }
     var backdropURL: URL? { CinemaAPI.absoluteURL(backdrop) ?? CinemaAPI.absoluteURL(poster) }
     var displayTitle: String { originName.map { "\(name) · \($0)" } ?? name }

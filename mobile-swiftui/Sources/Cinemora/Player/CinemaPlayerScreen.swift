@@ -1001,6 +1001,14 @@ struct CinemaPlayerScreen: View {
     private var server: MovieServer? { servers.indices.contains(serverIndex) ? servers[serverIndex] : nil }
     private var episodes: [MovieEpisode] { server?.episodes ?? [] }
     private var episode: MovieEpisode? { episodes.indices.contains(episodeIndex) ? episodes[episodeIndex] : nil }
+    private var currentEpisodeHasManualSidecarSubtitle: Bool {
+        guard movie.isAdminManuallyAdded, let episode else { return false }
+        let selectedSource = episode.withQuality(qualityIndex)
+        return !selectedSource.availableSubtitleTracks.isEmpty || selectedSource.bilingualSubtitleURL != nil
+    }
+    private var currentEpisodeAllowsPiP: Bool {
+        movie.isPictureInPictureAllowed && !currentEpisodeHasManualSidecarSubtitle
+    }
     private var relatedMovies: [Movie] {
         var seen = Set<String>()
         return (store.homeMovies + store.homeSections.flatMap(\.movies)).filter { candidate in
@@ -1256,7 +1264,7 @@ struct CinemaPlayerScreen: View {
                     .accessibilityLabel("Chọn nguồn phát")
                 }
 
-                if pictureInPictureEnabled && movie.allowPip != false && pipCoordinator.isSupported {
+                if pictureInPictureEnabled && currentEpisodeAllowsPiP && pipCoordinator.isSupported {
                     Button {
                         if pipCoordinator.isActive {
                             pipCoordinator.stop()
@@ -1707,7 +1715,7 @@ struct CinemaPlayerScreen: View {
                 // whether iOS may move playback into PiP by itself when the app
                 // leaves the foreground.
                 .onChange(of: pictureInPictureEnabled) { _, value in
-                    pipCoordinator.setAutoStart(value && movie.allowPip != false)
+                    pipCoordinator.setAutoStart(value && currentEpisodeAllowsPiP)
                 }
             }
         case .speed:
@@ -2328,6 +2336,7 @@ struct CinemaPlayerScreen: View {
         // Tập đang chọn có thể có nhiều chất lượng; lấy đúng chất lượng đang chọn.
         let qualities = episode.qualities ?? []
         if qualityIndex >= qualities.count { qualityIndex = 0 }
+        pipCoordinator.setAutoStart(pictureInPictureEnabled && currentEpisodeAllowsPiP)
         let source = episode.withQuality(qualityIndex)
         let startAt = pendingResumeTime ?? (hasAppliedResumeTime ? nil : resumeTime)
         if !source.availableSubtitleTracks.isEmpty {
@@ -2461,7 +2470,7 @@ struct CinemaPlayerScreen: View {
         } else {
             // Auto-PiP is requested as the app leaves the foreground. Select the
             // native subtitle track before iOS snapshots the AVPlayerLayer.
-            if pictureInPictureEnabled, movie.allowPip != false, pipCoordinator.isSupported {
+            if pictureInPictureEnabled, currentEpisodeAllowsPiP, pipCoordinator.isSupported {
                 playback.setNativeSubtitles(true)
             }
             playback.prepareForSystemOverlay()
@@ -2478,7 +2487,7 @@ struct CinemaPlayerScreen: View {
         hasAppliedPlaybackDefaults = true
         autoAdvanceEpisodes = store.playbackDefaults.autoAdvanceEpisodes
         pictureInPictureEnabled = store.playbackDefaults.pictureInPicture
-        pipCoordinator.setAutoStart(pictureInPictureEnabled && movie.allowPip != false)
+        pipCoordinator.setAutoStart(pictureInPictureEnabled && currentEpisodeAllowsPiP)
         if subtitleCustomizationEnabled {
             let defaults = store.playbackDefaults.subtitlePreferences
             subtitlePreferences = defaults

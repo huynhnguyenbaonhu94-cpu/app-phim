@@ -34,6 +34,10 @@ workflows:
           grep -Fq 'await playback.prepareNativeSubtitlesForPiP()' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'currentMediaSelection.selectedMediaOption(in: group)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'if subtitleReady {' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'isAdminManuallyAdded: Bool { apiID?.hasPrefix("custom-") == true }' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
+          grep -Fq 'currentEpisodeHasManualSidecarSubtitle' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'if pictureInPictureEnabled && currentEpisodeAllowsPiP && pipCoordinator.isSupported' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'pipCoordinator.setAutoStart(pictureInPictureEnabled && currentEpisodeAllowsPiP)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'requestedNativeTrackID' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let nativeTracks: [(id: String, language: String, url: URL)]' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let selectedTrack = preferredTrack ?? effectiveTracks.first' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
