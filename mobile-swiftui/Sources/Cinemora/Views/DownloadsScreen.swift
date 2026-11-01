@@ -287,7 +287,7 @@ struct DownloadsScreen: View {
 
     private func row(_ item: DownloadManager.Item) -> some View {
         let localFile = downloads.localURL(for: item)
-        VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 PosterArt(url: connectivity.isConnected ? URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL : nil)
                     .frame(width: 54, height: 78)
