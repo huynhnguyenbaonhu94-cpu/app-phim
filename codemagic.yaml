@@ -22,35 +22,15 @@ workflows:
           grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
           grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
           grep -Fq 'Task { @MainActor [weak self] in' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
-          grep -Fq 'progressDeliveryInterval: TimeInterval = 0.2' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift
-          grep -Fq 'didLoad timeRange: CMTimeRange' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift
-          grep -Fq 'elapsed >= 1.0' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'Dung lượng bản tải:' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
-          grep -Fq 'configuration.allowsCellularAccess = true' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift
-          grep -Fq 'configuration.allowsExpensiveNetworkAccess = true' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift
-          grep -Fq 'fallbackSourceURL' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'chưa phát sinh tiến trình sau 30 giây; đang thử link video gốc' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'asset.assetCache?.isPlayableOffline == true' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'Text("\(item.percentText) · \(item.sizeText)")' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
-          grep -Fq 'Text("Thời gian còn lại · \(item.etaText)")' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
-          grep -Fq 'return "~\(auroraByteText(safeDone)) / ~\(auroraByteText(total))"' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          if grep -Fq 'AVAssetExportSession' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift || grep -Fq 'exportForVLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift; then
-            echo 'ERROR: MP4/MOV conversion must remain removed'; exit 1
-          fi
-          if grep -Fq 'Bản tải được lưu trên máy. Bấm Mở bằng VLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift || grep -Fq 'Khi đang tải, dung lượng và thời gian hoàn tất' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift; then
-            echo 'ERROR: removed explanatory copy has returned'; exit 1
-          fi
           grep -Fq 'languageCode(for: preferred)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
-          grep -Fq 'return String(String(cleaned).prefix(100)) + ".movpkg"' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'Mở bằng VLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
           grep -Fq 'playback.setNativeSubtitles(true)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'requestedNativeTrackID' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let nativeTracks: [(id: String, language: String, url: URL)]' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let selectedTrack = preferredTrack ?? effectiveTracks.first' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let loadTask = Task.detached(priority: .utility) { () -> Data? in' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
           grep -Fq 'let loaded: Data? = await loadTask.value' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
-          if grep -Fq 'Xem trong Cinemora' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift; then
-            echo 'ERROR: offline in-app playback must remain removed'; exit 1
+          if grep -R -n -E 'DownloadManager|NativeHLSDownloadSession|OfflinePlaybackSupport|OfflineFileActivityView|DownloadsScreen|DownloadSheet|DownloadFolderSection|DownloadFolderScreen|AVAssetDownloadURLSession|AVAssetDownloadTask|localFileURL|offlineOnly|Mở bằng VLC|Tải xuống|Đã tải xuống|MOVPKG' mobile-swiftui/Sources/Cinemora mobile-swiftui/Info.plist; then
+            echo 'ERROR: retired offline movie download code or UI remains in the iOS target'; exit 1
           fi
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1

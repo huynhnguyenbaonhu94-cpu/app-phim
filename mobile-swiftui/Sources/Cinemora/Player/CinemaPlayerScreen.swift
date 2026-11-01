@@ -147,7 +147,7 @@ final class PlaybackController: ObservableObject {
         wantsToPlay = true
         isPlaying = true
     }
-    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, subtitleURL: URL? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = [], selectedSubtitleID: String? = nil, allowSubtitledPlaylist: Bool = true) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil, subtitleURL: URL? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = [], selectedSubtitleID: String? = nil, allowSubtitledPlaylist: Bool = true) {
         let keepNativeSubtitleMode = wantsNativeSubtitles
         configureAudioSession()
         loadTask?.cancel()
@@ -167,11 +167,8 @@ final class PlaybackController: ObservableObject {
         // response chỉ trả subtitleTracks mà không điền subtitleUrl ở cấp tập,
         // nên lấy URL được caller chọn trước khi dựng master.
         let sidecarSubtitleURL = subtitleURL ?? episode.subtitleURL
-        // App-cached sidecars are rendered by SubtitleController. Do not hand
-        // local VTT/SRT files to AVFoundation, which would try to compose them
-        // as media tracks and would falsely suggest native/PiP subtitle support.
         let nativeTracks: [(id: String, language: String, url: URL)] = subtitleTracks.compactMap { track -> (id: String, language: String, url: URL)? in
-            guard let url = track.subtitleURL, !url.isFileURL else { return nil }
+            guard let url = track.subtitleURL else { return nil }
             return (id: track.id, language: track.language, url: url)
         }
         let limitedNativeTracks = Array(nativeTracks.prefix(12))
@@ -205,7 +202,7 @@ final class PlaybackController: ObservableObject {
             requestedNativeLanguage = nil
         }
         let subtitledURL: URL? = {
-            guard localURL == nil, allowSubtitledPlaylist,
+            guard allowSubtitledPlaylist,
                   !hlsTracks.isEmpty,
                   let videoURL = episode.playbackURL else { return nil }
             let path = videoURL.absoluteString.lowercased()
@@ -222,7 +219,7 @@ final class PlaybackController: ObservableObject {
         legibleOption = nil
         nativeSubtitleActive = false
         wantsNativeSubtitles = keepNativeSubtitleMode
-        guard let url = localURL ?? subtitledURL ?? episode.playbackURL else {
+        guard let url = subtitledURL ?? episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
             errorMessage = "Tập này hiện chưa có đường dẫn phát."
@@ -235,8 +232,7 @@ final class PlaybackController: ObservableObject {
             // Do not compose the same VTT a second time: that can duplicate the
             // track and, more importantly, replace a valid HLS item with a plain
             // video item when the sidecar takes longer than the stream.
-            let itemSubtitleURL = subtitledURL == nil && localURL == nil && sidecarSubtitleURL?.isFileURL != true
-                ? sidecarSubtitleURL : nil
+            let itemSubtitleURL = subtitledURL == nil ? sidecarSubtitleURL : nil
             let item = await Self.makePlayerItem(videoURL: url, subtitleURL: itemSubtitleURL)
             guard !Task.isCancelled, self.activeRequestID == requestID else { return }
             item.preferredForwardBufferDuration = 8
@@ -282,7 +278,7 @@ final class PlaybackController: ObservableObject {
                         if self.usedSubtitledPlaylist, self.fallbackPlaybackURL != nil {
                             self.usedSubtitledPlaylist = false
                             self.fallbackPlaybackURL = nil
-                            self.load(episode, startAt: startAt, localURL: nil, subtitleURL: sidecarSubtitleURL, subtitleTracks: subtitleTracks, selectedSubtitleID: selectedSubtitleID, allowSubtitledPlaylist: false)
+                            self.load(episode, startAt: startAt, subtitleURL: sidecarSubtitleURL, subtitleTracks: subtitleTracks, selectedSubtitleID: selectedSubtitleID, allowSubtitledPlaylist: false)
                             return
                         }
                         self.isLoading = false; self.activeURL = nil
@@ -419,12 +415,7 @@ final class PlaybackController: ObservableObject {
 
     private static func makePlayerItem(videoURL: URL, subtitleURL: URL?) async -> AVPlayerItem {
         guard let subtitleURL else { return AVPlayerItem(asset: AVURLAsset(url: videoURL)) }
-        // Offline sidecars are parsed by SubtitleController; raw VTT/SRT files
-        // are not AVPlayer media assets and should not delay local video startup.
-        if videoURL.isFileURL || subtitleURL.isFileURL {
-            return AVPlayerItem(asset: AVURLAsset(url: videoURL))
-        }
-        // External VTT is only composed for non-HLS/local items. HLS gets its
+        // External VTT is only composed for non-HLS streams. HLS gets its
         // native PiP subtitle through the server-provided master playlist;
         // AVFoundation cannot reliably turn an arbitrary remote VTT into a
         // PiP-renderable legible track by itself.
@@ -671,17 +662,6 @@ final class SubtitleController: ObservableObject {
     }
     private static func fetchText(_ url: URL?) async -> String? {
         guard let url else { return nil }
-        if url.isFileURL {
-            let maxBytes = 8 * 1024 * 1024
-            return await Task.detached(priority: .utility) {
-                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-                      values.isRegularFile == true,
-                      let size = values.fileSize,
-                      size > 0, size <= maxBytes,
-                      let data = try? Data(contentsOf: url) else { return nil }
-                return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
-            }.value
-        }
         var request = URLRequest(url: url)
         // Vài CDN phim chặn client lạ; gửi header giống trình duyệt để chắc chắn tải được.
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
@@ -715,8 +695,8 @@ final class SubtitleController: ObservableObject {
     /// Phân tích phụ đề WebVTT/SRT thành các câu có mốc thời gian.
     ///
     /// Bản cũ bắt buộc mốc thời gian phải **đủ 3 phần** `HH:MM:SS.mmm`. WebVTT lại cho
-    /// phép `MM:SS.mmm` và rất nhiều nguồn phim phát đúng dạng đó, nên file tải về thành
-    /// công nhưng bị bỏ sạch: không dòng phụ đề nào hiện. Phần này đọc được cả
+    /// phép `MM:SS.mmm` và rất nhiều nguồn phim dùng đúng dạng đó, nên phụ đề bị bỏ sạch:
+    /// không dòng nào hiện. Phần này đọc được cả
     /// `HH:MM:SS.mmm`, `MM:SS.mmm`, `SS.mmm`, nhận dấu `,` của SRT, không cần dòng trống
     /// giữa các câu và tự bỏ thẻ định dạng.
     private static func parse(_ source: String) -> [SubtitleCue] {
@@ -893,16 +873,13 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
 @MainActor
 struct CinemaPlayerScreen: View {
     let movie: Movie
-    let localArtworkURL: URL?
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
     let resumeTime: Double?
     let subtitleCustomizationEnabled: Bool
-    let offlineOnly: Bool
     let onOpenRelated: ((Movie) -> Void)?
     @Environment(CinemaStore.self) private var store
-    @Environment(DownloadManager.self) private var downloads
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -1019,15 +996,13 @@ struct CinemaPlayerScreen: View {
             .lowercased()
     }
 
-    init(movie: Movie, localArtworkURL: URL? = nil, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, offlineOnly: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
         self.movie = movie
-        self.localArtworkURL = localArtworkURL
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
         self.resumeTime = resumeTime
         self.subtitleCustomizationEnabled = subtitleCustomizationEnabled
-        self.offlineOnly = offlineOnly
         self.onOpenRelated = onOpenRelated
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
@@ -1136,7 +1111,7 @@ struct CinemaPlayerScreen: View {
                         .transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)))
                         .zIndex(13)
                 }
-                if !connectivity.isConnected && !offlineOnly {
+                if !connectivity.isConnected {
                     NetworkUnavailableOverlay()
                         .transition(.opacity)
                         .zIndex(100)
@@ -1145,11 +1120,11 @@ struct CinemaPlayerScreen: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
                     .onChanged { value in
-                        guard offlineOnly || connectivity.isConnected else { return }
+                        guard connectivity.isConnected else { return }
                         handleAdjustmentDrag(value, width: proxy.size.width, height: proxy.size.height)
                     }
                     .onEnded { _ in
-                        guard offlineOnly || connectivity.isConnected else { return }
+                        guard connectivity.isConnected else { return }
                         finishAdjustmentGesture()
                     }
             )
@@ -1185,13 +1160,13 @@ struct CinemaPlayerScreen: View {
                 volume = systemVolume.value
             }
             .task {
-                if !offlineOnly { await store.loadHome() }
+                await store.loadHome()
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
             .task(id: store.accountUser?.id) {
-                guard !offlineOnly, store.accountUser != nil else { return }
+                guard store.accountUser != nil else { return }
                 await store.synchronizeSubtitlePreferencesForCurrentAccount()
                 guard !Task.isCancelled else { return }
                 subtitlePreferences = store.playbackDefaults.subtitlePreferences
@@ -2321,16 +2296,11 @@ struct CinemaPlayerScreen: View {
         } else {
             subtitles.load(url: source.subtitleURL, bilingualURL: source.bilingualSubtitleURL)
         }
-        // Ưu tiên bản đã tải về máy để xem được khi mất mạng.
-        let offlineURL = downloads.localURL(
-            movieSlug: movie.slug,
-            episodeSlug: source.slug.isEmpty ? source.name : source.slug
-        )
         // The inline renderer can switch among all tracks. For PiP, seed the
         // AVPlayerItem with the same first/default track through the HLS master
         // when the API only exposes it inside subtitleTracks.
         let nativeSubtitleURL = source.availableSubtitleTracks.first?.subtitleURL
-        playback.load(source, startAt: startAt, localURL: offlineURL, subtitleURL: nativeSubtitleURL, subtitleTracks: source.availableSubtitleTracks, selectedSubtitleID: subtitles.selectedTrackID)
+        playback.load(source, startAt: startAt, subtitleURL: nativeSubtitleURL, subtitleTracks: source.availableSubtitleTracks, selectedSubtitleID: subtitles.selectedTrackID)
         if startAt != nil { hasAppliedResumeTime = true }
         pendingResumeTime = nil
         saveLocalWatchProgress()
@@ -2418,7 +2388,7 @@ struct CinemaPlayerScreen: View {
 
     private var playerPlaceholder: some View {
         ZStack {
-            PosterArt(url: localArtworkURL ?? movie.backdropURL, fallbackURL: movie.posterURL)
+            PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL)
                 .ignoresSafeArea()
                 .overlay(Color.black.opacity(0.58))
             LinearGradient(
@@ -2471,7 +2441,6 @@ struct CinemaPlayerScreen: View {
     }
 
     private func saveLocalWatchProgress() {
-        guard !offlineOnly else { return }
         guard let episode else { return }
         store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
         lastHistorySaveAt = Date()

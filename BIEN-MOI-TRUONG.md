@@ -48,8 +48,8 @@ cái nào nên có, và cái nào là mã nền tảng cũ để trống cũng �
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `VITE_OAUTH_PORTAL_URL`, `VITE_FRONTEND_FORGE_API_URL`,
 `VITE_FRONTEND_FORGE_API_KEY`.
 
-Đăng nhập, bình luận, quản trị phim, tải phim offline đều dùng hệ thống tài khoản riêng của Cinemora
-(mật khẩu + cookie phiên), không phụ thuộc các biến trên.
+Đăng nhập, bình luận và quản trị phim đều dùng hệ thống tài khoản riêng của Cinemora
+(mật khẩu + cookie phiên), không phụ thuộc các biến trên. Ứng dụng iOS hiện không hỗ trợ tải phim để xem ngoại tuyến.
 
 ---
 

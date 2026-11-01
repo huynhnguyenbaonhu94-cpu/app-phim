@@ -28,17 +28,8 @@
     <string>Cinemora cần camera để quét mã QR đăng nhập trên thiết bị khác.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Cinemora cần truy cập ảnh hoặc video bạn chọn để gửi trong cuộc trò chuyện với quản trị viên.</string>
-    <key>UIFileSharingEnabled</key>
-    <true/>
-    <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    <key>LSApplicationQueriesSchemes</key>
-    <array>
-        <string>vlc</string>
-        <string>vlc-x-callbacks</string>
-    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIUserInterfaceStyle</key>

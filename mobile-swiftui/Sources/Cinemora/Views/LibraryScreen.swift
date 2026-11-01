@@ -69,7 +69,7 @@ struct LibraryScreen: View {
                                 .font(.auroraBody(10))
                                 .foregroundStyle(Color.auroraTextTertiary)
                         } else if !store.catalogMovies.isEmpty {
-                            Text("\(store.catalogMovies.count) phim đã tải")
+                            Text("\(store.catalogMovies.count) phim")
                                 .font(.auroraBody(10))
                                 .foregroundStyle(Color.auroraTextTertiary)
                         }

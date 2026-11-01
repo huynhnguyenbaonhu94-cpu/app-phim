@@ -712,8 +712,8 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
             let measuredRatio = await Self.videoAspectRatio(at: fileURL)
-            // The downloaded file is authoritative for playback orientation;
-            // chat preview dimensions stay fixed and are never mutated.
+            // This temporary chat-video attachment determines playback
+            // orientation; preview dimensions stay fixed and are never mutated.
             onPlayVideo(fileURL, measuredRatio ?? mediaAspectRatio)
         } catch {
             self.error = true

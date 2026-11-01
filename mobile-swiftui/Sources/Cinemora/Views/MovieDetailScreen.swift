@@ -11,7 +11,6 @@ struct MovieDetailScreen: View {
     @State private var selectedServer = 0
     @State private var selectedEpisode = 0
     @State private var showPlayer = false
-    @State private var showDownloadSheet = false
     @State private var relatedMovieRoute: Movie?
     @State private var didAutoStartPlayback = false
     @State private var showLoginPrompt = false
@@ -118,11 +117,6 @@ struct MovieDetailScreen: View {
             startPlayback()
         }
         .onChange(of: selectedServer) { _, _ in selectedEpisode = 0 }
-        .sheet(isPresented: $showDownloadSheet) {
-            if let movie {
-                DownloadSheet(movie: movie, servers: servers, initialServer: selectedServer)
-            }
-        }
         .fullScreenCover(isPresented: $showPlayer, onDismiss: {
             if relatedMovieRoute != nil {
                 relatedMovieRoute = nil
@@ -386,20 +380,6 @@ struct MovieDetailScreen: View {
                 HStack(alignment: .firstTextBaseline) {
                     SectionHeading(eyebrow: "SẴN SÀNG PHÁT", title: "Tập & nguồn")
                     Spacer(minLength: 0)
-                    Button {
-                        showDownloadSheet = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.circle.fill").font(.system(size: 12, weight: .bold))
-                            Text("Tải xuống").font(.auroraLabel(11, weight: .bold))
-                        }
-                        .foregroundStyle(Color.auroraViolet)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.auroraViolet.opacity(0.14), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Tải phim về máy")
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -788,8 +768,8 @@ private struct OfflineDetailConnectionCard: View {
 
     private var message: String {
         hasCachedMovie
-            ? "Thông tin phim đã tải trước đó vẫn hiển thị. Cần mạng để tải nội dung mới hoặc phát video."
-            : "Hãy kiểm tra Wi‑Fi hoặc dữ liệu di động rồi thử tải lại trang phim."
+            ? "Thông tin chi tiết đã lưu tạm vẫn hiển thị. Cần mạng để làm mới thông tin hoặc phát video."
+            : "Hãy kiểm tra Wi‑Fi hoặc dữ liệu di động rồi thử làm mới trang phim."
     }
 
     var body: some View {
@@ -829,7 +809,7 @@ private struct OfflineDetailConnectionCard: View {
                 Text(title)
                     .font(.auroraLabel(11, weight: .black))
                     .foregroundStyle(.white)
-                Text(hasCachedMovie ? "Đang hiển thị thông tin đã tải sẵn." : "Kiểm tra Wi‑Fi hoặc dữ liệu di động.")
+                Text(hasCachedMovie ? "Đang hiển thị thông tin đã lưu tạm." : "Kiểm tra Wi‑Fi hoặc dữ liệu di động.")
                     .font(.auroraBody(10))
                     .foregroundStyle(Color.auroraTextSecondary)
                     .lineLimit(2)

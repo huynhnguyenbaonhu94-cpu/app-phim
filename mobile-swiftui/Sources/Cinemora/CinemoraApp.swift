@@ -45,14 +45,12 @@ struct CinemoraApp: App {
     @State private var store = CinemaStore()
     @State private var connectivity = ConnectivityMonitor()
     @State private var tvStore = TvStore()
-    @State private var downloads = DownloadManager()
 
     var body: some Scene {
         WindowGroup {
-            CinemoraTabShell(store: store, tvStore: tvStore, downloads: downloads)
+            CinemoraTabShell(store: store, tvStore: tvStore)
                 .environment(store)
                 .environment(connectivity)
-                .environment(downloads)
                 .preferredColorScheme(.dark)
                 // MPVolumeView ẩn được gắn vào cửa sổ từ đây: nó cần nằm trong cây
                 // giao diện để iOS cho điều khiển âm lượng của máy, nhưng không được
@@ -146,7 +144,6 @@ struct CinemoraTabShell: View {
     /// container — on every published change.
     let store: CinemaStore
     let tvStore: TvStore
-    let downloads: DownloadManager
     @Environment(ConnectivityMonitor.self) private var connectivity
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
@@ -154,7 +151,7 @@ struct CinemoraTabShell: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity, downloads: downloads)
+            AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity)
                 .ignoresSafeArea()
 
             if showLaunchLoader {
@@ -163,9 +160,8 @@ struct CinemoraTabShell: View {
             }
 
             // The offline state belongs to the four server-backed tabs. Keep
-            // the tab bar above this gate so Settings remains reachable, and
-            // keep its local Downloads/Favorites routes usable without a
-            // network connection.
+            // the tab bar above this gate so Settings and saved lists remain
+            // reachable without a network connection.
             if connectivity.isOffline && selection != .settings {
                 NetworkUnavailableOverlay()
                     .transition(.opacity)
@@ -323,22 +319,19 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
     let store: CinemaStore
     let tvStore: TvStore
     let connectivity: ConnectivityMonitor
-    let downloads: DownloadManager
 
     func makeUIViewController(context: Context) -> AuroraTabHostController {
         let controller = AuroraTabHostController()
         let store = self.store
         let tvStore = self.tvStore
         let connectivity = self.connectivity
-        let downloads = self.downloads
         controller.makeHost = { index in
             let host = UIHostingController(
                 rootView: AuroraTabScreen(
                     tab: CinemoraTab.allCases[index],
                     store: store,
                     tvStore: tvStore,
-                    connectivity: connectivity,
-                    downloads: downloads
+                    connectivity: connectivity
                 )
             )
             // A hosting controller created by hand does not inherit the SwiftUI
@@ -369,7 +362,6 @@ private struct AuroraTabScreen: View {
     let store: CinemaStore
     let tvStore: TvStore
     let connectivity: ConnectivityMonitor
-    let downloads: DownloadManager
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -378,7 +370,6 @@ private struct AuroraTabScreen: View {
                 .environment(store)
                 .environment(tvStore)
                 .environment(connectivity)
-                .environment(downloads)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
                 }
@@ -511,7 +502,7 @@ struct NetworkUnavailableOverlay: View {
                         .font(.auroraDisplay(23))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                        Text("Các tab nội dung tạm dừng khi thiết bị ngoại tuyến. Bạn vẫn có thể mở Cài Đặt và xem phim đã tải; Cinemora sẽ tự tiếp tục khi có kết nối.")
+                    Text("Các tab nội dung tạm dừng khi thiết bị ngoại tuyến. Bạn vẫn có thể mở Cài Đặt; Cinemora sẽ tự tiếp tục khi có kết nối.")
                         .font(.auroraBody(12))
                         .foregroundStyle(Color.auroraTextSecondary)
                         .multilineTextAlignment(.center)

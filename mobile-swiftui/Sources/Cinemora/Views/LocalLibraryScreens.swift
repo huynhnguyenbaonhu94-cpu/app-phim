@@ -273,7 +273,7 @@ struct SavedHubScreen: View {
                     VStack(alignment: .leading, spacing: 8) {
                         SectionEyebrow(text: "CÀI ĐẶT & THƯ VIỆN")
                         AuroraGradientText(text: "Cài đặt & dữ liệu", font: .auroraDisplay(28))
-                        Text("Quản lý tài khoản, tùy chỉnh trình phát và phụ đề, xem lịch sử, phim yêu thích hoặc tiếp tục xem nội dung đã tải khi offline.")
+                        Text("Quản lý tài khoản, tùy chỉnh trình phát và phụ đề, xem lịch sử cùng danh sách phim yêu thích.")
                             .font(.auroraBody(12))
                             .foregroundStyle(Color.auroraTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -286,7 +286,6 @@ struct SavedHubScreen: View {
 
                     savedDestination(icon: "person.crop.circle.fill", title: "Tài khoản & thiết bị", detail: "Đăng nhập, đồng bộ thư viện và quản lý tối đa 5 thiết bị", tint: .auroraViolet, index: 2, destination: AccountSettingsScreen())
                     savedDestination(icon: "clock.arrow.circlepath", title: "Lịch sử xem", detail: "Tiếp tục những bộ phim bạn đang xem", tint: .auroraSky, index: 3, destination: WatchHistoryScreen())
-                    savedDestination(icon: "arrow.down.circle.fill", title: "Đã tải xuống", detail: "Phim đã tải, tiến trình tải và thư mục lưu phim trên máy", tint: .auroraMint, index: 3, destination: DownloadsScreen())
                     savedDestination(icon: "heart.fill", title: "Yêu thích", detail: "Danh sách phim đã lưu", tint: .auroraPink, index: 4, destination: FavoritesScreen())
                     savedDestination(icon: "slider.horizontal.3", title: "Cài đặt mặc định", detail: "Thiết lập cách phát video mỗi khi mở phim", tint: .auroraMint, index: 5, destination: PlaybackDefaultsScreen())
                     savedDestination(icon: "textformat.size", title: "Tùy chỉnh phụ đề", detail: "Phông chữ, màu sắc, vị trí, nền và viền", tint: .auroraAmber, index: 6, destination: SubtitlePreferencesScreen())

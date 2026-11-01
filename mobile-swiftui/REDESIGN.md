@@ -1281,6 +1281,8 @@ phần quản trị chạy đủ tính năng trong cả hai trường hợp.
 
 ## 32. Tải phim offline, poster và bộ lọc nhiều lựa chọn
 
+> **Lưu ý cập nhật 01/11/2026:** Toàn bộ tính năng tải phim ngoại tuyến, trình quản lý tệp tải và mở phim bằng VLC đã được gỡ khỏi ứng dụng iOS. Nội dung về tải phim trong các mục 32–39 bên dưới chỉ là lịch sử phát triển, không mô tả phiên bản hiện tại; phần poster và bộ lọc trong mục 32 vẫn còn hiệu lực.
+
 ### Poster trắng ở một số phim
 - **Nguyên nhân**: token ảnh `/api/cinema/image/<token>` chỉ sống **2 giờ**, trong khi
   `Cache-Control` lại khai 2 giờ. Danh sách phim tải về lúc sáng tới chiều là hàng loạt
