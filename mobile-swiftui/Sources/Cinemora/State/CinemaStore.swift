@@ -683,10 +683,9 @@ final class CinemaStore {
         catch { catalogError = error.localizedDescription }
     }
 
-    func search(_ keyword: String) async {
+    func search(_ keyword: String, recordHistory: Bool = false) async {
         let value = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { searchResults = []; return }
-        recordSearchHistory(value)
         searchRequestID += 1
         let requestID = searchRequestID
         searchLoading = true; searchError = nil
@@ -695,6 +694,7 @@ final class CinemaStore {
             let results = try await api.search(value).items
             guard requestID == searchRequestID else { return }
             searchResults = results
+            if recordHistory { recordSearchHistory(value) }
         } catch {
             guard requestID == searchRequestID else { return }
             searchResults = []; searchError = error.localizedDescription

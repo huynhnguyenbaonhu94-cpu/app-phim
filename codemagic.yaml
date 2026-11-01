@@ -30,8 +30,10 @@ workflows:
             mobile-swiftui/Sources/Cinemora/Views/DownloadFolderScreen.swift
           grep -Fq 'languageCode(for: preferred)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'playback.setNativeSubtitles(true)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
-          grep -Fq 'func prepareNativeSubtitlesForPiP() async' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'func prepareNativeSubtitlesForPiP() async -> Bool' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'await playback.prepareNativeSubtitlesForPiP()' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'currentMediaSelection.selectedMediaOption(in: group)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'if subtitleReady {' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'requestedNativeTrackID' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let nativeTracks: [(id: String, language: String, url: URL)]' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let selectedTrack = preferredTrack ?? effectiveTracks.first' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
@@ -40,6 +42,10 @@ workflows:
           grep -Fq 'sessionMissCount >= 2' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
           grep -Fq 'try await api.logoutAllDevices()' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
           grep -Fq 'let succeeded = await store.logoutAllDevices()' mobile-swiftui/Sources/Cinemora/Views/AccountSettingsScreen.swift
+          grep -Fq 'onSubmitQuery: { query in' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          grep -Fq 'store.search(query, recordHistory: true)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
+          grep -Fq 'func search(_ keyword: String, recordHistory: Bool = false) async' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq '.frame(maxHeight: 224, alignment: .top)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           if grep -R -n -E 'DownloadManager|NativeHLSDownloadSession|OfflinePlaybackSupport|OfflineFileActivityView|DownloadsScreen|DownloadSheet|DownloadFolderSection|DownloadFolderScreen|AVAssetDownloadURLSession|AVAssetDownloadTask|localFileURL|offlineOnly|Mở bằng VLC|Tải xuống|Đã tải xuống|MOVPKG' mobile-swiftui/Sources/Cinemora mobile-swiftui/Info.plist; then
             echo 'ERROR: retired offline movie download code or UI remains in the iOS target'; exit 1
           fi

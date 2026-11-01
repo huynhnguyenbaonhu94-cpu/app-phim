@@ -81,6 +81,10 @@ struct SearchScreen: View {
                             submitted = query
                             Task { await store.search(query) }
                         },
+                        onSubmitQuery: { query in
+                            submitted = query
+                            Task { await store.search(query, recordHistory: true) }
+                        },
                         onClear: {
                             submitted = ""
                             store.clearSearch()
@@ -270,7 +274,8 @@ struct SearchScreen: View {
                 .accessibilityLabel("Xóa tất cả lịch sử tìm kiếm")
             }
 
-            VStack(spacing: 8) {
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 8) {
                 ForEach(store.searchHistory) { item in
                     HStack(spacing: 10) {
                         Button {
@@ -310,8 +315,12 @@ struct SearchScreen: View {
                     .padding(.vertical, 10)
                     .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
+                }
+                .padding(10)
             }
-            .padding(10)
+            .frame(maxHeight: 224, alignment: .top)
+            .scrollIndicators(.visible)
+            .scrollBounceBehavior(.basedOnSize)
             .auroraCard(cornerRadius: 20, tint: .auroraViolet, fill: 0.55)
         }
     }
@@ -373,9 +382,10 @@ struct SearchScreen: View {
 /// query once typing pauses.
 private struct SearchField: View {
     @Binding var queryToRun: String?
-    /// Called with the query after a typing pause, and at once on Enter or the
-    /// arrow button.
+    /// Called after typing pauses; this updates results but never saves history.
     let onQuery: (String) -> Void
+    /// Called only when the user explicitly submits with Enter or the arrow.
+    let onSubmitQuery: (String) -> Void
     let onClear: () -> Void
 
     @State private var keyword = ""
@@ -451,12 +461,12 @@ private struct SearchField: View {
         }
     }
 
-    /// Enter or the arrow button: search immediately, skipping the debounce.
+    /// Enter or the arrow button: run and save a completed query.
     private func searchNow() {
         debounce?.cancel()
         guard canSubmit else { return }
         focused = false
-        onQuery(trimmed)
+        onSubmitQuery(trimmed)
     }
 
     /// Live search: one request per typing pause, not per keystroke. The store

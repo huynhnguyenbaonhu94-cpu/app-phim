@@ -348,19 +348,24 @@ final class PlaybackController: ObservableObject {
     /// Wait for the HLS sidecar rendition group before PiP snapshots the item.
     /// AVPlayer's SwiftUI overlay cannot enter the PiP surface, so the native
     /// legible track must be selected and applied first.
-    func prepareNativeSubtitlesForPiP() async {
-        if hasSidecarSubtitle, legibleGroup == nil {
-            let deadline = Date().addingTimeInterval(2)
-            while legibleGroup == nil, Date() < deadline, activeURL != nil,
-                  player.currentItem?.status != .failed {
-                try? await Task.sleep(for: .milliseconds(80))
-            }
-        }
-        setNativeSubtitles(true)
-        if nativeSubtitleActive {
-            // Let AVPlayer commit the selected rendition before the PiP handoff.
-            try? await Task.sleep(for: .milliseconds(180))
-        }
+    func prepareNativeSubtitlesForPiP() async -> Bool {
+        let needsSidecarTrack = hasSidecarSubtitle
+        let deadline = Date().addingTimeInterval(4)
+        repeat {
+            setNativeSubtitles(true)
+            if nativeSubtitleActive { break }
+            guard needsSidecarTrack, Date() < deadline, activeURL != nil,
+                  player.currentItem?.status != .failed else { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while !nativeSubtitleActive
+
+        // Movies without a sidecar still support ordinary PiP. For a sidecar,
+        // never claim success unless AVPlayer reports the requested rendition as
+        // selected; otherwise the SwiftUI-rendered captions would disappear.
+        guard needsSidecarTrack else { return true }
+        guard nativeSubtitleActive else { return false }
+        try? await Task.sleep(for: .milliseconds(180))
+        return nativeSubtitleActive
     }
 
     /// Keep the native PiP track aligned with the in-app language picker.
@@ -383,7 +388,7 @@ final class PlaybackController: ObservableObject {
         if let trackID, let exact = group.options.first(where: { $0.displayName.contains("[\(trackID)]") }) {
             legibleOption = exact
             item.select(exact, in: group)
-            return true
+            return item.currentMediaSelection.selectedMediaOption(in: group)?.isEqual(exact) == true
         }
         let preferred = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let option: AVMediaSelectionOption?
@@ -402,7 +407,7 @@ final class PlaybackController: ObservableObject {
         guard let option else { return false }
         legibleOption = option
         item.select(option, in: group)
-        return true
+        return item.currentMediaSelection.selectedMediaOption(in: group)?.isEqual(option) == true
     }
 
     private static func languageCode(for value: String) -> String? {
@@ -933,6 +938,7 @@ struct CinemaPlayerScreen: View {
     @State private var stopAtEpisodeID: String?
     @State private var autoAdvanceEpisodes = true
     @State private var pictureInPictureEnabled = true
+    @State private var isPreparingPiP = false
     @State private var relatedRecommendationsVisible = false
     @State private var selectedRelatedMovie: Movie?
     /// True while this player is being swapped for a related film. The cover
@@ -1256,20 +1262,36 @@ struct CinemaPlayerScreen: View {
                             pipCoordinator.stop()
                         } else {
                             Task { @MainActor in
-                                await playback.prepareNativeSubtitlesForPiP()
-                                pipCoordinator.start()
+                                isPreparingPiP = true
+                                let subtitleReady = await playback.prepareNativeSubtitlesForPiP()
+                                isPreparingPiP = false
+                                if subtitleReady {
+                                    pipCoordinator.start()
+                                } else {
+                                    controlsVisible = true
+                                    settingsOpen = true
+                                    settingsTab = .subtitle
+                                }
                             }
                         }
                         scheduleHide()
                     } label: {
-                        Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
-                            .font(.system(size: 15, weight: .semibold)).frame(width: 42, height: 42)
+                        Group {
+                            if isPreparingPiP {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                        }
+                        .frame(width: 42, height: 42)
                     }
                     .buttonStyle(.auroraPress(scale: 0.9))
                     .foregroundStyle(pipCoordinator.isActive ? Color.auroraVoid : .white)
                     .background {
                         Circle().fill(pipCoordinator.isActive ? AnyShapeStyle(LinearGradient.auroraPrimary) : AnyShapeStyle(Color.black.opacity(0.4)))
                     }
+                    .disabled(isPreparingPiP)
                     .overlay { Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8) }
                     .accessibilityLabel(pipCoordinator.isActive ? "Thoát Picture-in-Picture" : "Bật Picture-in-Picture")
                 }
