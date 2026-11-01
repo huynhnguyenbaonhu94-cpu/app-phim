@@ -31,7 +31,15 @@ workflows:
           grep -Fq 'fallbackSourceURL' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
           grep -Fq 'chưa phát sinh tiến trình sau 30 giây; đang thử link video gốc' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
           grep -Fq 'asset.assetCache?.isPlayableOffline == true' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
-          grep -Fq 'AVAssetExportSession.determineCompatibility' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
+          grep -Fq 'Text("\(item.percentText) · \(item.sizeText)")' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
+          grep -Fq 'Text("Thời gian còn lại · \(item.etaText)")' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift
+          grep -Fq 'return "~\(auroraByteText(safeDone)) / ~\(auroraByteText(total))"' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
+          if grep -Fq 'AVAssetExportSession' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift || grep -Fq 'exportForVLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift; then
+            echo 'ERROR: MP4/MOV conversion must remain removed'; exit 1
+          fi
+          if grep -Fq 'Bản tải được lưu trên máy. Bấm Mở bằng VLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift || grep -Fq 'Khi đang tải, dung lượng và thời gian hoàn tất' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift; then
+            echo 'ERROR: removed explanatory copy has returned'; exit 1
+          fi
           grep -Fq 'languageCode(for: preferred)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'return String(String(cleaned).prefix(100)) + ".movpkg"' mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift
           grep -Fq 'Mở bằng VLC' mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift

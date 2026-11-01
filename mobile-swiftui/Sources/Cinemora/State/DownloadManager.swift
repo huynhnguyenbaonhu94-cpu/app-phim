@@ -110,7 +110,7 @@ final class DownloadManager {
             if phase == .finished { return auroraByteText(max(receivedBytes, 0)) }
             let total = estimatedTotalBytes
             if phase == .downloading, progress <= 0.001 {
-                return total > 0 ? "Tổng ước tính ~\(auroraByteText(total)) · đang kết nối" : "Đang chờ nguồn video phản hồi…"
+                return total > 0 ? "~0 B / ~\(auroraByteText(total))" : "Đang chờ nguồn video phản hồi…"
             }
             guard total > 0 else {
                 return estimateUnavailable == true ? "Dung lượng nguồn chưa xác định" : "Đang tính dung lượng…"
@@ -118,7 +118,7 @@ final class DownloadManager {
             let estimatedDone = Double(total) * progress
             let safeDone = estimatedDone.isFinite && estimatedDone > 0 && estimatedDone < Double(Int64.max)
                 ? Int64(estimatedDone) : 0
-            return "Ước tính đã tải ~\(auroraByteText(safeDone)) / ~\(auroraByteText(total))"
+            return "~\(auroraByteText(safeDone)) / ~\(auroraByteText(total))"
         }
 
         var percentText: String {

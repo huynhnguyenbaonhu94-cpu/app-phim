@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Khối cài đặt thư mục chứa bản xuất MP4/MOV và các tệp tải đời cũ.
+/// Khối quản lý thư mục tệp video rời đã có sẵn.
 struct DownloadFolderSection: View {
     @Environment(DownloadManager.self) private var downloads
     @State private var showFolderPicker = false
@@ -22,7 +22,7 @@ struct DownloadFolderSection: View {
             }
 
             VStack(spacing: 10) {
-                primaryButton("Xem tệp đã xuất", icon: "folder") { showBrowser = true }
+                primaryButton("Xem tệp trong thư mục", icon: "folder") { showBrowser = true }
                 secondaryRow("Chọn thư mục khác", icon: "folder.badge.plus") { showFolderPicker = true }
                 secondaryRow("Dùng thư mục mặc định", icon: "arrow.uturn.backward", enabled: !downloads.isUsingDefaultFolder) {
                     showResetConfirm = true
@@ -42,7 +42,7 @@ struct DownloadFolderSection: View {
             Button("Dùng mặc định") { downloads.useDefaultFolder() }
             Button("Huỷ", role: .cancel) { }
         } message: {
-            Text("Các tệp MP4/MOV đã xuất sẽ được chuyển về thư mục mặc định. Package HLS do iOS quản lý không thể di chuyển; tệp cũ không chuyển được vẫn nằm ở thư mục trước.")
+            Text("Các tệp video rời trong thư mục ứng dụng sẽ được chuyển về thư mục mặc định. Package HLS do iOS quản lý không thể di chuyển; tệp cũ không chuyển được vẫn nằm ở thư mục trước.")
         }
     }
 
@@ -62,7 +62,7 @@ struct DownloadFolderSection: View {
                         .font(.auroraLabel(13, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(downloads.isUsingDefaultFolder ? "Nơi lưu bản xuất của Cinemora" : "Thư mục lưu bản video đã xuất")
+                    Text(downloads.isUsingDefaultFolder ? "Nơi lưu các tệp video rời cũ" : "Thư mục tệp video rời đã có")
                         .font(.auroraBody(11))
                         .foregroundStyle(Color.auroraTextSecondary)
                 }
@@ -81,7 +81,7 @@ struct DownloadFolderSection: View {
                 .foregroundStyle(Color.auroraTextSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("AVFoundation quản lý package HLS trong vùng ứng dụng. MP4/MOV xuất để chia sẻ với VLC sẽ nằm trong thư mục này.")
+            Text("iOS quản lý package HLS trong vùng ứng dụng. Cinemora không chuyển đổi package HLS sang MP4/MOV; thư mục này chỉ quản lý tệp video rời đã tồn tại.")
                 .font(.auroraBody(10))
                 .foregroundStyle(Color.auroraTextTertiary)
                 .fixedSize(horizontal: false, vertical: true)

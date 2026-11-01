@@ -19,7 +19,7 @@ enum OfflinePlaybackSupport {
                 return "Chưa phát hiện VLC trên thiết bị. Hãy cài VLC rồi thử chia sẻ tệp từ mục Đã tải."
             case .unsupportedFile(let extensionName):
                 if extensionName == "movpkg" {
-                    return "Bản HLS được iOS quản lý nên không mở trực tiếp bằng VLC. Hãy xuất MP4/MOV rồi chia sẻ sang VLC."
+                    return "Bản HLS dạng MOVPKG do iOS quản lý nên VLC không mở trực tiếp được. Cinemora không chuyển đổi tệp này."
                 }
                 return "Định dạng .\(extensionName) không thể gửi trực tiếp sang VLC từ bản tải này."
             }
