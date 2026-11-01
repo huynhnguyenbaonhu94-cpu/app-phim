@@ -1,9 +1,14 @@
 import AVFoundation
 import Foundation
 
-/// Foreground AVFoundation HLS package downloader. Tasks are intentionally not
-/// restored after process relaunch; incomplete native tasks are marked failed.
+/// AVFoundation HLS package downloader. AVAssetDownloadURLSession requires a
+/// background URLSessionConfiguration; passing `.default` raises an Objective-C
+/// exception and aborts the app during DownloadManager initialization.
 final class NativeHLSDownloadSession: NSObject, AVAssetDownloadDelegate {
+    private static var backgroundSessionIdentifier: String {
+        "\(Bundle.main.bundleIdentifier ?? "app.serval4238.taurus3258").cinemora.hls-downloads"
+    }
+
     var onProgress: ((String, Double) -> Void)?
     var onPackage: ((String, URL) -> Void)?
     var onFailure: ((String, Error) -> Void)?
@@ -16,9 +21,14 @@ final class NativeHLSDownloadSession: NSObject, AVAssetDownloadDelegate {
 
     override init() {
         super.init()
-        let configuration = URLSessionConfiguration.default
+        // Apple requires this AVAssetDownloadURLSession to use a background
+        // configuration. URLSessionConfiguration.default causes SIGABRT inside
+        // AVAssetDownloadURLSession's initializer, which otherwise crashes the
+        // app on every launch because DownloadManager is created at app startup.
+        let configuration = URLSessionConfiguration.background(withIdentifier: Self.backgroundSessionIdentifier)
         configuration.waitsForConnectivity = true
         configuration.allowsCellularAccess = false
+        configuration.isDiscretionary = false
         configuration.timeoutIntervalForResource = 24 * 60 * 60
         configuration.httpAdditionalHeaders = ["User-Agent": "Cinemora/1.0 (iOS)"]
         session = AVAssetDownloadURLSession(configuration: configuration, assetDownloadDelegate: self, delegateQueue: OperationQueue.main)

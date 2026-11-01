@@ -22,8 +22,12 @@ workflows:
           grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
           grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
           grep -Fq 'Task { @MainActor [weak self] in' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'URLSessionConfiguration.background(withIdentifier:' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift
           if grep -Fq 'MainActor.assumeIsolated' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift; then
             echo 'ERROR: unsafe synchronous MainActor assumption remains in the periodic player callback'; exit 1
+          fi
+          if grep -Fq 'let configuration = URLSessionConfiguration.default' mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift; then
+            echo 'ERROR: AVAssetDownloadURLSession must use a background URLSessionConfiguration'; exit 1
           fi
           if grep -Fq 'if let imagePreview {' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift; then
             echo 'ERROR: Codemagic is using the stale MovieRequestScreen.swift'; exit 1
