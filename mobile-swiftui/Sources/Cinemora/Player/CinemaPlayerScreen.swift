@@ -170,27 +170,50 @@ final class PlaybackController: ObservableObject {
         // App-cached sidecars are rendered by SubtitleController. Do not hand
         // local VTT/SRT files to AVFoundation, which would try to compose them
         // as media tracks and would falsely suggest native/PiP subtitle support.
-        let nativeTracks = Array((subtitleTracks.compactMap { track in
+        let nativeTracks: [(id: String, language: String, url: URL)] = subtitleTracks.compactMap { track -> (id: String, language: String, url: URL)? in
             guard let url = track.subtitleURL, !url.isFileURL else { return nil }
             return (id: track.id, language: track.language, url: url)
-        }).prefix(12))
-        let effectiveTracks = nativeTracks.isEmpty ? sidecarSubtitleURL.map { [(id: "legacy", language: "vi", url: $0)] } ?? [] : nativeTracks
-        let hlsTracks = effectiveTracks.enumerated().map { index, track in
-            (id: "cinemora-track-\(index + 1)", sourceID: track.id, language: track.language, url: track.url)
+        }
+        let limitedNativeTracks = Array(nativeTracks.prefix(12))
+        let effectiveTracks: [(id: String, language: String, url: URL)]
+        if limitedNativeTracks.isEmpty, let sidecarSubtitleURL {
+            effectiveTracks = [(id: "legacy", language: "vi", url: sidecarSubtitleURL)]
+        } else {
+            effectiveTracks = limitedNativeTracks
+        }
+        let hlsTracks: [(id: String, sourceID: String, language: String, url: URL)] = effectiveTracks.enumerated().map { entry in
+            let trackIndex = entry.offset
+            let track = entry.element
+            let identifier = "cinemora-track-\(trackIndex + 1)"
+            return (id: identifier, sourceID: track.id, language: track.language, url: track.url)
         }
         nativeTrackKeyBySourceID = hlsTracks.reduce(into: [String: String]()) { result, track in
             if result[track.sourceID] == nil { result[track.sourceID] = track.id }
         }
-        let selectedSourceID = selectedSubtitleID.flatMap { id in effectiveTracks.first(where: { $0.id == id })?.id } ?? effectiveTracks.first?.id
-        requestedNativeTrackID = selectedSourceID.flatMap { nativeTrackKeyBySourceID[$0] } ?? hlsTracks.first?.id
-        requestedNativeLanguage = selectedSourceID.flatMap { id in effectiveTracks.first(where: { $0.id == id })?.language } ?? effectiveTracks.first?.language
+        let preferredTrack: (id: String, language: String, url: URL)?
+        if let selectedSubtitleID {
+            preferredTrack = effectiveTracks.first { $0.id == selectedSubtitleID }
+        } else {
+            preferredTrack = nil
+        }
+        let selectedTrack = preferredTrack ?? effectiveTracks.first
+        if let selectedTrack {
+            requestedNativeTrackID = nativeTrackKeyBySourceID[selectedTrack.id] ?? hlsTracks.first?.id
+            requestedNativeLanguage = selectedTrack.language
+        } else {
+            requestedNativeTrackID = hlsTracks.first?.id
+            requestedNativeLanguage = nil
+        }
         let subtitledURL: URL? = {
             guard localURL == nil, allowSubtitledPlaylist,
                   !hlsTracks.isEmpty,
                   let videoURL = episode.playbackURL else { return nil }
             let path = videoURL.absoluteString.lowercased()
             guard path.contains(".m3u8") || path.contains("/api/cinema/stream/") else { return nil }
-            return CinemaAPI.subtitledPlaylistURL(video: videoURL, tracks: hlsTracks.map { (id: $0.id, language: $0.language, url: $0.url) })
+            let playlistTracks: [(id: String, language: String, url: URL)] = hlsTracks.map { track in
+                (id: track.id, language: track.language, url: track.url)
+            }
+            return CinemaAPI.subtitledPlaylistURL(video: videoURL, tracks: playlistTracks)
         }()
         fallbackPlaybackURL = subtitledURL == nil ? nil : episode.playbackURL
         usedSubtitledPlaylist = subtitledURL != nil
