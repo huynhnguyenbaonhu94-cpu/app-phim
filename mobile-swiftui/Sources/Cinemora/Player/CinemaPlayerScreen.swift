@@ -345,6 +345,24 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    /// Wait for the HLS sidecar rendition group before PiP snapshots the item.
+    /// AVPlayer's SwiftUI overlay cannot enter the PiP surface, so the native
+    /// legible track must be selected and applied first.
+    func prepareNativeSubtitlesForPiP() async {
+        if hasSidecarSubtitle, legibleGroup == nil {
+            let deadline = Date().addingTimeInterval(2)
+            while legibleGroup == nil, Date() < deadline, activeURL != nil,
+                  player.currentItem?.status != .failed {
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+        setNativeSubtitles(true)
+        if nativeSubtitleActive {
+            // Let AVPlayer commit the selected rendition before the PiP handoff.
+            try? await Task.sleep(for: .milliseconds(180))
+        }
+    }
+
     /// Keep the native PiP track aligned with the in-app language picker.
     /// Outside PiP this only records the language for the next activation.
     func selectNativeSubtitle(trackID: String, language: String) {
@@ -1237,11 +1255,10 @@ struct CinemaPlayerScreen: View {
                         if pipCoordinator.isActive {
                             pipCoordinator.stop()
                         } else {
-                            // Select the native AVPlayer track before the system
-                            // snapshots the item into PiP. The delegate callback
-                            // repeats this when PiP actually becomes active.
-                            playback.setNativeSubtitles(true)
-                            pipCoordinator.start()
+                            Task { @MainActor in
+                                await playback.prepareNativeSubtitlesForPiP()
+                                pipCoordinator.start()
+                            }
                         }
                         scheduleHide()
                     } label: {
@@ -2416,8 +2433,17 @@ struct CinemaPlayerScreen: View {
     /// Tách khỏi body: để nguyên trong chuỗi modifier thì trình biên dịch phải
     /// suy luận cả biểu thức khổng lồ và bị quá thời gian.
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        if phase == .active { playback.recoverAfterForeground() }
-        else { playback.prepareForSystemOverlay() }
+        if phase == .active {
+            playback.recoverAfterForeground()
+            if !pipCoordinator.isActive { playback.setNativeSubtitles(false) }
+        } else {
+            // Auto-PiP is requested as the app leaves the foreground. Select the
+            // native subtitle track before iOS snapshots the AVPlayerLayer.
+            if pictureInPictureEnabled, movie.allowPip != false, pipCoordinator.isSupported {
+                playback.setNativeSubtitles(true)
+            }
+            playback.prepareForSystemOverlay()
+        }
     }
 
     private func applyPlaybackDefaults() {

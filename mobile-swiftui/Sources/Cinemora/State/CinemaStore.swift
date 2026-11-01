@@ -202,9 +202,13 @@ final class CinemaStore {
                 await refreshCloudLibrary()
             } else if accountUser == nil {
                 accountError = nil
+            } else {
+                sessionMissCount += 1
+                if sessionMissCount >= 2 { clearAccountState() }
             }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
+                sessionMissCount += 1
                 if sessionMissCount >= 2 { clearAccountState() }
             } else { accountError = error.localizedDescription }
         }
@@ -222,12 +226,12 @@ final class CinemaStore {
             }
             else {
                 sessionMissCount += 1
-                if sessionMissCount >= 5 { clearAccountState() }
+                if sessionMissCount >= 2 { clearAccountState() }
             }
         } catch {
             if let apiError = error as? APIError, apiError.isUnauthorized {
                 sessionMissCount += 1
-                if sessionMissCount >= 5 { clearAccountState() }
+                if sessionMissCount >= 2 { clearAccountState() }
             } else if accountUser != nil { accountError = error.localizedDescription }
         }
     }
@@ -435,9 +439,22 @@ final class CinemaStore {
         }
     }
 
-    func logoutAllDevices() async {
-        clearAccountState()
-        try? await api.logoutAllDevices()
+    func logoutAllDevices() async -> Bool {
+        guard accountUser != nil else { return true }
+        accountError = nil
+        do {
+            try await api.logoutAllDevices()
+            clearAccountState()
+            return true
+        } catch {
+            let failure = error.localizedDescription
+            // The server may have committed the revocation while the response
+            // was lost. Re-check before telling the user the operation failed.
+            await checkAccountSession()
+            guard accountUser != nil else { return true }
+            accountError = failure
+            return false
+        }
     }
 
     func clearAccountError() {

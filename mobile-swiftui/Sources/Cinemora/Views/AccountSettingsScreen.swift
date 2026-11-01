@@ -12,6 +12,8 @@ struct AccountSettingsScreen: View {
     @State private var password = ""
     @State private var submitting = false
     @State private var showLogoutAllAlert = false
+    @State private var isLoggingOutAllDevices = false
+    @State private var logoutAllError: String?
     @State private var showChangePassword = false
     @State private var showQrLogin = false
     @State private var showQrScanner = false
@@ -68,6 +70,8 @@ struct AccountSettingsScreen: View {
                 email = ""
                 password = ""
                 isRegistering = false
+                isLoggingOutAllDevices = false
+                logoutAllError = nil
                 store.clearAccountError()
             }
         }
@@ -79,10 +83,10 @@ struct AccountSettingsScreen: View {
             }
         }
         .alert("Đăng xuất tất cả thiết bị?", isPresented: $showLogoutAllAlert) {
-            Button("Đăng xuất tất cả", role: .destructive) { Task { await store.logoutAllDevices() } }
+            Button("Đăng xuất tất cả", role: .destructive) { performLogoutAllDevices() }
             Button("Hủy", role: .cancel) { }
         } message: {
-            Text("Tất cả phiên đăng nhập, kể cả thiết bị đang xem phim, sẽ bị thu hồi ngay lập tức.")
+            Text("Máy chủ sẽ thu hồi mọi phiên Cinemora. Thiết bị đang mở ứng dụng sẽ tự đăng xuất khi kiểm tra phiên kế tiếp; thiết bị đang ở nền sẽ kiểm tra lại khi mở ứng dụng.")
         }
         .sheet(isPresented: $showQrLogin) {
             QRLoginSheet().environment(store)
@@ -387,10 +391,29 @@ struct AccountSettingsScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 7)
                 }
-                Button("Đăng xuất tất cả thiết bị", role: .destructive) { showLogoutAllAlert = true }
+                if isLoggingOutAllDevices {
+                    HStack(spacing: 9) {
+                        ProgressView().tint(Color.auroraPink)
+                        Text("Đang thu hồi phiên trên các thiết bị…")
+                            .font(.auroraBody(11))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 5)
+                }
+                if let logoutAllError {
+                    Text(logoutAllError)
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraPink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button(isLoggingOutAllDevices ? "Đang đăng xuất…" : "Đăng xuất tất cả thiết bị", role: .destructive) {
+                    showLogoutAllAlert = true
+                }
                     .font(.auroraLabel(12, weight: .bold))
                     .frame(maxWidth: .infinity)
                     .padding(.top, 5)
+                    .disabled(isLoggingOutAllDevices)
             }
             .padding(16)
             .auroraCard(cornerRadius: 24, tint: .auroraViolet, fill: 0.6)
@@ -412,6 +435,20 @@ struct AccountSettingsScreen: View {
             }
             .buttonStyle(.auroraPress(scale: 0.97))
             .auroraReveal(6)
+        }
+    }
+
+    @MainActor
+    private func performLogoutAllDevices() {
+        guard !isLoggingOutAllDevices else { return }
+        isLoggingOutAllDevices = true
+        logoutAllError = nil
+        Task { @MainActor in
+            let succeeded = await store.logoutAllDevices()
+            isLoggingOutAllDevices = false
+            if !succeeded {
+                logoutAllError = store.accountError ?? "Không thể thu hồi phiên đăng nhập. Kiểm tra kết nối rồi thử lại."
+            }
         }
     }
 

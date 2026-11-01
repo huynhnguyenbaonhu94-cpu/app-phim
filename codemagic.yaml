@@ -30,11 +30,16 @@ workflows:
             mobile-swiftui/Sources/Cinemora/Views/DownloadFolderScreen.swift
           grep -Fq 'languageCode(for: preferred)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'playback.setNativeSubtitles(true)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'func prepareNativeSubtitlesForPiP() async' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          grep -Fq 'await playback.prepareNativeSubtitlesForPiP()' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'requestedNativeTrackID' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let nativeTracks: [(id: String, language: String, url: URL)]' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let selectedTrack = preferredTrack ?? effectiveTracks.first' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'let loadTask = Task.detached(priority: .utility) { () -> Data? in' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
           grep -Fq 'let loaded: Data? = await loadTask.value' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'sessionMissCount >= 2' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'try await api.logoutAllDevices()' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'let succeeded = await store.logoutAllDevices()' mobile-swiftui/Sources/Cinemora/Views/AccountSettingsScreen.swift
           if grep -R -n -E 'DownloadManager|NativeHLSDownloadSession|OfflinePlaybackSupport|OfflineFileActivityView|DownloadsScreen|DownloadSheet|DownloadFolderSection|DownloadFolderScreen|AVAssetDownloadURLSession|AVAssetDownloadTask|localFileURL|offlineOnly|Mở bằng VLC|Tải xuống|Đã tải xuống|MOVPKG' mobile-swiftui/Sources/Cinemora mobile-swiftui/Info.plist; then
             echo 'ERROR: retired offline movie download code or UI remains in the iOS target'; exit 1
           fi
