@@ -22,6 +22,12 @@ workflows:
           grep -Fq 'if let preview = imagePreview' mobile-swiftui/Sources/Cinemora/Views/MovieRequestScreen.swift
           grep -Fq 'var episodeGroups: [MovieServer]?' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
           grep -Fq 'Task { @MainActor [weak self] in' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
+          # Remove these retired sources if an old checkout or ZIP-overwrite left them behind.
+          rm -f mobile-swiftui/Sources/Cinemora/State/DownloadManager.swift \
+            mobile-swiftui/Sources/Cinemora/State/NativeHLSDownloadSession.swift \
+            mobile-swiftui/Sources/Cinemora/State/OfflinePlaybackSupport.swift \
+            mobile-swiftui/Sources/Cinemora/Views/DownloadsScreen.swift \
+            mobile-swiftui/Sources/Cinemora/Views/DownloadFolderScreen.swift
           grep -Fq 'languageCode(for: preferred)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'playback.setNativeSubtitles(true)' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift
           grep -Fq 'requestedNativeTrackID' mobile-swiftui/Sources/Cinemora/Player/CinemaPlayerScreen.swift

@@ -15,6 +15,13 @@ workflows:
       - name: Install XcodeGen
         script: |
           brew install xcodegen || brew upgrade xcodegen
+      - name: Remove retired movie download sources
+        script: |
+          rm -f Sources/Cinemora/State/DownloadManager.swift \
+            Sources/Cinemora/State/NativeHLSDownloadSession.swift \
+            Sources/Cinemora/State/OfflinePlaybackSupport.swift \
+            Sources/Cinemora/Views/DownloadsScreen.swift \
+            Sources/Cinemora/Views/DownloadFolderScreen.swift
       - name: Generate Xcode project
         script: |
           cd mobile-swiftui
