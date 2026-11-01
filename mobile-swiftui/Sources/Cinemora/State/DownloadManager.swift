@@ -55,8 +55,8 @@ final class DownloadManager {
         var startedAt: Date?
 
         var progress: Double {
-            if totalSegments > 0 { return min(1, Double(doneSegments) / Double(totalSegments)) }
-            if totalBytes > 0 { return min(1, Double(receivedBytes) / Double(totalBytes)) }
+            if totalSegments > 0 { return min(1, max(0, Double(doneSegments) / Double(totalSegments))) }
+            if totalBytes > 0 { return min(1, max(0, Double(receivedBytes) / Double(totalBytes))) }
             return phase == .finished ? 1 : 0
         }
         var isRunning: Bool { phase == .downloading || phase == .waiting }
@@ -96,7 +96,7 @@ final class DownloadManager {
             return "\(done) / \(auroraByteText(total))"
         }
 
-        var percentText: String { "\(Int((progress * 100).rounded()))%" }
+        var percentText: String { "\(Int((min(1, max(0, progress)) * 100).rounded()))%" }
 
         var speedText: String {
             guard let speed, speed.isFinite, speed > 0, speed < Double(Int64.max) else { return "" }
@@ -730,6 +730,15 @@ final class DownloadManager {
         // Interrupted work must be retried; valid persisted packages remain finished.
         items = stored.map { item in
             var copy = item
+            // JSON can contain representable but nonsensical counters. Normalize
+            // them before views format progress or storage estimates.
+            copy.receivedBytes = max(0, copy.receivedBytes)
+            copy.totalBytes = max(0, copy.totalBytes)
+            copy.doneSegments = max(0, copy.doneSegments)
+            copy.totalSegments = max(0, copy.totalSegments)
+            if let speed = copy.speed, !speed.isFinite || speed < 0 { copy.speed = nil }
+            if let duration = copy.durationSeconds, !duration.isFinite || duration < 0 { copy.durationSeconds = nil }
+            if let bandwidth = copy.bandwidth, bandwidth < 0 { copy.bandwidth = nil }
             if copy.phase == .downloading || copy.phase == .waiting { copy.phase = .failed; copy.message = "Tải native chưa hoàn tất khi app đóng; hãy tải lại." }
             let isNativePackage = copy.fileName.lowercased().hasSuffix(".movpkg")
             let package = root.appendingPathComponent(copy.fileName, isDirectory: true)

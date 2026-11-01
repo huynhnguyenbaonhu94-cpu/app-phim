@@ -49,7 +49,7 @@ struct CinemoraApp: App {
 
     var body: some Scene {
         WindowGroup {
-            CinemoraTabShell(store: store, tvStore: tvStore)
+            CinemoraTabShell(store: store, tvStore: tvStore, downloads: downloads)
                 .environment(store)
                 .environment(connectivity)
                 .environment(downloads)
@@ -146,6 +146,7 @@ struct CinemoraTabShell: View {
     /// container — on every published change.
     let store: CinemaStore
     let tvStore: TvStore
+    let downloads: DownloadManager
     @Environment(ConnectivityMonitor.self) private var connectivity
     @State private var selection: CinemoraTab = .home
     @State private var showLaunchLoader = true
@@ -153,7 +154,7 @@ struct CinemoraTabShell: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity)
+            AuroraTabHost(selection: $selection, store: store, tvStore: tvStore, connectivity: connectivity, downloads: downloads)
                 .ignoresSafeArea()
 
             if showLaunchLoader {
@@ -322,19 +323,22 @@ private struct AuroraTabHost: UIViewControllerRepresentable {
     let store: CinemaStore
     let tvStore: TvStore
     let connectivity: ConnectivityMonitor
+    let downloads: DownloadManager
 
     func makeUIViewController(context: Context) -> AuroraTabHostController {
         let controller = AuroraTabHostController()
         let store = self.store
         let tvStore = self.tvStore
         let connectivity = self.connectivity
+        let downloads = self.downloads
         controller.makeHost = { index in
             let host = UIHostingController(
                 rootView: AuroraTabScreen(
                     tab: CinemoraTab.allCases[index],
                     store: store,
                     tvStore: tvStore,
-                    connectivity: connectivity
+                    connectivity: connectivity,
+                    downloads: downloads
                 )
             )
             // A hosting controller created by hand does not inherit the SwiftUI
@@ -365,6 +369,7 @@ private struct AuroraTabScreen: View {
     let store: CinemaStore
     let tvStore: TvStore
     let connectivity: ConnectivityMonitor
+    let downloads: DownloadManager
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -373,6 +378,7 @@ private struct AuroraTabScreen: View {
                 .environment(store)
                 .environment(tvStore)
                 .environment(connectivity)
+                .environment(downloads)
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailScreen(slug: movie.slug)
                 }
