@@ -80,8 +80,19 @@ struct TvVideoQuality: Decodable, Identifiable, Hashable {
 struct MovieEpisodeSubtitleTrack: Decodable, Hashable, Identifiable {
     let language: String
     let subtitleUrl: String
+    /// Local app-owned sidecar, when this track has been cached for offline playback.
+    /// The source URL remains part of the identity so a refreshed API response does
+    /// not make the language picker jump to a different track.
+    let localFileURL: URL?
+
+    init(language: String, subtitleUrl: String, localFileURL: URL? = nil) {
+        self.language = language
+        self.subtitleUrl = subtitleUrl
+        self.localFileURL = localFileURL
+    }
+
     var id: String { "\(language)|\(subtitleUrl)" }
-    var subtitleURL: URL? { CinemaAPI.absoluteURL(subtitleUrl) }
+    var subtitleURL: URL? { localFileURL ?? CinemaAPI.absoluteURL(subtitleUrl) }
 }
 
 /** Một chất lượng của tập phim, kèm phụ đề riêng của chất lượng đó. */

@@ -3,8 +3,83 @@ import UIKit
 
 @MainActor
 enum CinemoraAppIconController {
+    private static let selectionKeyPrefix = "cinemora.app.icon.account.v1."
+    private static var activationGeneration = 0
+    private static var activeAccountID: Int?
+
     static var selectedOption: CinemoraAppIconOption {
         CinemoraAppIconOption(alternateName: UIApplication.shared.alternateIconName) ?? .standard
+    }
+
+    static func activate(accountID: Int?, hasSpecialPrivileges: Bool) {
+        activationGeneration += 1
+        let generation = activationGeneration
+        activeAccountID = hasSpecialPrivileges ? accountID : nil
+        guard hasSpecialPrivileges, let accountID else {
+            resetToStandard()
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        let key = selectionKeyPrefix + String(accountID)
+        let savedOption: CinemoraAppIconOption?
+        if let rawValue = defaults.string(forKey: key) {
+            savedOption = CinemoraAppIconOption(rawValue: rawValue)
+        } else {
+            // Adopt an already-installed alternate icon for this account only once.
+            let installed = selectedOption
+            if installed != .standard { defaults.set(installed.rawValue, forKey: key) }
+            savedOption = installed == .standard ? nil : installed
+        }
+
+        let option = savedOption ?? .standard
+        guard selectedOption != option else { return }
+        Task { @MainActor in
+            guard generation == activationGeneration, activeAccountID == accountID else { return }
+            do {
+                try await apply(option)
+            } catch {
+                // An icon change is best-effort; retain the account's saved choice.
+            }
+            // A newer account may have switched while UIKit's completion was pending.
+            guard generation == activationGeneration, activeAccountID == accountID else {
+                reconcileCurrentAccount()
+                return
+            }
+        }
+    }
+
+    static func select(_ option: CinemoraAppIconOption, for accountID: Int) async throws {
+        guard activeAccountID == accountID else { throw CinemoraAppIconError.accountChanged }
+        let generation = activationGeneration
+        try await apply(option)
+        guard generation == activationGeneration, activeAccountID == accountID else {
+            reconcileCurrentAccount()
+            throw CinemoraAppIconError.accountChanged
+        }
+        UserDefaults.standard.set(option.rawValue, forKey: selectionKeyPrefix + String(accountID))
+    }
+
+    private static func resetToStandard() {
+        guard UIApplication.shared.supportsAlternateIcons,
+              UIApplication.shared.alternateIconName != nil else { return }
+        let generation = activationGeneration
+        UIApplication.shared.setAlternateIconName(nil) { _ in
+            Task { @MainActor in
+                guard generation == activationGeneration else {
+                    reconcileCurrentAccount()
+                    return
+                }
+            }
+        }
+    }
+
+    private static func reconcileCurrentAccount() {
+        guard let accountID = activeAccountID else {
+            resetToStandard()
+            return
+        }
+        activate(accountID: accountID, hasSpecialPrivileges: true)
     }
 
     static func apply(_ option: CinemoraAppIconOption) async throws {
@@ -22,19 +97,16 @@ enum CinemoraAppIconController {
         }
     }
 
-    static func resetIfNotPrivileged(_ hasSpecialPrivileges: Bool) {
-        guard !hasSpecialPrivileges,
-              UIApplication.shared.supportsAlternateIcons,
-              UIApplication.shared.alternateIconName != nil else { return }
-        UIApplication.shared.setAlternateIconName(nil, completionHandler: nil)
-    }
 }
 
 private enum CinemoraAppIconError: LocalizedError {
-    case notSupported
+    case notSupported, accountChanged
 
     var errorDescription: String? {
-        "Thiết bị hoặc cấu hình ứng dụng hiện không hỗ trợ đổi biểu tượng."
+        switch self {
+        case .notSupported: "Thiết bị hoặc cấu hình ứng dụng hiện không hỗ trợ đổi biểu tượng."
+        case .accountChanged: "Tài khoản vừa thay đổi. Hãy mở lại mục biểu tượng app rồi thử lại."
+        }
     }
 }
 
@@ -149,6 +221,7 @@ enum CinemoraAppIconOption: String, CaseIterable, Identifiable {
 }
 
 struct SpecialAppIconPickerScreen: View {
+    @Environment(CinemaStore.self) private var store
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -285,8 +358,14 @@ struct SpecialAppIconPickerScreen: View {
         errorMessage = nil
         successMessage = nil
         do {
-            try await CinemoraAppIconController.apply(option)
-            selected = option
+            guard let accountID = store.accountUser?.id,
+                  store.accountUser?.hasSpecialPrivileges == true else {
+                errorMessage = "Chỉ tài khoản có đặc quyền mới có thể đổi biểu tượng."
+                applying = nil
+                return
+            }
+            try await CinemoraAppIconController.select(option, for: accountID)
+            selected = CinemoraAppIconController.selectedOption
             successMessage = "Đã đổi biểu tượng ứng dụng."
         } catch {
             errorMessage = error.localizedDescription

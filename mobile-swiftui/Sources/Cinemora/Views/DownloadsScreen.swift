@@ -1,12 +1,13 @@
+import AVFoundation
 import SwiftUI
 
 private struct VLCShareItem: Identifiable {
     let id = UUID()
-    let fileURL: URL
+    let fileURLs: [URL]
 }
 
-/// Danh sách phim đã tải về: tách rõ **đang tải** và **đã tải**, thanh tiến trình
-/// kèm dung lượng thực tế trên dung lượng ước tính, có dừng và xoá từng bản.
+/// Danh sách phim đã tải về: tách rõ **đang tải** và **đã tải**, kèm ước tính
+/// dung lượng/ETA khi đang tải và kích thước package chính xác khi hoàn tất.
 struct DownloadsScreen: View {
     @Environment(DownloadManager.self) private var downloads
     @Environment(ConnectivityMonitor.self) private var connectivity
@@ -14,10 +15,12 @@ struct DownloadsScreen: View {
     @State private var filter: DownloadFilter = .active
     @State private var pendingRemoval: DownloadManager.Item?
     @State private var showRemoveAll = false
-    @State private var itemForPlayback: DownloadManager.Item?
-    @State private var internalPlaybackItem: DownloadManager.Item?
     @State private var vlcShareItem: VLCShareItem?
-    @State private var playbackNotice: String?
+    @State private var vlcNotice: String?
+    @State private var exportNotice: String?
+    @State private var exportingItemIDs: Set<String> = []
+    @State private var exportProgress: [String: Double] = [:]
+    @State private var exportStatus: [String: String] = [:]
 
     enum DownloadFilter: String, CaseIterable, Identifiable {
         case active, done
@@ -41,7 +44,7 @@ struct DownloadsScreen: View {
                     }
                     .padding(.top, 8)
                     header
-                    if let notice = downloads.wifiNotice { wifiBanner(notice) }
+                    if let notice = downloads.networkNotice { networkBanner(notice) }
                     summaryCard
                     filterBar
                     if !shownItems.isEmpty { bulkActions }
@@ -55,7 +58,7 @@ struct DownloadsScreen: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionEyebrow(text: "THƯ MỤC TẢI XUỐNG")
+                        SectionEyebrow(text: "THƯ MỤC BẢN XUẤT")
                         DownloadFolderSection()
                     }
                     .auroraReveal(6)
@@ -83,74 +86,182 @@ struct DownloadsScreen: View {
         } message: {
             Text("Toàn bộ \(doneItems.count) tập đã tải sẽ bị xoá khỏi máy. Phim đang tải dở không bị ảnh hưởng.")
         }
-        .confirmationDialog("Chọn cách phát", isPresented: Binding(get: { itemForPlayback != nil }, set: { if !$0 { itemForPlayback = nil } }), titleVisibility: .visible) {
-            if let item = itemForPlayback {
-                Button("Xem trong Cinemora") {
-                    itemForPlayback = nil
-                    openInternally(item)
-                }
-                if let fileURL = downloads.localURL(for: item), case .available = OfflinePlaybackSupport.vlcAvailability(for: fileURL) {
-                    Button("Mở bằng VLC") {
-                        itemForPlayback = nil
-                        vlcShareItem = VLCShareItem(fileURL: fileURL)
-                    }
-                } else {
-                    Button("VLC không khả dụng") { }
-                        .disabled(true)
-                }
-                Button("Huỷ", role: .cancel) { itemForPlayback = nil }
-            }
+        .alert("Không thể mở bằng VLC", isPresented: Binding(get: { vlcNotice != nil }, set: { if !$0 { vlcNotice = nil } })) {
+            Button("Đã hiểu", role: .cancel) { vlcNotice = nil }
         } message: {
-            Text(playbackDialogMessage)
+            Text(vlcNotice ?? "Tệp tải xuống không khả dụng.")
         }
-        .alert("Không thể phát bản tải", isPresented: Binding(get: { playbackNotice != nil }, set: { if !$0 { playbackNotice = nil } })) {
-            Button("Đã hiểu", role: .cancel) { playbackNotice = nil }
+        .alert("Không thể xuất video", isPresented: Binding(get: { exportNotice != nil }, set: { if !$0 { exportNotice = nil } })) {
+            Button("Đã hiểu", role: .cancel) { exportNotice = nil }
         } message: {
-            Text(playbackNotice ?? "Tệp tải xuống không khả dụng.")
+            Text(exportNotice ?? "Không thể tạo bản video tương thích.")
         }
         .sheet(item: $vlcShareItem) { item in
-            OfflineFileActivityView(fileURL: item.fileURL)
+            OfflineFileActivityView(fileURLs: item.fileURLs)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(item: $internalPlaybackItem) { item in
-            if let fileURL = downloads.localURL(for: item) {
-                OfflineDownloadPlayerScreen(item: item, fileURL: fileURL)
-            } else {
-                StateMessage(icon: "exclamationmark.triangle", title: "Tệp không còn trên máy", detail: "Hãy xoá mục này rồi tải lại tập phim khi có mạng.")
-                    .presentationBackground(Color.black)
+    }
+
+    private func openWithVLC(_ item: DownloadManager.Item) {
+        if let exportedURL = downloads.vlcExportURL(for: item) {
+            shareWithVLC(item, videoURL: exportedURL)
+            return
+        }
+        guard let packageURL = downloads.localURL(for: item) else {
+            vlcNotice = "Không tìm thấy bản tải trên thiết bị. Hãy xoá mục này rồi tải lại khi có mạng."
+            return
+        }
+        guard packageURL.pathExtension.lowercased() == "movpkg" else {
+            switch OfflinePlaybackSupport.vlcAvailability(for: packageURL) {
+            case .available:
+                shareWithVLC(item, videoURL: packageURL)
+            case .notInstalled:
+                vlcNotice = "Chưa phát hiện VLC. Hãy cài VLC, sau đó thử lại để chuyển tệp qua bảng chia sẻ của iOS."
+            case .unsupportedFile(let ext):
+                vlcNotice = "Không thể mở trực tiếp định dạng .\(ext) bằng VLC. Hãy tải lại để Cinemora tạo bản HLS có thể xuất MP4/MOV."
+            }
+            return
+        }
+        exportForVLC(item, sourceURL: packageURL)
+    }
+
+    private func shareWithVLC(_ item: DownloadManager.Item, videoURL: URL) {
+        var fileURLs = [videoURL]
+        for track in downloads.subtitleTracks(for: item) {
+            guard let subtitleURL = track.localFileURL,
+                  !fileURLs.contains(subtitleURL) else { continue }
+            fileURLs.append(subtitleURL)
+        }
+        vlcShareItem = VLCShareItem(fileURLs: fileURLs)
+    }
+
+    private func exportForVLC(_ item: DownloadManager.Item, sourceURL: URL) {
+        guard !exportingItemIDs.contains(item.id) else { return }
+        let requiredBytes = max(item.receivedBytes, 1)
+        if downloads.freeBytes > 0, downloads.freeBytes < requiredBytes {
+            exportNotice = "Không đủ dung lượng trống để tạo bản MP4/MOV. Hãy giải phóng ít nhất khoảng \(auroraByteText(requiredBytes)) rồi thử lại."
+            return
+        }
+
+        let id = item.id
+        exportingItemIDs.insert(id)
+        exportProgress[id] = 0
+        exportStatus[id] = "Đang kiểm tra định dạng và dung lượng…"
+        Task { @MainActor in
+            var outputURL: URL?
+            var progressTask: Task<Void, Never>?
+            defer {
+                progressTask?.cancel()
+                exportingItemIDs.remove(id)
+                exportProgress[id] = nil
+                exportStatus[id] = nil
+            }
+
+            do {
+                let asset = AVURLAsset(url: sourceURL)
+                guard try await asset.load(.isPlayable) else { throw VLCExportError.assetUnavailable }
+
+                let candidates: [(preset: String, type: AVFileType)] = [
+                    (AVAssetExportPresetPassthrough, .mp4),
+                    (AVAssetExportPresetPassthrough, .mov),
+                    (AVAssetExportPresetHighestQuality, .mp4),
+                    (AVAssetExportPresetHighestQuality, .mov),
+                    (AVAssetExportPreset1280x720, .mp4),
+                    (AVAssetExportPreset1280x720, .mov)
+                ]
+                var selected: (session: AVAssetExportSession, type: AVFileType)?
+                for candidate in candidates {
+                    let compatible = await Self.isExportCompatible(asset: asset, preset: candidate.preset, type: candidate.type)
+                    guard compatible,
+                          let session = AVAssetExportSession(asset: asset, presetName: candidate.preset),
+                          session.supportedFileTypes.contains(candidate.type) else { continue }
+                    selected = (session, candidate.type)
+                    break
+                }
+                guard let selected else { throw VLCExportError.noCompatibleFormat }
+
+                let fileExtension = selected.type == .mov ? "mov" : "mp4"
+                let destination = downloads.exportDestination(for: item, fileExtension: fileExtension)
+                outputURL = destination
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                selected.session.outputURL = destination
+                selected.session.outputFileType = selected.type
+                selected.session.shouldOptimizeForNetworkUse = true
+                exportStatus[id] = "Đang tạo bản .\(fileExtension)…"
+
+                let exportSession = selected.session
+                progressTask = Task { @MainActor in
+                    while !Task.isCancelled {
+                        let progress = Double(exportSession.progress)
+                        if progress.isFinite { exportProgress[id] = max(exportProgress[id] ?? 0, min(1, max(0, progress))) }
+                        if exportSession.status == .completed || exportSession.status == .failed || exportSession.status == .cancelled { break }
+                        try? await Task.sleep(for: .milliseconds(300))
+                    }
+                }
+                try await Self.performExport(exportSession)
+                progressTask?.cancel()
+                exportProgress[id] = 1
+
+                guard let values = try? destination.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                      values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
+                    throw VLCExportError.emptyOutput
+                }
+                shareWithVLC(item, videoURL: destination)
+            } catch {
+                progressTask?.cancel()
+                if let outputURL { try? FileManager.default.removeItem(at: outputURL) }
+                exportNotice = error.localizedDescription
             }
         }
     }
 
-    private var playbackDialogMessage: String {
-        guard let item = itemForPlayback, let fileURL = downloads.localURL(for: item) else {
-            return "Mục này chưa có package tải hợp lệ. Hãy xoá hoặc tải lại để tạo package native."
+    private static func isExportCompatible(asset: AVAsset, preset: String, type: AVFileType) async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAssetExportSession.determineCompatibility(ofExportPreset: preset, with: asset, outputFileType: type) { compatible in
+                continuation.resume(returning: compatible)
+            }
         }
-        let availability = OfflinePlaybackSupport.vlcAvailability(for: fileURL)
-        return availability.message
     }
 
-    private func choosePlayback(_ item: DownloadManager.Item) {
-        guard downloads.localURL(for: item) != nil else {
-            playbackNotice = "Bản tải cũ không phải package AVFoundation nên chưa thể phát. Hãy xoá hoặc tải lại bằng Cinemora."
-            return
+    private static func performExport(_ session: AVAssetExportSession) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            session.exportAsynchronously {
+                switch session.status {
+                case .completed:
+                    continuation.resume(returning: ())
+                case .cancelled:
+                    continuation.resume(throwing: CancellationError())
+                default:
+                    continuation.resume(throwing: session.error ?? VLCExportError.exportFailed)
+                }
+            }
         }
-        itemForPlayback = item
     }
 
-    private func openInternally(_ item: DownloadManager.Item) {
-        guard downloads.localURL(for: item) != nil else {
-            playbackNotice = "Bản tải cũ không phải package AVFoundation. Hãy tải lại tập này trong Cinemora."
-            return
+    private enum VLCExportError: LocalizedError {
+        case assetUnavailable
+        case noCompatibleFormat
+        case emptyOutput
+        case exportFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .assetUnavailable: "Không đọc được package HLS đã tải để tạo tệp tương thích VLC."
+            case .noCompatibleFormat: "iOS không hỗ trợ xuất package HLS này thành MP4 hoặc MOV. Bản tải vẫn còn trong Cinemora, nhưng chưa thể chuyển sang VLC."
+            case .emptyOutput: "Quá trình chuyển đổi không tạo được tệp video hợp lệ."
+            case .exportFailed: "Xuất video thất bại. Hãy kiểm tra dung lượng trống rồi thử lại."
+            }
         }
-        internalPlaybackItem = item
     }
 
-    /// Nhắc rõ vì sao bản tải đang chờ: phim chỉ tải qua Wi-Fi.
-    private func wifiBanner(_ text: String) -> some View {
+    /// Offline notice or a warning that cellular data may be consumed.
+    private func networkBanner(_ text: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "wifi.exclamationmark")
+            Image(systemName: downloads.isCellular ? "antenna.radiowaves.left.and.right" : "wifi.exclamationmark")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Color.auroraAmber)
             Text(text)
@@ -174,11 +285,15 @@ struct DownloadsScreen: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionEyebrow(text: "XEM KHI KHÔNG CÓ WIFI")
+            SectionEyebrow(text: "TẢI VỀ · MỞ BẰNG VLC")
             AuroraGradientText(text: "Đã tải xuống", font: .auroraDisplay(28))
-            Text("Phim tải xuống được lưu trên máy để xem khi không có mạng.")
+            Text("Bản tải được lưu trên máy. Bấm Mở bằng VLC để chia sẻ tệp MP4/MOV tương thích; package HLS sẽ được xuất trước nếu cần. Phụ đề rời đã lưu được gửi kèm thành tệp riêng để chọn trong VLC.")
                 .font(.auroraBody(12))
                 .foregroundStyle(Color.auroraTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Khi đang tải, dung lượng và thời gian hoàn tất là ước tính; dung lượng bản tải chính xác sẽ hiện khi hoàn tất.")
+                .font(.auroraBody(10))
+                .foregroundStyle(Color.auroraTextSecondary.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 18)
@@ -257,7 +372,7 @@ struct DownloadsScreen: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
-            Text(filter == .active ? "Đang tải song song tối đa 2 tập" : "Xoá ở đây là xoá luôn tệp trong thư mục")
+            Text(filter == .active ? "Đang tải song song tối đa 2 tập" : "Xoá mục sẽ xoá bản tải và tệp MP4/MOV đã xuất")
                 .font(.auroraBody(10))
                 .foregroundStyle(Color.auroraTextSecondary)
         }
@@ -287,9 +402,12 @@ struct DownloadsScreen: View {
 
     private func row(_ item: DownloadManager.Item) -> some View {
         let localFile = downloads.localURL(for: item)
+        let vlcFile = downloads.vlcExportURL(for: item)
+        let canOpenWithVLC = localFile != nil || vlcFile != nil
+        let isExporting = exportingItemIDs.contains(item.id)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                PosterArt(url: connectivity.isConnected ? URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL : nil)
+                PosterArt(url: downloads.posterURL(for: item), fallbackURL: connectivity.isConnected ? URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL : nil)
                     .frame(width: 54, height: 78)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 5) {
@@ -303,58 +421,106 @@ struct DownloadsScreen: View {
                         .lineLimit(1)
                     HStack(spacing: 8) {
                         statusChip(item)
-                        if item.phase == .downloading, !item.speedText.isEmpty {
-                            Text(item.speedText)
-                                .font(.auroraBody(10))
-                                .foregroundStyle(Color.auroraTextSecondary)
-                        }
                     }
                 }
                 Spacer(minLength: 0)
             }
 
-            if item.phase != .finished {
+            if item.phase == .downloading {
                 VStack(alignment: .leading, spacing: 6) {
-                    ProgressBar(value: item.progress, tint: item.phase == .downloading ? .auroraViolet : .auroraAmber)
-                    HStack(spacing: 8) {
-                        if !item.fileName.lowercased().hasSuffix(".movpkg") {
-                            Text(item.sizeText)
-                                .font(.auroraLabel(11, weight: .bold))
-                                .foregroundStyle(.white)
+                    if item.progress <= 0.001 {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color.auroraViolet)
+                            Text("Đang kết nối và chuẩn bị luồng HLS…")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraTextSecondary)
                         }
+                    } else {
+                        ProgressBar(value: item.progress, tint: .auroraViolet)
+                    }
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(item.sizeText)
+                            .font(.auroraLabel(10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
                         Text(item.percentText)
-                            .font(.auroraBody(10))
+                            .font(.auroraLabel(10, weight: .bold))
                             .foregroundStyle(Color.auroraViolet)
-                        if !item.etaText.isEmpty {
-                            Text(item.etaText)
-                                .font(.auroraBody(10))
-                                .foregroundStyle(Color.auroraTextSecondary)
-                        }
-                        Spacer(minLength: 0)
-                        if item.totalSegments > 0 && !item.fileName.lowercased().hasSuffix(".movpkg") {
-                            Text("\(item.doneSegments)/\(item.totalSegments) phân đoạn")
-                                .font(.auroraBody(10))
-                                .foregroundStyle(Color.auroraTextSecondary)
-                        }
+                    }
+                    Text("Tốc độ ước tính: \(item.speedText.isEmpty ? "Đang đo…" : item.speedText)")
+                        .font(.auroraBody(9))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                    if !item.etaText.isEmpty {
+                        Text("Thời gian còn lại: \(item.etaText)")
+                            .font(.auroraBody(9))
+                            .foregroundStyle(Color.auroraTextSecondary)
                     }
                 }
-            } else {
+            } else if item.phase == .waiting, item.message == nil {
                 HStack(spacing: 8) {
-                    if localFile == nil {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.auroraAmber)
-                        Text("Bản HLS cũ không tương thích — hãy xoá và tải lại")
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.auroraAmber)
+                    Text("Đang chờ đến lượt tải…")
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraTextSecondary)
+                }
+            } else if item.phase == .finished {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Dung lượng bản tải: \(item.sizeText)", systemImage: "internaldrive")
+                        .font(.auroraBody(10))
+                        .foregroundStyle(Color.auroraMint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    if vlcFile != nil {
+                        Label("Bản MP4/MOV sẵn sàng chia sẻ với VLC", systemImage: "checkmark.circle.fill")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraMint)
+                    } else if localFile != nil {
+                        Label("Bản HLS sẽ được xuất sang MP4/MOV khi mở bằng VLC", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                    } else {
+                        Label("Không tìm thấy bản tải hoặc tệp VLC đã xuất", systemImage: "exclamationmark.triangle.fill")
                             .font(.auroraBody(10))
                             .foregroundStyle(Color.auroraAmber)
                     }
-                    Spacer(minLength: 0)
+                }
+            }
+
+            if item.phase == .finished, let subtitleStatus = downloads.subtitleCacheStatus(for: item) {
+                Label(subtitleStatus, systemImage: "captions.bubble.fill")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(subtitleStatus.contains("đã lưu: ") ? Color.auroraMint : Color.auroraAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isExporting {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressBar(value: exportProgress[item.id] ?? 0, tint: .auroraSky)
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small).tint(Color.auroraSky)
+                        Text(exportStatus[item.id] ?? "Đang chuẩn bị bản video cho VLC…")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                        Spacer(minLength: 0)
+                        if let progress = exportProgress[item.id], progress > 0 {
+                            Text("\(Int((progress * 100).rounded()))%")
+                                .font(.auroraLabel(10, weight: .bold))
+                                .foregroundStyle(Color.auroraSky)
+                        }
+                    }
                 }
             }
 
             if let message = item.message {
                 Text(message)
                     .font(.auroraBody(11))
-                    .foregroundStyle(item.phase == .unsupported ? Color.auroraAmber : Color.auroraPink)
+                    .foregroundStyle(item.phase == .unsupported || message.localizedCaseInsensitiveContains("mạng") || message.localizedCaseInsensitiveContains("tiến trình") || message.localizedCaseInsensitiveContains("nguồn") ? Color.auroraAmber : Color.auroraPink)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -365,16 +531,22 @@ struct DownloadsScreen: View {
                 case .paused, .failed:
                     actionButton("Tải lại từ đầu", icon: "arrow.clockwise", tint: .auroraMint) { downloads.retry(item.id) }
                 case .finished:
-                    if localFile != nil {
-                        actionButton("Xem", icon: "play.fill", tint: .auroraMint) { choosePlayback(item) }
+                    if canOpenWithVLC {
+                        actionButton(isExporting ? "Đang chuẩn bị VLC…" : "Mở bằng VLC", icon: "play.rectangle.fill", tint: .auroraMint) {
+                            openWithVLC(item)
+                        }
+                        .disabled(isExporting)
+                        .opacity(isExporting ? 0.55 : 1)
                     } else {
-                        EmptyView()
+                        actionButton("Tải lại", icon: "arrow.clockwise", tint: .auroraMint) { downloads.retry(item.id) }
                     }
                 case .unsupported:
                     actionButton("Tải lại", icon: "arrow.clockwise", tint: .auroraMint) { downloads.retry(item.id) }
                 }
                 Spacer(minLength: 0)
                 actionButton("Xoá tải", icon: "trash", tint: .auroraPink) { pendingRemoval = item }
+                    .disabled(isExporting)
+                    .opacity(isExporting ? 0.45 : 1)
             }
         }
         .padding(14)
@@ -420,26 +592,6 @@ struct DownloadsScreen: View {
             .background(tint.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
-    }
-}
-
-/// Player dành riêng cho bản tải: episode chỉ có file://, không có URL mạng hay
-/// subtitle từ server, và CinemaPlayerScreen được đánh dấu offlineOnly.
-private struct OfflineDownloadPlayerScreen: View {
-    let item: DownloadManager.Item
-    let fileURL: URL
-
-    var body: some View {
-        let episode = item.offlineEpisode(fileURL: fileURL)
-        let server = MovieServer(name: item.serverName, isAi: false, episodes: [episode])
-        CinemaPlayerScreen(
-            movie: item.offlineMovie(),
-            servers: [server],
-            initialServer: 0,
-            initialEpisode: 0,
-            subtitleCustomizationEnabled: true,
-            offlineOnly: true
-        )
     }
 }
 
@@ -577,17 +729,52 @@ struct DownloadSheet: View {
                     .lineLimit(2)
                 if let item {
                     if item.phase == .downloading {
-                        ProgressBar(value: item.progress).frame(width: 140)
-                        Text(item.sizeText).font(.auroraBody(10)).foregroundStyle(Color.auroraTextSecondary)
+                        if item.progress <= 0.001 {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color.auroraViolet)
+                        } else {
+                            ProgressBar(value: item.progress).frame(width: 140)
+                        }
+                        Text(item.sizeText)
+                            .font(.auroraBody(9))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Tiến trình \(item.percentText) · \(item.etaText)")
+                            .font(.auroraBody(9))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Tốc độ ước tính: \(item.speedText.isEmpty ? "Đang đo…" : item.speedText)")
+                            .font(.auroraBody(9))
+                            .foregroundStyle(Color.auroraTextSecondary)
+                            .lineLimit(1)
                     } else {
-                        Text(item.message ?? item.phase.title)
+                        Text(item.phase == .finished ? "Đã tải xong · \(item.sizeText)" : (item.message ?? item.phase.title))
                             .font(.auroraBody(10))
                             .foregroundStyle(item.phase == .finished ? Color.auroraMint : Color.auroraTextSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             Spacer(minLength: 0)
             if let item, item.phase == .finished {
+                if !episode.availableSubtitleTracks.isEmpty {
+                    Button {
+                        _ = downloads.enqueue(movie: movie, serverName: server.name, episode: episode)
+                    } label: {
+                        Label("Sub", systemImage: "captions.bubble")
+                            .font(.auroraLabel(10, weight: .bold))
+                            .foregroundStyle(Color.auroraSky)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 7)
+                            .background(Color.auroraSky.opacity(0.13), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Tải và lưu riêng phụ đề rời để dùng trong VLC")
+                }
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundStyle(Color.auroraMint)

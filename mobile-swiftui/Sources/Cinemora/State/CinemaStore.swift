@@ -114,7 +114,9 @@ final class CinemaStore {
         if let data = localDefaults.data(forKey: accountUserCacheKey), let cached = try? decoder.decode(RemoteAccountUser.self, from: data) {
             accountUser = cached
             searchHistory = loadSearchHistory(for: cached.id)
-            CinemoraAppIconController.resetIfNotPrivileged(cached.hasSpecialPrivileges)
+            CinemoraAppIconController.activate(accountID: cached.id, hasSpecialPrivileges: cached.hasSpecialPrivileges)
+        } else {
+            CinemoraAppIconController.activate(accountID: nil, hasSpecialPrivileges: false)
         }
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
             playbackDefaults = defaults
@@ -460,7 +462,7 @@ final class CinemaStore {
         playbackDefaults.subtitlePreferences = deviceSubtitlePreferences
         savePlaybackDefaults()
         subtitlePreferencesSyncMessage = nil
-        CinemoraAppIconController.resetIfNotPrivileged(false)
+        CinemoraAppIconController.activate(accountID: nil, hasSpecialPrivileges: false)
         localDefaults.removeObject(forKey: accountUserCacheKey)
         sessionMissCount = 0
         accountDevices = []
@@ -485,7 +487,7 @@ final class CinemaStore {
             subtitlePreferencesSyncMessage = nil
             searchHistory = user.map { loadSearchHistory(for: $0.id) } ?? []
         }
-        CinemoraAppIconController.resetIfNotPrivileged(user?.hasSpecialPrivileges == true)
+        CinemoraAppIconController.activate(accountID: user?.id, hasSpecialPrivileges: user?.hasSpecialPrivileges == true)
         if let user, let data = try? JSONEncoder().encode(user) {
             localDefaults.set(data, forKey: accountUserCacheKey)
         } else {

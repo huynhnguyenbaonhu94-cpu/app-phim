@@ -167,16 +167,30 @@ final class PlaybackController: ObservableObject {
         // response chỉ trả subtitleTracks mà không điền subtitleUrl ở cấp tập,
         // nên lấy URL được caller chọn trước khi dựng master.
         let sidecarSubtitleURL = subtitleURL ?? episode.subtitleURL
-        let nativeTracks = Array((subtitleTracks.compactMap { track in track.subtitleURL.map { (id: track.id, language: track.language, url: $0) } }).prefix(12))
+        // App-cached sidecars are rendered by SubtitleController. Do not hand
+        // local VTT/SRT files to AVFoundation, which would try to compose them
+        // as media tracks and would falsely suggest native/PiP subtitle support.
+        let nativeTracks = Array((subtitleTracks.compactMap { track in
+            guard let url = track.subtitleURL, !url.isFileURL else { return nil }
+            return (id: track.id, language: track.language, url: url)
+        }).prefix(12))
         let effectiveTracks = nativeTracks.isEmpty ? sidecarSubtitleURL.map { [(id: "legacy", language: "vi", url: $0)] } ?? [] : nativeTracks
-        requestedNativeLanguage = selectedSubtitleID.flatMap { id in subtitleTracks.first(where: { $0.id == id })?.language } ?? effectiveTracks.first?.language
+        let hlsTracks = effectiveTracks.enumerated().map { index, track in
+            (id: "cinemora-track-\(index + 1)", sourceID: track.id, language: track.language, url: track.url)
+        }
+        nativeTrackKeyBySourceID = hlsTracks.reduce(into: [String: String]()) { result, track in
+            if result[track.sourceID] == nil { result[track.sourceID] = track.id }
+        }
+        let selectedSourceID = selectedSubtitleID.flatMap { id in effectiveTracks.first(where: { $0.id == id })?.id } ?? effectiveTracks.first?.id
+        requestedNativeTrackID = selectedSourceID.flatMap { nativeTrackKeyBySourceID[$0] } ?? hlsTracks.first?.id
+        requestedNativeLanguage = selectedSourceID.flatMap { id in effectiveTracks.first(where: { $0.id == id })?.language } ?? effectiveTracks.first?.language
         let subtitledURL: URL? = {
             guard localURL == nil, allowSubtitledPlaylist,
-                  !effectiveTracks.isEmpty,
+                  !hlsTracks.isEmpty,
                   let videoURL = episode.playbackURL else { return nil }
             let path = videoURL.absoluteString.lowercased()
             guard path.contains(".m3u8") || path.contains("/api/cinema/stream/") else { return nil }
-            return CinemaAPI.subtitledPlaylistURL(video: videoURL, tracks: effectiveTracks)
+            return CinemaAPI.subtitledPlaylistURL(video: videoURL, tracks: hlsTracks.map { (id: $0.id, language: $0.language, url: $0.url) })
         }()
         fallbackPlaybackURL = subtitledURL == nil ? nil : episode.playbackURL
         usedSubtitledPlaylist = subtitledURL != nil
@@ -198,7 +212,8 @@ final class PlaybackController: ObservableObject {
             // Do not compose the same VTT a second time: that can duplicate the
             // track and, more importantly, replace a valid HLS item with a plain
             // video item when the sidecar takes longer than the stream.
-            let itemSubtitleURL = subtitledURL == nil ? sidecarSubtitleURL : nil
+            let itemSubtitleURL = subtitledURL == nil && localURL == nil && sidecarSubtitleURL?.isFileURL != true
+                ? sidecarSubtitleURL : nil
             let item = await Self.makePlayerItem(videoURL: url, subtitleURL: itemSubtitleURL)
             guard !Task.isCancelled, self.activeRequestID == requestID else { return }
             item.preferredForwardBufferDuration = 8
@@ -219,7 +234,7 @@ final class PlaybackController: ObservableObject {
                         if let group = loadedGroup, !group.options.isEmpty {
                             self.legibleGroup = group
                             if self.wantsNativeSubtitles {
-                                if self.selectNativeOption(language: self.requestedNativeLanguage, item: item) {
+                                if self.selectNativeOption(trackID: self.requestedNativeTrackID, language: self.requestedNativeLanguage, item: item) {
                                     self.nativeSubtitleActive = true
                                     self.nativeSubtitleStatus = nil
                                 } else {
@@ -271,6 +286,8 @@ final class PlaybackController: ObservableObject {
     /// Nhóm phụ đề gốc của item (có khi link phát được bọc kèm phụ đề rời).
     private var legibleGroup: AVMediaSelectionGroup?
     private var legibleOption: AVMediaSelectionOption?
+    private var nativeTrackKeyBySourceID: [String: String] = [:]
+    private var requestedNativeTrackID: String?
     private var requestedNativeLanguage: String?
     @Published private(set) var nativeSubtitleStatus: String?
     /// Tập này có phụ đề rời do máy chủ/admin cung cấp hay không.
@@ -291,7 +308,7 @@ final class PlaybackController: ObservableObject {
             return
         }
         if enabled {
-            guard selectNativeOption(language: requestedNativeLanguage, item: player.currentItem) else {
+            guard selectNativeOption(trackID: requestedNativeTrackID, language: requestedNativeLanguage, item: player.currentItem) else {
                 nativeSubtitleActive = false
                 nativeSubtitleStatus = "Nguồn phát không cung cấp track phụ đề native tương ứng; phụ đề PiP chưa được bật."
                 return
@@ -311,10 +328,11 @@ final class PlaybackController: ObservableObject {
 
     /// Keep the native PiP track aligned with the in-app language picker.
     /// Outside PiP this only records the language for the next activation.
-    func selectNativeSubtitle(language: String) {
+    func selectNativeSubtitle(trackID: String, language: String) {
+        requestedNativeTrackID = nativeTrackKeyBySourceID[trackID] ?? requestedNativeTrackID
         requestedNativeLanguage = language
         guard wantsNativeSubtitles else { return }
-        guard selectNativeOption(language: language, item: player.currentItem) else {
+        guard selectNativeOption(trackID: requestedNativeTrackID, language: language, item: player.currentItem) else {
             nativeSubtitleActive = false
             nativeSubtitleStatus = "Nguồn phát không cung cấp track phụ đề native tương ứng; phụ đề PiP chưa được bật."
             return
@@ -323,20 +341,25 @@ final class PlaybackController: ObservableObject {
         nativeSubtitleStatus = nil
     }
 
-    private func selectNativeOption(language: String?, item: AVPlayerItem?) -> Bool {
+    private func selectNativeOption(trackID: String?, language: String?, item: AVPlayerItem?) -> Bool {
         guard let item, let group = legibleGroup, !group.options.isEmpty else { return false }
+        if let trackID, let exact = group.options.first(where: { $0.displayName.contains("[\(trackID)]") }) {
+            legibleOption = exact
+            item.select(exact, in: group)
+            return true
+        }
         let preferred = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let option: AVMediaSelectionOption?
         if preferred.isEmpty {
             option = group.options.first
         } else {
             let target = preferred.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
+            let targetCode = Self.languageCode(for: preferred)
             option = group.options.first { candidate in
                 let displayName = candidate.displayName.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
-                let localeID = (candidate.locale?.identifier ?? "").lowercased()
+                let localeID = candidate.locale?.identifier ?? ""
                 return displayName.contains(target)
-                    || localeID == preferred.lowercased()
-                    || localeID.hasPrefix(preferred.lowercased() + "-")
+                    || (targetCode != nil && Self.languageCode(for: localeID) == targetCode)
             }
         }
         guard let option else { return false }
@@ -345,8 +368,39 @@ final class PlaybackController: ObservableObject {
         return true
     }
 
+    private static func languageCode(for value: String) -> String? {
+        let folded = value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let aliases: [(String, String)] = [
+            ("tieng viet", "vi"), ("vietnamese", "vi"), ("viet", "vi"),
+            ("vietsub", "vi"),
+            ("tieng anh", "en"), ("english", "en"),
+            ("engsub", "en"),
+            ("tieng nhat", "ja"), ("japanese", "ja"),
+            ("tieng han", "ko"), ("korean", "ko"),
+            ("tieng trung", "zh"), ("chinese", "zh"),
+            ("tieng phap", "fr"), ("french", "fr"),
+            ("tieng tay ban nha", "es"), ("spanish", "es"),
+            ("tieng thai", "th"), ("thai", "th"),
+            ("tieng indonesia", "id"), ("indonesian", "id")
+        ]
+        if let alias = aliases.first(where: { folded == $0.0 || folded.hasPrefix($0.0 + " ") || folded.hasPrefix($0.0 + "(") }) {
+            return alias.1
+        }
+        let tag = value.replacingOccurrences(of: "_", with: "-").lowercased()
+        let code = String(tag.split(separator: "-").first ?? "")
+        return (2...3).contains(code.count) && code.allSatisfy(\.isLetter) ? code : nil
+    }
+
     private static func makePlayerItem(videoURL: URL, subtitleURL: URL?) async -> AVPlayerItem {
         guard let subtitleURL else { return AVPlayerItem(asset: AVURLAsset(url: videoURL)) }
+        // Offline sidecars are parsed by SubtitleController; raw VTT/SRT files
+        // are not AVPlayer media assets and should not delay local video startup.
+        if videoURL.isFileURL || subtitleURL.isFileURL {
+            return AVPlayerItem(asset: AVURLAsset(url: videoURL))
+        }
         // External VTT is only composed for non-HLS/local items. HLS gets its
         // native PiP subtitle through the server-provided master playlist;
         // AVFoundation cannot reliably turn an arbitrary remote VTT into a
@@ -594,6 +648,17 @@ final class SubtitleController: ObservableObject {
     }
     private static func fetchText(_ url: URL?) async -> String? {
         guard let url else { return nil }
+        if url.isFileURL {
+            let maxBytes = 8 * 1024 * 1024
+            return await Task.detached(priority: .utility) {
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                      values.isRegularFile == true,
+                      let size = values.fileSize,
+                      size > 0, size <= maxBytes,
+                      let data = try? Data(contentsOf: url) else { return nil }
+                return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+            }.value
+        }
         var request = URLRequest(url: url)
         // Vài CDN phim chặn client lạ; gửi header giống trình duyệt để chắc chắn tải được.
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
@@ -805,6 +870,7 @@ final class PictureInPictureCoordinator: NSObject, ObservableObject, AVPictureIn
 @MainActor
 struct CinemaPlayerScreen: View {
     let movie: Movie
+    let localArtworkURL: URL?
     let servers: [MovieServer]
     let initialServer: Int
     let initialEpisode: Int
@@ -930,8 +996,9 @@ struct CinemaPlayerScreen: View {
             .lowercased()
     }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, offlineOnly: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
+    init(movie: Movie, localArtworkURL: URL? = nil, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, offlineOnly: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
         self.movie = movie
+        self.localArtworkURL = localArtworkURL
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
@@ -1169,7 +1236,15 @@ struct CinemaPlayerScreen: View {
 
                 if pictureInPictureEnabled && movie.allowPip != false && pipCoordinator.isSupported {
                     Button {
-                        pipCoordinator.isActive ? pipCoordinator.stop() : pipCoordinator.start()
+                        if pipCoordinator.isActive {
+                            pipCoordinator.stop()
+                        } else {
+                            // Select the native AVPlayer track before the system
+                            // snapshots the item into PiP. The delegate callback
+                            // repeats this when PiP actually becomes active.
+                            playback.setNativeSubtitles(true)
+                            pipCoordinator.start()
+                        }
                         scheduleHide()
                     } label: {
                         Image(systemName: pipCoordinator.isActive ? "pip.exit" : "pip.enter")
@@ -1527,7 +1602,7 @@ struct CinemaPlayerScreen: View {
                     ForEach(subtitles.availableTracks) { track in
                         Button {
                             subtitles.selectTrack(id: track.id)
-                            _ = playback.selectNativeSubtitle(language: track.language)
+                            playback.selectNativeSubtitle(trackID: track.id, language: track.language)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: subtitles.selectedTrackID == track.id ? "checkmark.circle.fill" : "circle")
@@ -2320,7 +2395,7 @@ struct CinemaPlayerScreen: View {
 
     private var playerPlaceholder: some View {
         ZStack {
-            PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL)
+            PosterArt(url: localArtworkURL ?? movie.backdropURL, fallbackURL: movie.posterURL)
                 .ignoresSafeArea()
                 .overlay(Color.black.opacity(0.58))
             LinearGradient(

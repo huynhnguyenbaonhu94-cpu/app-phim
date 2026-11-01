@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Khối cài đặt thư mục lưu phim tải về, dùng chung trong màn Đã tải xuống.
+/// Khối cài đặt thư mục chứa bản xuất MP4/MOV và các tệp tải đời cũ.
 struct DownloadFolderSection: View {
     @Environment(DownloadManager.self) private var downloads
     @State private var showFolderPicker = false
@@ -22,7 +22,7 @@ struct DownloadFolderSection: View {
             }
 
             VStack(spacing: 10) {
-                primaryButton("Xem tệp đã tải", icon: "folder") { showBrowser = true }
+                primaryButton("Xem tệp đã xuất", icon: "folder") { showBrowser = true }
                 secondaryRow("Chọn thư mục khác", icon: "folder.badge.plus") { showFolderPicker = true }
                 secondaryRow("Dùng thư mục mặc định", icon: "arrow.uturn.backward", enabled: !downloads.isUsingDefaultFolder) {
                     showResetConfirm = true
@@ -42,7 +42,7 @@ struct DownloadFolderSection: View {
             Button("Dùng mặc định") { downloads.useDefaultFolder() }
             Button("Huỷ", role: .cancel) { }
         } message: {
-            Text("Các tập đã tải sẽ được chuyển về thư mục mặc định của Cinemora. Tệp không chuyển được vẫn nằm ở thư mục cũ.")
+            Text("Các tệp MP4/MOV đã xuất sẽ được chuyển về thư mục mặc định. Package HLS do iOS quản lý không thể di chuyển; tệp cũ không chuyển được vẫn nằm ở thư mục trước.")
         }
     }
 
@@ -62,7 +62,7 @@ struct DownloadFolderSection: View {
                         .font(.auroraLabel(13, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(downloads.isUsingDefaultFolder ? "Thư mục mặc định của Cinemora" : "Thư mục bạn đã chọn")
+                    Text(downloads.isUsingDefaultFolder ? "Nơi lưu bản xuất của Cinemora" : "Thư mục lưu bản video đã xuất")
                         .font(.auroraBody(11))
                         .foregroundStyle(Color.auroraTextSecondary)
                 }
@@ -80,6 +80,10 @@ struct DownloadFolderSection: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(Color.auroraTextSecondary)
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("AVFoundation quản lý package HLS trong vùng ứng dụng. MP4/MOV xuất để chia sẻ với VLC sẽ nằm trong thư mục này.")
+                .font(.auroraBody(10))
+                .foregroundStyle(Color.auroraTextTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
@@ -191,7 +195,7 @@ struct DownloadedFilesBrowser: View {
                         }
 
                         if entries.isEmpty {
-                            Text("Thư mục đang trống. Hãy tải một tập phim về máy trước.")
+                            Text("Chưa có tệp MP4/MOV đã xuất. Bản tải HLS vẫn có thể phát offline trong Cinemora.")
                                 .font(.auroraBody(12))
                                 .foregroundStyle(Color.auroraTextSecondary)
                                 .frame(maxWidth: .infinity)
@@ -270,14 +274,17 @@ struct DownloadedFilesBrowser: View {
     }
 
     private func reload() {
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        let supportedExtensions: Set<String> = ["mp4", "mov", "m4v", "mkv", "avi", "m3u8", "ts"]
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: downloads.root,
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles]
         )) ?? []
-        entries = urls.map { url in
+        entries = urls.compactMap { url in
             let values = try? url.resourceValues(forKeys: Set(keys))
+            guard values?.isRegularFile == true,
+                  supportedExtensions.contains(url.pathExtension.lowercased()) else { return nil }
             return FileEntry(
                 url: url,
                 size: Int64(values?.fileSize ?? 0),

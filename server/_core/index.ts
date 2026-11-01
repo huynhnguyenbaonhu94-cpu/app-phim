@@ -19,7 +19,7 @@ import { initializeDatabase } from "../db";
 import { registerSpecialChatMediaRoute } from "../specialChat";
 import { startR2BackupScheduler } from "../r2Backup";
 import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
-import { buildSubtitledPlaylist } from "../subtitledPlaylist";
+import { attachSidecarSubtitlesToMaster, buildSubtitleMediaPlaylist, buildSubtitledPlaylist } from "../subtitledPlaylist";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
 const tvProxyOrigin = "https://baothanhhoa.vn";
@@ -293,17 +293,28 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
   return lastResponse;
 }
 
+  // EXT-X-MEDIA:TYPE=SUBTITLES must point to a subtitle Media Playlist, not
+  // directly to a standalone .vtt segment. The playlist below wraps that VTT.
+  app.get("/api/cinema/subtitle-media.m3u8", (req, res) => {
+    const rawURL = typeof req.query.url === "string" ? req.query.url.trim() : "";
+    const playlist = buildSubtitleMediaPlaylist(rawURL, (url) => registerStreamSourceFromPlaylist(url) || url);
+    if (!playlist) return res.status(400).send("Link phụ đề không hợp lệ");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    return res.status(200).send(playlist);
+  });
+
   /**
-   * Master playlist bọc link M3U8 kèm phụ đề rời.
-   *
-   * AVFoundation chỉ hiện phụ đề trong PiP khi phụ đề thuộc media của
-   * AVPlayerItem; phụ đề rời (.vtt) thì không. Bọc bằng EXT-X-MEDIA để trình
-   * phát có nhóm phụ đề hợp lệ — nhờ đó PiP hiện phụ đề đúng tiến trình phim.
-   * Máy chủ chỉ sinh playlist nhỏ; video và phụ đề vẫn do thiết bị tải trực tiếp.
+   * Master playlist bọc link M3U8 kèm phụ đề rời. Khi nguồn là master HLS,
+   * gắn track vào từng variant thay vì đặt master lồng trong một variant.
    */
   app.get("/api/cinema/subtitled.m3u8", async (req, res) => {
     const read = (value: unknown) => (typeof value === "string" ? value.trim() : "");
-    const origin = `${req.protocol}://${req.get("host")}`;
+    const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol = forwardedProto === "https" ? "https" : req.protocol;
+    let origin = `${protocol}://${req.get("host")}`;
+    try { if (process.env.PUBLIC_BASE_URL) origin = new URL(process.env.PUBLIC_BASE_URL).origin; } catch { /* Use request origin. */ }
     const absolute = (raw: string) => {
       if (/^https?:\/\//i.test(raw)) return raw;
       if (raw.startsWith("/")) return `${origin}${raw}`;
@@ -318,7 +329,46 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
     const languages = values(req.query.lang);
     const tracks = subs.map((raw, index) => ({ id: read(ids[index]) || `track-${index + 1}`, language: read(languages[index]) || "und", name: read(languages[index]) || `Phụ đề ${index + 1}`, url: absolute(read(raw)) })).filter(track => track.url) as Array<{ id: string; language: string; name: string; url: string }>;
     if (!tracks.length && read(req.query.sub)) tracks.push({ id: "legacy", language: "vi", name: "Phụ đề", url: absolute(read(req.query.sub)) });
-    const playlist = videoURL ? buildSubtitledPlaylist(videoURL, tracks) : null;
+
+    // App API URLs use short-lived server stream tokens. Resolve that token
+    // server-side so a real upstream master can be amended without nesting one
+    // master playlist as another playlist's variant URI.
+    if (videoURL && tracks.length) {
+      try {
+        const parsedVideo = new URL(videoURL);
+        const token = parsedVideo.pathname.match(/\/api\/cinema\/stream\/([^/]+)\/?$/)?.[1];
+        const source = token ? getStreamSource(token) : null;
+        if (source) {
+          const upstream = await fetchStreamUpstream(source);
+          if (!upstream?.ok) return res.status(502).send("Không đọc được playlist HLS để gắn phụ đề PiP");
+          const contentType = upstream.headers.get("content-type") || "";
+          if (source.includes(".m3u8") || contentType.includes("mpegurl") || contentType.includes("vnd.apple")) {
+            const sourcePlaylist = await upstream.text();
+            if (/#EXT-X-STREAM-INF:/m.test(sourcePlaylist)) {
+              const playlistURL = upstream.url || source;
+              const attached = attachSidecarSubtitlesToMaster(
+                sourcePlaylist,
+                tracks,
+                origin,
+                playlistURL,
+                (url) => registerStreamSourceFromPlaylist(url) || url,
+              );
+              if (!attached) return res.status(502).send("Không thể tạo track phụ đề HLS cho PiP");
+              res.setHeader("Access-Control-Allow-Origin", "*");
+              res.setHeader("Cache-Control", "no-store");
+              res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+              return res.status(200).send(attached);
+            }
+          }
+        }
+      } catch (error) {
+        // Upstream errors can embed credential-bearing URLs; keep diagnostics non-sensitive.
+        console.warn("[Cinema] Không thể kiểm tra playlist cho phụ đề PiP.");
+        return res.status(502).send("Không đọc được playlist HLS để gắn phụ đề PiP");
+      }
+    }
+
+    const playlist = videoURL ? buildSubtitledPlaylist(videoURL, tracks, origin) : null;
     if (!playlist) return res.status(400).send("Thiếu link M3U8 hoặc link phụ đề hợp lệ");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store");

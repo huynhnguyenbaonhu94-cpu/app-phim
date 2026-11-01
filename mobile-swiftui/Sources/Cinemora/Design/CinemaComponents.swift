@@ -172,6 +172,21 @@ struct PosterArt: View {
         for candidate in candidates {
             for attempt in 0..<retryDelays.count {
                 do {
+                    if candidate.isFileURL {
+                        let loaded = await Task.detached(priority: .utility) {
+                            guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                                  values.isRegularFile == true,
+                                  let size = values.fileSize,
+                                  size > 0, size <= 5 * 1024 * 1024 else { return nil }
+                            return try? Data(contentsOf: candidate)
+                        }.value
+                        guard let data = loaded, !Task.isCancelled,
+                              let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { break }
+                        guard !Task.isCancelled else { return }
+                        PosterImageCache.shared.setObject(decoded, forKey: candidate as NSURL)
+                        image = decoded
+                        return
+                    }
                     var request = URLRequest(url: candidate)
                     request.cachePolicy = .returnCacheDataElseLoad
                     request.timeoutInterval = 20

@@ -503,11 +503,33 @@ export async function reorderMovieEpisodes(sourceId: number, ids: number[]): Pro
 
 /** Chuẩn hoá phụ đề: chuyển SRT sang WebVTT vì AVPlayer chỉ đọc được VTT. */
 export function toWebVTT(raw: string): string {
-  const text = raw.replace(/\r\n?/g, "\n").trimStart();
-  if (/^WEBVTT/i.test(text)) return text;
-  const withHeader = text.replace(/^(\d+)\s*$/gm, "");
-  const converted = withHeader.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-  return `WEBVTT\n\n${converted.trim()}\n`;
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trimStart();
+  const normalizedTimes = text.replace(/\b(?:\d{1,3}:){0,2}\d{1,2}[,;.]\d{1,3}\b/g, (stamp) => {
+    const match = /^([\d:]+)[,;.](\d{1,3})$/.exec(stamp);
+    if (!match) return stamp;
+    const parts = match[1].split(":").map(Number);
+    if (parts.some((part) => !Number.isFinite(part) || part < 0)) return stamp;
+    const fraction = match[2].padEnd(3, "0");
+    const pad = (value: number) => String(value).padStart(2, "0");
+    if (parts.length === 3) {
+      return `${pad(parts[0])}:${pad(parts[1])}:${pad(parts[2])}.${fraction}`;
+    }
+    let totalSeconds: number;
+    if (parts.length === 1) totalSeconds = parts[0];
+    else if (parts.length === 2) totalSeconds = parts[0] * 60 + parts[1];
+    else return stamp;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    return hours > 0
+      ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${fraction}`
+      : `${pad(minutes)}:${pad(seconds)}.${fraction}`;
+  });
+  if (/^WEBVTT/i.test(normalizedTimes)) {
+    return normalizedTimes.endsWith("\n") ? normalizedTimes : `${normalizedTimes}\n`;
+  }
+  const withoutCueNumbers = normalizedTimes.replace(/^(\d+)\s*$/gm, "");
+  return `WEBVTT\n\n${withoutCueNumbers.trim()}\n`;
 }
 
 /** Lưu file phụ đề admin tải lên và trả về URL công khai. */

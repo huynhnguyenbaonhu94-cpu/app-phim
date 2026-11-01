@@ -16,9 +16,12 @@ enum OfflinePlaybackSupport {
             case .available:
                 return "Đã phát hiện VLC. iOS sẽ chuyển tệp qua bảng chia sẻ để VLC nhận quyền mở tệp đúng cách."
             case .notInstalled:
-                return "Chưa phát hiện VLC trên thiết bị. Hãy cài VLC nếu muốn mở ngoài app; bạn vẫn có thể phát bằng Cinemora offline."
+                return "Chưa phát hiện VLC trên thiết bị. Hãy cài VLC rồi thử chia sẻ tệp từ mục Đã tải."
             case .unsupportedFile(let extensionName):
-                return "Định dạng .\(extensionName) không được gửi sang VLC từ bản tải này. Hãy phát bằng Cinemora."
+                if extensionName == "movpkg" {
+                    return "Bản HLS được iOS quản lý nên không mở trực tiếp bằng VLC. Hãy xuất MP4/MOV rồi chia sẻ sang VLC."
+                }
+                return "Định dạng .\(extensionName) không thể gửi trực tiếp sang VLC từ bản tải này."
             }
         }
     }
@@ -30,7 +33,7 @@ enum OfflinePlaybackSupport {
             var isDirectory: ObjCBool = false
             guard url.isFileURL, FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
                   let children = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil), !children.isEmpty else { return false }
-            return true
+            return AVURLAsset(url: url).assetCache?.isPlayableOffline == true
         }
         guard url.isFileURL,
               let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
@@ -119,7 +122,7 @@ extension DownloadManager.Item {
         )
     }
 
-    func offlineEpisode(fileURL: URL) -> MovieEpisode {
+    func offlineEpisode(fileURL: URL, subtitleTracks: [MovieEpisodeSubtitleTrack] = []) -> MovieEpisode {
         MovieEpisode(
             name: episodeName,
             slug: episodeSlug,
@@ -130,7 +133,9 @@ extension DownloadManager.Item {
             subtitleUrl: nil,
             subtitleLabel: nil,
             bilingualSubtitleUrl: nil,
-            subtitleTracks: [],
+            // DownloadManager has already verified each local file. Do not put
+            // remote episode-level subtitle URLs on an offline episode.
+            subtitleTracks: subtitleTracks.filter { $0.subtitleURL?.isFileURL == true },
             qualities: nil,
             localFileURL: fileURL
         )
@@ -142,10 +147,10 @@ extension DownloadManager.Item {
 /// reliable cross-app file transfer; this system controller grants compatible
 /// apps the file through the supported share extension mechanism.
 struct OfflineFileActivityView: UIViewControllerRepresentable {
-    let fileURL: URL
+    let fileURLs: [URL]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+        UIActivityViewController(activityItems: fileURLs, applicationActivities: nil)
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
