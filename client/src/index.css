@@ -5138,3 +5138,52 @@ select:-webkit-autofill {
   .mobile-search-panel-caption { font-size: 9px; }
   .mobile-search-field { padding-left: 11px; }
 }
+
+
+/* Durable catalog poster/thumbnail R2 backfill controls */
+.admin-r2-artwork-card { margin-top: 16px; }
+.admin-r2-artwork-card .admin-r2-status-heading { align-items: flex-start; }
+.admin-r2-artwork-card .admin-r2-status-heading > div { display: grid; gap: 2px; min-width: 0; }
+.admin-r2-artwork-card .admin-r2-status-heading p { max-width: 740px; margin: 8px 0 0; color: #8c96a3; font-size: 10px; line-height: 1.55; }
+.admin-r2-backfill-pill { display: inline-flex; align-items: center; flex: 0 0 auto; min-height: 29px; padding: 0 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; color: #a4acb7; background: rgba(255,255,255,.04); font-size: 9px; font-weight: 700; white-space: nowrap; }
+.admin-r2-backfill-pill--running { color: #f3d17f; border-color: rgba(243,209,127,.25); background: rgba(243,209,127,.08); }
+.admin-r2-backfill-pill--paused { color: #c8cbd2; border-color: rgba(200,203,210,.2); background: rgba(200,203,210,.06); }
+.admin-r2-backfill-pill--completed { color: #c5ee88; border-color: rgba(197,238,136,.25); background: rgba(197,238,136,.08); }
+.admin-r2-backfill-pill--completed_with_errors, .admin-r2-backfill-pill--failed { color: #ffaaa3; border-color: rgba(255,170,163,.24); background: rgba(255,170,163,.07); }
+.admin-r2-backfill-progress-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+.admin-r2-backfill-progress-item { display: grid; gap: 9px; min-width: 0; padding: 14px; border: 1px solid rgba(255,255,255,.08); border-radius: 13px; background: rgba(0,0,0,.13); }
+.admin-r2-backfill-progress-item > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.admin-r2-backfill-progress-item > div:first-child span { color: #9aa3af; font-size: 10px; }
+.admin-r2-backfill-progress-item > div:first-child strong { color: #e8ebef; font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.admin-r2-backfill-progress-item small { overflow-wrap: anywhere; color: #707b89; font-size: 9px; line-height: 1.45; }
+.admin-r2-backfill-track { overflow: hidden; width: 100%; height: 7px; border: 1px solid rgba(255,255,255,.055); border-radius: 999px; background: rgba(255,255,255,.055); }
+.admin-r2-backfill-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #a5cc4a, #e0f58a); box-shadow: 0 0 14px rgba(210,243,107,.25); transition: width .3s ease; }
+.admin-r2-backfill-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
+.admin-r2-backfill-stat-grid > div { display: grid; gap: 5px; min-width: 0; padding: 11px 12px; border: 1px solid rgba(255,255,255,.075); border-radius: 11px; background: rgba(0,0,0,.1); }
+.admin-r2-backfill-stat-grid span { color: #798390; font-size: 9px; }
+.admin-r2-backfill-stat-grid strong { color: #e6e9ed; font: 600 16px 'Space Grotesk'; font-variant-numeric: tabular-nums; }
+.admin-r2-backfill-stat-grid .has-error strong { color: #ffaaa3; }
+.admin-r2-backfill-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.admin-r2-backfill-actions .button { min-height: 35px; }
+.admin-r2-backfill-busy { display: inline-flex; align-items: center; gap: 6px; color: #98a1ad; font-size: 9px; }
+.admin-r2-backfill-busy svg { animation: admin-r2-backfill-spin 1s linear infinite; }
+@keyframes admin-r2-backfill-spin { to { transform: rotate(360deg); } }
+.admin-r2-backfill-error { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid rgba(255,140,130,.18); border-radius: 10px; color: #e9a7a1; background: rgba(255,120,110,.055); font-size: 10px; line-height: 1.5; }
+.admin-r2-backfill-error svg { flex: 0 0 auto; margin-top: 1px; }
+.admin-r2-backfill-failures { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(0,0,0,.11); }
+.admin-r2-backfill-failures > strong { display: flex; align-items: center; gap: 7px; color: #e8c4a5; font-size: 10px; }
+.admin-r2-backfill-failures ul { display: grid; gap: 6px; max-height: 210px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.admin-r2-backfill-failures li { display: grid; gap: 3px; padding: 8px 9px; border-radius: 8px; background: rgba(255,255,255,.025); }
+.admin-r2-backfill-failures li span { overflow-wrap: anywhere; color: #cbd1d8; font-size: 9px; }
+.admin-r2-backfill-failures li small { overflow-wrap: anywhere; color: #818b98; font-size: 8px; line-height: 1.4; }
+.admin-r2-backfill-note { margin: 0; color: #77818e; font-size: 9px; line-height: 1.55; }
+@media (max-width: 680px) {
+  .admin-r2-backfill-progress-grid { grid-template-columns: 1fr; }
+  .admin-r2-backfill-stat-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .admin-r2-artwork-card .admin-r2-status-heading { flex-direction: column; }
+  .admin-r2-backfill-actions .button { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-r2-backfill-track > span { transition: none; }
+  .admin-r2-backfill-busy svg { animation: none; }
+}

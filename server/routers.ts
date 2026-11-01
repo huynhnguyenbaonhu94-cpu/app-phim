@@ -44,6 +44,7 @@ import { listSpecialChatConversations, listSpecialChatMessages, markSpecialChatC
 import { checkR2Connection, getBackupStatus, runR2Backup } from "./r2Backup";
 import { getR2PublicSettings, saveR2Settings } from "./r2Storage";
 import { getAdminDashboardStats } from "./adminDashboard";
+import { getPosterBackfillStatus, pausePosterBackfill, resumePosterBackfill, retryFailedPosterBackfill, startPosterBackfill } from "./movieArtworkBackfill";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -634,6 +635,11 @@ export const appRouter = router({
     runBackup: adminProcedure.input(z.object({}).optional()).mutation(() => runR2Backup()),
     getBackupStatus: adminProcedure.query(() => getBackupStatus()),
     updateBackupSchedule: adminProcedure.input(z.object({ enabled: z.boolean(), frequency: z.enum(["daily", "weekly"]), scheduleHourVietnam: z.number().int().min(0).max(23) })).mutation(({ input }) => saveR2Settings({ backupEnabled: input.enabled, backupFrequency: input.frequency, scheduleHourVietnam: input.scheduleHourVietnam })),
+    getPosterBackfillStatus: adminProcedure.query(() => getPosterBackfillStatus()),
+    startPosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => startPosterBackfill()),
+    pausePosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => pausePosterBackfill()),
+    resumePosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => resumePosterBackfill()),
+    retryFailedPosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => retryFailedPosterBackfill()),
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({

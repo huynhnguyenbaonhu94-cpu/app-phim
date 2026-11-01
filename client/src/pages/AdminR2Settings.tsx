@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock3, Cloud, DatabaseBackup, KeyRound, Link as LinkIcon, RefreshCw, Save, ShieldCheck, TestTube2 } from "lucide-react";
+import { CheckCircle2, CircleAlert, Clock3, Cloud, DatabaseBackup, Image, KeyRound, Link as LinkIcon, Loader2, Pause, Play, RefreshCw, RotateCcw, Save, ShieldCheck, TestTube2 } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -58,10 +58,15 @@ export default function AdminR2Settings() {
   const [schedule, setSchedule] = useState<BackupSchedule>({ enabled: false, frequency: "daily", scheduleHourVietnam: 9 });
   const settings = trpc.adminR2.getSettings.useQuery(undefined, { enabled: user?.role === "admin", retry: false });
   const backupStatusQuery = trpc.adminR2.getBackupStatus.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 10_000 });
+  const artworkBackfillQuery = trpc.adminR2.getPosterBackfillStatus.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 5_000 });
   const saveSettings = trpc.adminR2.saveSettings.useMutation();
   const testConnection = trpc.adminR2.testConnection.useMutation();
   const runBackup = trpc.adminR2.runBackup.useMutation();
   const updateBackupSchedule = trpc.adminR2.updateBackupSchedule.useMutation();
+  const startArtworkBackfill = trpc.adminR2.startPosterBackfill.useMutation();
+  const pauseArtworkBackfill = trpc.adminR2.pausePosterBackfill.useMutation();
+  const resumeArtworkBackfill = trpc.adminR2.resumePosterBackfill.useMutation();
+  const retryArtworkBackfill = trpc.adminR2.retryFailedPosterBackfill.useMutation();
 
   useEffect(() => {
     const value = settings.data;
@@ -185,6 +190,25 @@ export default function AdminR2Settings() {
     }
   }
 
+  async function controlArtworkBackfill(action: "start" | "pause" | "resume" | "retry") {
+    try {
+      if (action === "start") await startArtworkBackfill.mutateAsync({});
+      else if (action === "pause") await pauseArtworkBackfill.mutateAsync({});
+      else if (action === "resume") await resumeArtworkBackfill.mutateAsync({});
+      else await retryArtworkBackfill.mutateAsync({});
+      await artworkBackfillQuery.refetch();
+      const messages = {
+        start: "Đã bắt đầu quét và sao lưu poster/thumbnail lên R2.",
+        pause: "Đã yêu cầu tạm dừng sau ảnh đang xử lý.",
+        resume: "Đã tiếp tục từ checkpoint đã lưu.",
+        retry: "Đã đưa các ảnh lỗi vào hàng chờ thử lại.",
+      };
+      toast.success(messages[action]);
+    } catch (error) {
+      toast.error("Không thể điều khiển backfill", { description: error instanceof Error ? error.message : "Hãy kiểm tra cấu hình R2 và thử lại." });
+    }
+  }
+
   const status = backupStatusQuery.data as BackupStatus | undefined;
   const latest = status?.latest;
   const statusLabel = status?.running || latest?.status === "running" ? "Đang chạy" : latest?.status === "completed" ? "Thành công" : latest?.status === "failed" ? "Lỗi" : "Chưa chạy";
@@ -192,10 +216,21 @@ export default function AdminR2Settings() {
   const encryptionReady = settings.data?.encryptionKeyConfigured !== false;
   const credentialsReady = Boolean(settings.data?.hasAccessKeyId && settings.data?.hasSecretAccessKey);
   const r2Ready = Boolean(settings.data?.configured);
+  const artworkRun = artworkBackfillQuery.data?.run;
+  const artworkCounts = artworkBackfillQuery.data?.counts;
+  const artworkRunning = artworkRun?.status === "running";
+  const artworkPaused = artworkRun?.status === "paused";
+  const artworkCanRetry = (artworkRun?.status === "completed_with_errors" || artworkRun?.status === "failed") && Boolean(artworkCounts?.failed);
+  const artworkControlPending = startArtworkBackfill.isPending || pauseArtworkBackfill.isPending || resumeArtworkBackfill.isPending || retryArtworkBackfill.isPending;
+  const artworkStatusLabel = artworkRun?.status === "running" ? "Đang chạy"
+    : artworkRun?.status === "paused" ? "Đã tạm dừng"
+      : artworkRun?.status === "completed" ? "Hoàn tất"
+        : artworkRun?.status === "completed_with_errors" ? "Hoàn tất · có ảnh lỗi"
+          : artworkRun?.status === "failed" ? "Lỗi tác vụ" : "Chưa chạy";
 
   return <PageShell><main className="content-wrap inner-page admin-r2-page">
     <div className="page-topline"><Link href="/admin/accounts" className="back-link">← Tài khoản</Link><span className="result-note"><Link href="/admin/accounts" className="text-link">Quản lý tài khoản</Link> · <Link href="/admin/special-chat" className="text-link">Chat đặc quyền</Link> · R2 backup</span></div>
-    <SectionHeading eyebrow="CINEMORA ADMIN · STORAGE" title="Cloudflare R2 & backup" action={<button className="admin-tv-refresh" onClick={() => { void settings.refetch(); void backupStatusQuery.refetch(); }} disabled={Boolean(settings.isFetching || backupStatusQuery.isFetching)} title="Cập nhật trạng thái"><RefreshCw size={15} /></button>} />
+    <SectionHeading eyebrow="CINEMORA ADMIN · STORAGE" title="Cloudflare R2 & backup" action={<button className="admin-tv-refresh" onClick={() => { void settings.refetch(); void backupStatusQuery.refetch(); void artworkBackfillQuery.refetch(); }} disabled={Boolean(settings.isFetching || backupStatusQuery.isFetching || artworkBackfillQuery.isFetching)} title="Cập nhật trạng thái"><RefreshCw size={15} /></button>} />
     <p className="admin-r2-intro">Lưu tệp chat riêng tư, ảnh poster/thumbnail và phụ đề admin upload vào object storage; sao lưu database theo lịch. Tệp đã tồn tại trong thư mục uploads cũ không bị xóa hoặc tự chuyển. Secret chỉ được gửi khi nhập mới và không bao giờ trả về trình duyệt.</p>
 
     <section className="admin-r2-grid">
@@ -232,6 +267,51 @@ export default function AdminR2Settings() {
         <div className="admin-r2-timezone-note"><Clock3 size={14} /><span>Lịch chạy theo giờ địa phương Việt Nam (UTC+7), không phụ thuộc múi giờ trên máy chủ. Giờ cũ đã được quy đổi để giữ nguyên thời điểm chạy tương đương.</span></div>
         <div className="admin-r2-retention"><strong>Giữ lại backup</strong><span>Backup không tự xóa để tránh mất dữ liệu. Nếu muốn giới hạn thời gian lưu, tạo lifecycle rule trong cài đặt bucket Cloudflare R2 cho prefix <code>backups/</code>; kiểm tra chính sách khôi phục trước khi bật xóa tự động.</span><a href="https://developers.cloudflare.com/r2/buckets/object-lifecycles/" target="_blank" rel="noreferrer">Hướng dẫn R2 Object Lifecycle</a></div>
       </div>
+    </section>
+
+    <section className="admin-r2-status-card admin-r2-artwork-card">
+      <div className="admin-r2-status-heading">
+        <div><span className="eyebrow">POSTER & THUMBNAIL</span><h2>Sao lưu artwork catalog lên R2</h2><p>Quét danh sách phim theo từng trang, khử trùng lặp URL và lưu checkpoint để có thể tiếp tục sau khi Node.js khởi động lại.</p></div>
+        <span className={`admin-r2-backfill-pill admin-r2-backfill-pill--${artworkRun?.status || "idle"}`}>{artworkStatusLabel}</span>
+      </div>
+      {artworkBackfillQuery.error && <p className="admin-r2-backfill-error"><CircleAlert size={15} /> Không đọc được trạng thái backfill. Hãy tải lại trang hoặc kiểm tra kết nối database.</p>}
+      <div className="admin-r2-backfill-progress-grid">
+        <div className="admin-r2-backfill-progress-item">
+          <div><span>Quét danh mục</span><strong>{(artworkRun?.pagesCompleted || 0).toLocaleString("vi-VN")} / {artworkRun?.pagesTotal ? artworkRun.pagesTotal.toLocaleString("vi-VN") : "đang xác định"} trang</strong></div>
+          <div className="admin-r2-backfill-track" role="progressbar" aria-label="Tiến độ quét danh mục" aria-valuemin={0} aria-valuemax={100} aria-valuenow={artworkRun?.pageProgress ?? 0}><span style={{ width: `${artworkRun?.pageProgress ?? 0}%` }} /></div>
+          <small>{artworkRun?.currentKindLabel ? `Đang ở danh mục: ${artworkRun.currentKindLabel} · trang ${artworkRun.currentPage}` : "Tổng số trang được cập nhật khi từng danh mục được đọc."}</small>
+        </div>
+        <div className="admin-r2-backfill-progress-item">
+          <div><span>Xử lý ảnh đã phát hiện</span><strong>{(artworkCounts?.processed || 0).toLocaleString("vi-VN")} / {(artworkCounts?.total || 0).toLocaleString("vi-VN")}</strong></div>
+          <div className="admin-r2-backfill-track" role="progressbar" aria-label="Tiến độ xử lý ảnh đã phát hiện" aria-valuemin={0} aria-valuemax={100} aria-valuenow={artworkRun?.imageProgress ?? 0}><span style={{ width: `${artworkRun?.imageProgress ?? 0}%` }} /></div>
+          <small>{artworkRun?.currentItemName ? `Đang xử lý: ${artworkRun.currentItemName}` : `Cập nhật gần nhất: ${formatDate(artworkRun?.heartbeatAt)}`}</small>
+        </div>
+      </div>
+      <div className="admin-r2-backfill-stat-grid">
+        <div><span>Trang đã quét</span><strong>{(artworkRun?.pagesCompleted || 0).toLocaleString("vi-VN")}</strong></div>
+        <div><span>Ảnh đã phát hiện</span><strong>{(artworkCounts?.total || 0).toLocaleString("vi-VN")}</strong></div>
+        <div><span>Lưu được vào R2</span><strong>{(artworkCounts?.succeeded || 0).toLocaleString("vi-VN")}</strong></div>
+        <div className={artworkCounts?.failed ? "has-error" : ""}><span>Cần thử lại</span><strong>{(artworkCounts?.failed || 0).toLocaleString("vi-VN")}</strong></div>
+      </div>
+      {artworkRun?.lastError && <p className="admin-r2-backfill-error"><CircleAlert size={15} /> {artworkRun.lastError}</p>}
+      {!r2Ready && <p className="admin-r2-field-hint">Hãy cấu hình và kiểm tra kết nối R2 trước khi chạy. Tác vụ sẽ không ghi vào local storage thay cho R2.</p>}
+      <div className="admin-r2-backfill-actions">
+        {artworkRunning ? (
+          <button type="button" className="button button-ghost" disabled={artworkControlPending} onClick={() => void controlArtworkBackfill("pause")}><Pause size={14} /> {pauseArtworkBackfill.isPending ? "Đang tạm dừng…" : "Tạm dừng"}</button>
+        ) : artworkPaused ? (
+          <button type="button" className="button button-primary" disabled={artworkControlPending || !r2Ready} onClick={() => void controlArtworkBackfill("resume")}><Play size={14} /> {resumeArtworkBackfill.isPending ? "Đang tiếp tục…" : "Tiếp tục"}</button>
+        ) : (
+          <button type="button" className="button button-primary" disabled={artworkControlPending || !r2Ready} onClick={() => void controlArtworkBackfill("start")}><Image size={14} /> {startArtworkBackfill.isPending ? "Đang khởi tạo…" : artworkRun?.status && artworkRun.status !== "idle" ? "Quét lại catalog" : "Bắt đầu backfill"}</button>
+        )}
+        {artworkCanRetry && !artworkRunning && !artworkPaused && <button type="button" className="button button-ghost" disabled={artworkControlPending || !r2Ready} onClick={() => void controlArtworkBackfill("retry")}><RotateCcw size={14} /> {retryArtworkBackfill.isPending ? "Đang thử lại…" : `Thử lại ${artworkCounts?.failed || 0} ảnh lỗi`}</button>}
+        <button type="button" className="button button-ghost" disabled={artworkBackfillQuery.isFetching} onClick={() => void artworkBackfillQuery.refetch()}><RefreshCw size={14} /> Làm mới tiến trình</button>
+        {artworkControlPending && <span className="admin-r2-backfill-busy"><Loader2 size={14} /> Đang cập nhật trạng thái…</span>}
+      </div>
+      {(artworkBackfillQuery.data?.failureSamples.length || 0) > 0 && <div className="admin-r2-backfill-failures">
+        <strong><CircleAlert size={14} /> Ảnh cần kiểm tra gần đây</strong>
+        <ul>{artworkBackfillQuery.data?.failureSamples.map(item => <li key={item.id}><span>{item.movieName || item.movieSlug || "Không rõ phim"} · {item.sourceType}</span><small>{item.lastError || "Không lưu được vào R2"} · {item.attempts} lần thử</small></li>)}</ul>
+      </div>}
+      <p className="admin-r2-backfill-note">Tác vụ chỉ xử lý poster/thumbnail từ catalog API có host hợp lệ; không xóa hay sửa URL nguồn trong dữ liệu phim. Quá trình chạy nền trên Node.js cPanel, có thể tạm dừng và tiếp tục từ checkpoint.</p>
     </section>
 
     <section className="admin-r2-status-card">

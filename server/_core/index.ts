@@ -20,6 +20,7 @@ import { registerSpecialChatMediaRoute } from "../specialChat";
 import { startR2BackupScheduler } from "../r2Backup";
 import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
 import { mirrorMovieArtwork } from "../movieArtwork";
+import { startPosterBackfillRecovery } from "../movieArtworkBackfill";
 import { attachSidecarSubtitlesToMaster, buildSubtitleMediaPlaylist, buildSubtitledPlaylist } from "../subtitledPlaylist";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
@@ -127,6 +128,7 @@ async function startServer() {
   } catch (error) {
     console.error("[Database] Startup initialization failed:", error instanceof Error ? error.message : error);
   }
+  startPosterBackfillRecovery();
   startR2BackupScheduler();
   const app = express();
   const server = createServer(app);

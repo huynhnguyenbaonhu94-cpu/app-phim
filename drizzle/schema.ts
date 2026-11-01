@@ -356,3 +356,42 @@ export const customMovies = mysqlTable("custom_movies", {
 
 export type CustomMovie = typeof customMovies.$inferSelect;
 export type InsertCustomMovie = typeof customMovies.$inferInsert;
+
+/** One durable catalog-artwork backfill checkpoint; state survives cPanel restarts. */
+export const r2PosterBackfillState = mysqlTable("r2_poster_backfill_state", {
+  id: int("id").primaryKey(),
+  status: varchar("status", { length: 32 }).default("idle").notNull(),
+  phase: varchar("phase", { length: 32 }).default("discovering").notNull(),
+  catalogIndex: int("catalogIndex").default(0).notNull(),
+  currentPage: int("currentPage").default(1).notNull(),
+  currentKindTotalPages: int("currentKindTotalPages").default(0).notNull(),
+  pagesTotal: int("pagesTotal").default(0).notNull(),
+  pagesCompleted: int("pagesCompleted").default(0).notNull(),
+  itemsTotal: int("itemsTotal").default(0).notNull(),
+  currentKind: varchar("currentKind", { length: 40 }),
+  currentItemName: varchar("currentItemName", { length: 255 }),
+  lastError: text("lastError"),
+  workerToken: varchar("workerToken", { length: 64 }),
+  leaseExpiresAt: timestamp("leaseExpiresAt"),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  heartbeatAt: timestamp("heartbeatAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Snapshot queue for catalog image URLs; uniqueness prevents duplicate mirrors across lists. */
+export const r2PosterBackfillItems = mysqlTable("r2_poster_backfill_items", {
+  id: int("id").autoincrement().primaryKey(),
+  sourceHash: varchar("sourceHash", { length: 64 }).notNull().unique(),
+  sourceUrl: text("sourceUrl").notNull(),
+  sourceType: varchar("sourceType", { length: 20 }).notNull(),
+  movieSlug: varchar("movieSlug", { length: 200 }),
+  movieName: varchar("movieName", { length: 255 }),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  attempts: int("attempts").default(0).notNull(),
+  workerToken: varchar("workerToken", { length: 64 }),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  completedAt: timestamp("completedAt"),
+}, (table) => ({ statusIdIndex: index("r2_poster_backfill_status_id_idx").on(table.status, table.id) }));

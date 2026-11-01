@@ -16,6 +16,14 @@ Khi app iOS hoặc web tải poster/thumbnail của catalog API, backend tự l�
 
 Tính năng dùng chung cấu hình R2 hiện có trong trang quản trị và không cần thêm migration database. Nếu R2 chưa cấu hình/không truy cập được hoặc nguồn trả về dữ liệu không phải ảnh raster hợp lệ, backend giữ fallback proxy hiện tại thay vì trả URL R2 giả. Bản cũ đã lưu vẫn được dùng nếu lần refresh nguồn thất bại.
 
+## Backfill catalog hiện có
+
+Ngoài mirror tự động khi người dùng xem phim, trang `/admin/r2-settings` có card **Sao lưu artwork catalog lên R2**. Sau khi cấu hình và kiểm tra R2, admin có thể bắt đầu một lượt quét catalog hiện có. Worker duyệt danh sách cập nhật và các danh mục phim lẻ, phim bộ, TV shows, hoạt hình, Vietsub, thuyết minh, lồng tiếng, subteam và phim chiếu rạp; các URL ảnh trùng nhau được khử trùng lặp trước khi mirror. Phạm vi là poster/thumbnail của catalog API, không phải video/HLS.
+
+Card hiển thị số trang, số ảnh đã phát hiện, số ảnh lưu thành công và ảnh cần thử lại; admin có thể tạm dừng, tiếp tục, hoặc chạy lại các ảnh lỗi. Checkpoint và hàng đợi ảnh được lưu trong MySQL. Bảng trạng thái được tự tạo bởi compatibility guard khi backend khởi động; không cần chạy SQL thủ công. Nếu tiến trình Node.js bị restart giữa chừng, worker sẽ nhận lại lượt đang chạy khi lease hết hạn và tiếp tục từ trang/ảnh chưa hoàn tất. Thao tác **Quét lại catalog** tạo một lượt mới và thay thế hàng đợi/lịch sử lỗi hiện tại; không xóa object artwork đã có trên R2.
+
+Backfill chỉ bắt đầu khi admin bấm nút, không tự chạy ngay sau khi deploy. Nó kiểm tra kết nối R2 trước khi khởi chạy, xử lý tối đa hai ảnh đồng thời và dùng lại `mirrorMovieArtwork`/manifest content-addressed hiện có. Ảnh lỗi không làm cả lượt quét dừng; backend ghi lại để admin thử lại sau. Nếu R2 hoặc một trang catalog bị lỗi liên tục, tác vụ tạm dừng ở checkpoint thay vì tiếp tục báo thành công giả.
+
 ## Dashboard
 
 Đăng nhập tài khoản có role `admin`, sau đó mở `/admin` hoặc chọn **Quản trị/Dashboard quản trị** trên menu đầu trang. API `adminDashboard.overview` được bảo vệ bằng `adminProcedure`. Chỉ số tổng hợp đọc từ các bảng hiện có; mục phim hiển thị rõ là phim thủ công để không nhầm với catalog từ nguồn API bên ngoài.

@@ -469,6 +469,63 @@ type MovieListResult = { items: Movie[]; pagination: ReturnType<typeof unwrapIte
 export const MAX_FILTER_COMBOS = 12;
 const PAGE_LIMIT = 24;
 
+/**
+ * Backfill union: the broad updated list plus each distinct catalog collection.
+ * Duplicate titles/URLs are deduplicated by the persistent backfill item index.
+ */
+export const MOVIE_ARTWORK_BACKFILL_KINDS = [
+  { kind: "latest", label: "Phim mới cập nhật" },
+  { kind: "single", label: "Phim lẻ" },
+  { kind: "series", label: "Phim bộ" },
+  { kind: "shows", label: "TV shows" },
+  { kind: "animation", label: "Hoạt hình" },
+  { kind: "vietsub", label: "Phim Vietsub" },
+  { kind: "thuyetminh", label: "Phim thuyết minh" },
+  { kind: "longtieng", label: "Phim lồng tiếng" },
+  { kind: "subteam", label: "Phim theo subteam" },
+  { kind: "theatrical", label: "Phim chiếu rạp" },
+] as const;
+
+export type MovieArtworkBackfillKind = (typeof MOVIE_ARTWORK_BACKFILL_KINDS)[number]["kind"];
+export type MovieArtworkCandidate = {
+  sourceUrl: string;
+  sourceType: "poster" | "thumbnail";
+  movieSlug: string;
+  movieName: string;
+};
+
+export function extractMovieArtworkCandidates(items: unknown[], pathImage?: string): MovieArtworkCandidate[] {
+  const candidates: MovieArtworkCandidate[] = [];
+  for (const value of items) {
+    const item = value as any;
+    const poster = resolveImage(item?.poster_url, pathImage) || resolveImage(item?.thumb_url, pathImage);
+    const thumbnail = resolveImage(item?.thumb_url, pathImage) || poster;
+    const movieSlug = cleanText(item?.slug).slice(0, 200);
+    const movieName = cleanText(item?.name, "Phim").slice(0, 255);
+    if (poster) candidates.push({ sourceUrl: poster, sourceType: "poster", movieSlug, movieName });
+    if (thumbnail && thumbnail !== poster) candidates.push({ sourceUrl: thumbnail, sourceType: "thumbnail", movieSlug, movieName });
+  }
+  return candidates;
+}
+
+/** Fetch one upstream page without normalizing/auto-enqueueing its poster URLs. */
+export async function getMovieArtworkPage(kind: MovieArtworkBackfillKind, page: number) {
+  const boundedPage = safePage(page);
+  const payload = await upstream(listEndpoints[kind], { page: boundedPage, limit: PAGE_LIMIT }, { bypassCache: true });
+  const { items, pagination, pathImage } = unwrapItems(payload);
+  const pageInfo = pagination as any;
+  const rawTotalPages = Number(pageInfo?.totalPages);
+  return {
+    kind,
+    page: boundedPage,
+    totalPages: Number.isFinite(rawTotalPages) && rawTotalPages > 0
+      ? Math.min(MAX_CINEMA_PAGE, Math.floor(rawTotalPages))
+      : null,
+    itemCount: items.length,
+    candidates: extractMovieArtworkCandidates(items, pathImage),
+  };
+}
+
 export type MovieFilterInput = {
   kind?: keyof typeof listEndpoints;
   page?: number;

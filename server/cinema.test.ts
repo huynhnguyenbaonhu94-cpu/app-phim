@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { getStreamSource, MAX_CINEMA_PAGE, protectImageSource, registerStreamSource } from "./cinema";
+import { extractMovieArtworkCandidates, getStreamSource, MAX_CINEMA_PAGE, protectImageSource, registerStreamSource } from "./cinema";
 import type { TrpcContext } from "./_core/context";
 
 function caller() {
@@ -27,6 +27,21 @@ describe("cinema proxy guardrails", () => {
   it("keeps canonical public R2 artwork URLs unchanged", async () => {
     const artwork = "/api/public-storage/public-assets/movie-artwork/abc123/poster.jpg";
     expect(protectImageSource(artwork)).toBe(artwork);
+  });
+
+  it("extracts allowlisted poster and thumbnail sources and rejects untrusted hosts", () => {
+    const candidates = extractMovieArtworkCandidates([
+      { slug: "film-one", name: "Film One", poster_url: "https://phimimg.com/poster.jpg", thumb_url: "https://phimimg.com/thumb.jpg" },
+      { slug: "film-two", name: "Film Two", poster_url: "https://phimimg.com/poster.jpg", thumb_url: "https://untrusted.example/thumb.jpg" },
+      { slug: "film-three", name: "Film Three", poster_url: "https://untrusted.example/poster.jpg", thumb_url: "" },
+    ]);
+
+    expect(candidates.map((item) => item.sourceUrl)).toEqual([
+      "https://phimimg.com/poster.jpg",
+      "https://phimimg.com/thumb.jpg",
+      "https://phimimg.com/poster.jpg",
+    ]);
+    expect(candidates.map((item) => item.sourceType)).toEqual(["poster", "thumbnail", "poster"]);
   });
 
   it("creates stream proxy tokens for the supported HLS CDN hosts", () => {
