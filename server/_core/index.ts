@@ -19,6 +19,7 @@ import { initializeDatabase } from "../db";
 import { registerSpecialChatMediaRoute } from "../specialChat";
 import { startR2BackupScheduler } from "../r2Backup";
 import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
+import { buildSubtitledPlaylist } from "../subtitledPlaylist";
 
 const tvProxyHosts = new Set(["d4.dhcn.vn", "media.dhcn.vn"]);
 const tvProxyOrigin = "https://baothanhhoa.vn";
@@ -309,22 +310,16 @@ async function fetchStreamUpstream(url: string, range?: string): Promise<Respons
       return "";
     };
     const videoURL = absolute(read(req.query.video));
-    const subtitleURL = absolute(read(req.query.sub));
     // Chấp nhận cả link .m3u8 gốc lẫn link proxy của Cinemora: app ưu tiên phát qua proxy
     // (máy chủ tự gắn header cho CDN), mà link proxy không có đuôi .m3u8.
-    const isPlaylist = /\.m3u8/i.test(videoURL) || /\/api\/cinema\/stream\//i.test(videoURL);
-    if (!videoURL || !subtitleURL || !isPlaylist) {
-      return res.status(400).send("Thiếu link M3U8 hoặc link phụ đề");
-    }
-    const playlist = [
-      "#EXTM3U",
-      // Phụ đề rời (EXT-X-MEDIA TYPE=SUBTITLES) yêu cầu HLS version 4.
-      "#EXT-X-VERSION:4",
-      `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Phụ đề",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,LANGUAGE="vi",URI="${subtitleURL}"`,
-      '#EXT-X-STREAM-INF:BANDWIDTH=6000000,SUBTITLES="subs"',
-      videoURL,
-      "",
-    ].join("\n");
+    const values = (value: unknown) => (Array.isArray(value) ? value : value == null ? [] : [value]);
+    const subs = values(req.query.suburl);
+    const ids = values(req.query.track);
+    const languages = values(req.query.lang);
+    const tracks = subs.map((raw, index) => ({ id: read(ids[index]) || `track-${index + 1}`, language: read(languages[index]) || "und", name: read(languages[index]) || `Phụ đề ${index + 1}`, url: absolute(read(raw)) })).filter(track => track.url) as Array<{ id: string; language: string; name: string; url: string }>;
+    if (!tracks.length && read(req.query.sub)) tracks.push({ id: "legacy", language: "vi", name: "Phụ đề", url: absolute(read(req.query.sub)) });
+    const playlist = videoURL ? buildSubtitledPlaylist(videoURL, tracks) : null;
+    if (!playlist) return res.status(400).send("Thiếu link M3U8 hoặc link phụ đề hợp lệ");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");

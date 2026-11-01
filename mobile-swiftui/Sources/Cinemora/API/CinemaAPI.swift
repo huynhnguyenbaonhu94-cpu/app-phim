@@ -138,12 +138,16 @@ struct CinemaAPI {
     /// AVPlayerItem, mà phụ đề rời (.vtt) thì không. Bọc bằng EXT-X-MEDIA để
     /// trình phát có nhóm phụ đề hợp lệ.
     static func subtitledPlaylistURL(video: URL, subtitle: URL) -> URL? {
+        subtitledPlaylistURL(video: video, tracks: [(id: "legacy", language: "vi", url: subtitle)])
+    }
+    static func subtitledPlaylistURL(video: URL, tracks: [(id: String, language: String, url: URL)]) -> URL? {
+        guard !tracks.isEmpty else { return nil }
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.path = "/api/cinema/subtitled.m3u8"
-        components?.queryItems = [
-            URLQueryItem(name: "video", value: video.absoluteString),
-            URLQueryItem(name: "sub", value: subtitle.absoluteString),
-        ]
+        components?.queryItems = [URLQueryItem(name: "video", value: video.absoluteString)]
+        components?.queryItems?.append(contentsOf: tracks.prefix(12).flatMap { track in
+            [URLQueryItem(name: "track", value: track.id), URLQueryItem(name: "lang", value: track.language), URLQueryItem(name: "suburl", value: track.url.absoluteString)]
+        })
         return components?.url
     }
 

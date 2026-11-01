@@ -125,15 +125,15 @@ struct DownloadsScreen: View {
 
     private var playbackDialogMessage: String {
         guard let item = itemForPlayback, let fileURL = downloads.localURL(for: item) else {
-            return "Tệp đã tải không còn tồn tại hoặc không phải định dạng video phát được."
+            return "Mục này chưa có package tải hợp lệ. Hãy xoá hoặc tải lại để tạo package native."
         }
         let availability = OfflinePlaybackSupport.vlcAvailability(for: fileURL)
-        return "\(downloads.offlineStorageText(for: item)). \(availability.message)"
+        return availability.message
     }
 
     private func choosePlayback(_ item: DownloadManager.Item) {
         guard downloads.localURL(for: item) != nil else {
-            playbackNotice = "Tệp tải xuống không còn tồn tại, rỗng hoặc không đúng định dạng video. Cinemora không gọi VLC và không báo đã mở tệp. Hãy xoá mục này rồi tải lại."
+            playbackNotice = "Bản tải cũ không phải package AVFoundation nên chưa thể phát. Hãy xoá hoặc tải lại bằng Cinemora."
             return
         }
         itemForPlayback = item
@@ -141,7 +141,7 @@ struct DownloadsScreen: View {
 
     private func openInternally(_ item: DownloadManager.Item) {
         guard downloads.localURL(for: item) != nil else {
-            playbackNotice = "Không tìm thấy tệp video trên máy. Hãy xoá mục này rồi tải lại; không có kết nối mạng nào được gọi để thay thế tệp."
+            playbackNotice = "Bản tải cũ không phải package AVFoundation. Hãy tải lại tập này trong Cinemora."
             return
         }
         internalPlaybackItem = item
@@ -176,7 +176,7 @@ struct DownloadsScreen: View {
         VStack(alignment: .leading, spacing: 8) {
             SectionEyebrow(text: "XEM KHI KHÔNG CÓ WIFI")
             AuroraGradientText(text: "Đã tải xuống", font: .auroraDisplay(28))
-            Text("Phim đã tải nằm trong bộ nhớ máy, phát được khi mất mạng.")
+            Text("Phim tải xuống được lưu trên máy để xem khi không có mạng.")
                 .font(.auroraBody(12))
                 .foregroundStyle(Color.auroraTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -195,7 +195,7 @@ struct DownloadsScreen: View {
                         .foregroundStyle(Color.auroraMint)
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(doneItems.count) tập đã tải · \(activeItems.count) đang tải")
+                    Text("\(doneItems.count) tập đã tải · \(downloads.activeCount) đang tải")
                         .font(.auroraLabel(13, weight: .bold))
                         .foregroundStyle(.white)
                     Text("Dung lượng đã dùng: \(downloads.totalSizeText) · còn trống \(downloads.freeSpaceText)")
@@ -243,7 +243,7 @@ struct DownloadsScreen: View {
                 Button {
                     downloads.pauseAll()
                 } label: {
-                    smallAction("Dừng tất cả", icon: "pause.circle", tint: .auroraAmber)
+                    smallAction("Huỷ tất cả", icon: "xmark.circle", tint: .auroraAmber)
                 }
                 .buttonStyle(.plain)
                 .disabled(isPaused)
@@ -317,9 +317,11 @@ struct DownloadsScreen: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ProgressBar(value: item.progress, tint: item.phase == .downloading ? .auroraViolet : .auroraAmber)
                     HStack(spacing: 8) {
-                        Text(item.sizeText)
-                            .font(.auroraLabel(11, weight: .bold))
-                            .foregroundStyle(.white)
+                        if !item.fileName.lowercased().hasSuffix(".movpkg") {
+                            Text(item.sizeText)
+                                .font(.auroraLabel(11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
                         Text(item.percentText)
                             .font(.auroraBody(10))
                             .foregroundStyle(Color.auroraViolet)
@@ -329,7 +331,7 @@ struct DownloadsScreen: View {
                                 .foregroundStyle(Color.auroraTextSecondary)
                         }
                         Spacer(minLength: 0)
-                        if item.totalSegments > 0 {
+                        if item.totalSegments > 0 && !item.fileName.lowercased().hasSuffix(".movpkg") {
                             Text("\(item.doneSegments)/\(item.totalSegments) phân đoạn")
                                 .font(.auroraBody(10))
                                 .foregroundStyle(Color.auroraTextSecondary)
@@ -338,18 +340,14 @@ struct DownloadsScreen: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    Image(systemName: localFile == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(localFile == nil ? Color.auroraAmber : Color.auroraMint)
-                    Text(localFile == nil ? "Tệp không còn hoặc không đọc được" : "Đã tải xong, phát được offline")
-                        .font(.auroraBody(10))
-                        .foregroundStyle(localFile == nil ? Color.auroraAmber : Color.auroraTextSecondary)
+                    if localFile == nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.auroraAmber)
+                        Text("Bản HLS cũ không tương thích — hãy xoá và tải lại")
+                            .font(.auroraBody(10))
+                            .foregroundStyle(Color.auroraAmber)
+                    }
                     Spacer(minLength: 0)
-                }
-                if localFile != nil {
-                    Text(downloads.offlineStorageText(for: item))
-                        .font(.auroraBody(9))
-                        .foregroundStyle(Color.auroraTextTertiary)
-                        .lineLimit(2)
                 }
             }
 
@@ -363,9 +361,9 @@ struct DownloadsScreen: View {
             HStack(spacing: 8) {
                 switch item.phase {
                 case .downloading, .waiting:
-                    actionButton("Dừng tải", icon: "pause.fill", tint: .auroraAmber) { downloads.pause(item.id) }
+                    actionButton("Huỷ · tải lại từ đầu", icon: "xmark", tint: .auroraAmber) { downloads.pause(item.id) }
                 case .paused, .failed:
-                    actionButton("Tiếp tục", icon: "play.fill", tint: .auroraMint) { downloads.retry(item.id) }
+                    actionButton("Tải lại từ đầu", icon: "arrow.clockwise", tint: .auroraMint) { downloads.retry(item.id) }
                 case .finished:
                     if localFile != nil {
                         actionButton("Xem", icon: "play.fill", tint: .auroraMint) { choosePlayback(item) }
@@ -373,7 +371,7 @@ struct DownloadsScreen: View {
                         EmptyView()
                     }
                 case .unsupported:
-                    EmptyView()
+                    actionButton("Tải lại", icon: "arrow.clockwise", tint: .auroraMint) { downloads.retry(item.id) }
                 }
                 Spacer(minLength: 0)
                 actionButton("Xoá tải", icon: "trash", tint: .auroraPink) { pendingRemoval = item }
@@ -597,11 +595,13 @@ struct DownloadSheet: View {
                 Button {
                     if let item, item.phase == .downloading || item.phase == .waiting {
                         downloads.pause(item.id)
+                    } else if let item {
+                        downloads.retry(item.id)
                     } else {
                         downloads.enqueue(movie: movie, serverName: server.name, episode: episode)
                     }
                 } label: {
-                    Image(systemName: item?.phase == .downloading ? "pause.circle.fill" : "arrow.down.circle")
+                    Image(systemName: item?.phase == .downloading || item?.phase == .waiting ? "xmark.circle.fill" : "arrow.clockwise.circle")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Color.auroraViolet)
                 }

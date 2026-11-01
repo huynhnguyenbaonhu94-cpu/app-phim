@@ -148,7 +148,8 @@ final class PlaybackController: ObservableObject {
         wantsToPlay = true
         isPlaying = true
     }
-    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, subtitleURL: URL? = nil, allowSubtitledPlaylist: Bool = true) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, subtitleURL: URL? = nil, subtitleTracks: [MovieEpisodeSubtitleTrack] = [], selectedSubtitleID: String? = nil, allowSubtitledPlaylist: Bool = true) {
+        let keepNativeSubtitleMode = wantsNativeSubtitles
         configureAudioSession()
         loadTask?.cancel()
         activeRequestID = UUID()
@@ -161,26 +162,30 @@ final class PlaybackController: ObservableObject {
         player.pause()
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
+        nativeSubtitleStatus = nil
         itemObservation = nil
         // Phụ đề rời: phát qua master playlist để PiP cũng hiện phụ đề. Một số
         // response chỉ trả subtitleTracks mà không điền subtitleUrl ở cấp tập,
         // nên lấy URL được caller chọn trước khi dựng master.
         let sidecarSubtitleURL = subtitleURL ?? episode.subtitleURL
+        let nativeTracks = Array((subtitleTracks.compactMap { track in track.subtitleURL.map { (id: track.id, language: track.language, url: $0) } }).prefix(12))
+        let effectiveTracks = nativeTracks.isEmpty ? sidecarSubtitleURL.map { [(id: "legacy", language: "vi", url: $0)] } ?? [] : nativeTracks
+        requestedNativeLanguage = selectedSubtitleID.flatMap { id in subtitleTracks.first(where: { $0.id == id })?.language } ?? effectiveTracks.first?.language
         let subtitledURL: URL? = {
             guard localURL == nil, allowSubtitledPlaylist,
-                  let sidecarSubtitleURL,
+                  !effectiveTracks.isEmpty,
                   let videoURL = episode.playbackURL else { return nil }
             let path = videoURL.absoluteString.lowercased()
             guard path.contains(".m3u8") || path.contains("/api/cinema/stream/") else { return nil }
-            return CinemaAPI.subtitledPlaylistURL(video: videoURL, subtitle: sidecarSubtitleURL)
+            return CinemaAPI.subtitledPlaylistURL(video: videoURL, tracks: effectiveTracks)
         }()
         fallbackPlaybackURL = subtitledURL == nil ? nil : episode.playbackURL
         usedSubtitledPlaylist = subtitledURL != nil
-        hasSidecarSubtitle = sidecarSubtitleURL != nil
+        hasSidecarSubtitle = !effectiveTracks.isEmpty
         legibleGroup = nil
         legibleOption = nil
         nativeSubtitleActive = false
-        wantsNativeSubtitles = false
+        wantsNativeSubtitles = keepNativeSubtitleMode
         guard let url = localURL ?? subtitledURL ?? episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
@@ -206,14 +211,20 @@ final class PlaybackController: ObservableObject {
                     case .readyToPlay:
                         // Phụ đề rời: giữ nhóm phụ đề cho PiP, còn khi xem bình
                         // thường app vẽ phụ đề theo thiết lập của người dùng.
-                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
-                           let option = group.options.first {
+                        if let group = try? await item.asset.loadMediaSelectionGroup(for: .legible), !group.options.isEmpty {
                             self.legibleGroup = group
-                            self.legibleOption = option
-                            if self.wantsNativeSubtitles || !self.hasSidecarSubtitle {
-                                item.select(option, in: group)
-                                self.nativeSubtitleActive = self.wantsNativeSubtitles
+                            if self.wantsNativeSubtitles {
+                                if self.selectNativeOption(language: self.requestedNativeLanguage, item: item) {
+                                    self.nativeSubtitleActive = true
+                                    self.nativeSubtitleStatus = nil
+                                } else {
+                                    self.nativeSubtitleActive = false
+                                    self.nativeSubtitleStatus = "Nguồn phát không cung cấp track phụ đề native tương ứng; phụ đề PiP chưa được bật."
+                                }
                             }
+                        } else if self.wantsNativeSubtitles && self.hasSidecarSubtitle {
+                            self.nativeSubtitleActive = false
+                            self.nativeSubtitleStatus = "Nguồn phát không cung cấp phụ đề native cho PiP."
                         }
                         self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
                         if let startAt, startAt > 0, startAt.isFinite {
@@ -228,7 +239,7 @@ final class PlaybackController: ObservableObject {
                         if self.usedSubtitledPlaylist, self.fallbackPlaybackURL != nil {
                             self.usedSubtitledPlaylist = false
                             self.fallbackPlaybackURL = nil
-                            self.load(episode, startAt: startAt, localURL: nil, allowSubtitledPlaylist: false)
+                            self.load(episode, startAt: startAt, localURL: nil, subtitleURL: sidecarSubtitleURL, subtitleTracks: subtitleTracks, selectedSubtitleID: selectedSubtitleID, allowSubtitledPlaylist: false)
                             return
                         }
                         self.isLoading = false; self.activeURL = nil
@@ -255,6 +266,8 @@ final class PlaybackController: ObservableObject {
     /// Nhóm phụ đề gốc của item (có khi link phát được bọc kèm phụ đề rời).
     private var legibleGroup: AVMediaSelectionGroup?
     private var legibleOption: AVMediaSelectionOption?
+    private var requestedNativeLanguage: String?
+    @Published private(set) var nativeSubtitleStatus: String?
     /// Tập này có phụ đề rời do máy chủ/admin cung cấp hay không.
     private var hasSidecarSubtitle = false
     /// Đang phát qua master playlist phụ đề (để biết đường quay về link gốc).
@@ -266,13 +279,20 @@ final class PlaybackController: ObservableObject {
     /// thì trả lại lớp phụ đề theo thiết lập của người dùng.
     func setNativeSubtitles(_ enabled: Bool) {
         wantsNativeSubtitles = enabled
-        guard let group = legibleGroup, let option = legibleOption else {
+        guard let group = legibleGroup else {
             nativeSubtitleActive = false
+            if enabled && hasSidecarSubtitle { nativeSubtitleStatus = "Phụ đề PiP không khả dụng từ nguồn phát này." }
+            if !enabled { nativeSubtitleStatus = nil }
             return
         }
         if enabled {
-            player.currentItem?.select(option, in: group)
+            guard selectNativeOption(language: requestedNativeLanguage, item: player.currentItem) else {
+                nativeSubtitleActive = false
+                nativeSubtitleStatus = "Nguồn phát không cung cấp track phụ đề native tương ứng; phụ đề PiP chưa được bật."
+                return
+            }
             nativeSubtitleActive = true
+            nativeSubtitleStatus = nil
         } else {
             // An embedded track may have been selected for ordinary playback
             // already. Only clear the selection we introduced for a sidecar;
@@ -280,11 +300,48 @@ final class PlaybackController: ObservableObject {
             // off in the inline player.
             if hasSidecarSubtitle { player.currentItem?.select(nil, in: group) }
             nativeSubtitleActive = false
+            nativeSubtitleStatus = nil
         }
     }
 
+    /// Keep the native PiP track aligned with the in-app language picker.
+    /// Outside PiP this only records the language for the next activation.
+    func selectNativeSubtitle(language: String) {
+        requestedNativeLanguage = language
+        guard wantsNativeSubtitles else { return }
+        guard selectNativeOption(language: language, item: player.currentItem) else {
+            nativeSubtitleActive = false
+            nativeSubtitleStatus = "Nguồn phát không cung cấp track phụ đề native tương ứng; phụ đề PiP chưa được bật."
+            return
+        }
+        nativeSubtitleActive = true
+        nativeSubtitleStatus = nil
+    }
+
+    private func selectNativeOption(language: String?, item: AVPlayerItem?) -> Bool {
+        guard let item, let group = legibleGroup, !group.options.isEmpty else { return false }
+        let preferred = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let option: AVMediaSelectionOption?
+        if preferred.isEmpty {
+            option = group.options.first
+        } else {
+            let target = preferred.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
+            option = group.options.first { candidate in
+                let displayName = candidate.displayName.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "vi_VN"))
+                let localeID = (candidate.locale?.identifier ?? "").lowercased()
+                return displayName.contains(target)
+                    || localeID == preferred.lowercased()
+                    || localeID.hasPrefix(preferred.lowercased() + "-")
+            }
+        }
+        guard let option else { return false }
+        legibleOption = option
+        item.select(option, in: group)
+        return true
+    }
+
     private static func makePlayerItem(videoURL: URL, subtitleURL: URL?) async -> AVPlayerItem {
-        guard let subtitleURL else { return AVPlayerItem(url: videoURL) }
+        guard let subtitleURL else { return AVPlayerItem(asset: AVURLAsset(url: videoURL)) }
         // External VTT is only composed for non-HLS/local items. HLS gets its
         // native PiP subtitle through the server-provided master playlist;
         // AVFoundation cannot reliably turn an arbitrary remote VTT into a
@@ -1455,7 +1512,7 @@ struct CinemaPlayerScreen: View {
 
     @ViewBuilder
     private var subtitleLanguagePicker: some View {
-        if subtitles.availableTracks.count > 1 {
+        if subtitles.availableTracks.count > 1 || playback.nativeSubtitleStatus != nil {
             VStack(alignment: .leading, spacing: 7) {
                 Text("NGÔN NGỮ PHỤ ĐỀ")
                     .font(.system(size: 8, weight: .black, design: .rounded))
@@ -1465,6 +1522,7 @@ struct CinemaPlayerScreen: View {
                     ForEach(subtitles.availableTracks) { track in
                         Button {
                             subtitles.selectTrack(id: track.id)
+                            _ = playback.selectNativeSubtitle(language: track.language)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: subtitles.selectedTrackID == track.id ? "checkmark.circle.fill" : "circle")
@@ -1481,6 +1539,13 @@ struct CinemaPlayerScreen: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
+                if let status = playback.nativeSubtitleStatus {
+                    Text(status)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(status)
                 }
             }
         }
@@ -2162,7 +2227,7 @@ struct CinemaPlayerScreen: View {
         // AVPlayerItem with the same first/default track through the HLS master
         // when the API only exposes it inside subtitleTracks.
         let nativeSubtitleURL = source.availableSubtitleTracks.first?.subtitleURL
-        playback.load(source, startAt: startAt, localURL: offlineURL, subtitleURL: nativeSubtitleURL)
+        playback.load(source, startAt: startAt, localURL: offlineURL, subtitleURL: nativeSubtitleURL, subtitleTracks: source.availableSubtitleTracks, selectedSubtitleID: subtitles.selectedTrackID)
         if startAt != nil { hasAppliedResumeTime = true }
         pendingResumeTime = nil
         saveLocalWatchProgress()

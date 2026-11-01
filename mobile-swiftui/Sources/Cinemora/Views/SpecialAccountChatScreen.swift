@@ -549,7 +549,10 @@ private struct SpecialChatMediaPreview: View {
         return CGSize(width: width, height: width / displayAspectRatio)
     }
     private var videoDisplaySize: CGSize {
-        displaySize(maxHeight: 320)
+        // Keep the inline card stable regardless of server metadata or whether
+        // the video has already been opened. The player uses the file ratio.
+        let width = min(max(1, maxWidth), 320 * (16.0 / 9.0))
+        return CGSize(width: width, height: width * (9.0 / 16.0))
     }
     private var imageDisplaySize: CGSize {
         // The server-saved dimensions are the source of truth. Do not derive
@@ -696,10 +699,9 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
             let measuredRatio = await Self.videoAspectRatio(at: fileURL)
-            // Prefer server metadata. A locally measured ratio is only a
-            // viewer fallback for legacy messages without saved dimensions;
-            // it never mutates the bubble's layout.
-            onPlayVideo(fileURL, mediaAspectRatio ?? measuredRatio)
+            // The downloaded file is authoritative for playback orientation;
+            // chat preview dimensions stay fixed and are never mutated.
+            onPlayVideo(fileURL, measuredRatio ?? mediaAspectRatio)
         } catch {
             self.error = true
             errorMessage = "Không tải được video · chạm để thử lại"

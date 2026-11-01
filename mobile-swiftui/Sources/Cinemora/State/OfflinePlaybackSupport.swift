@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftUI
 import UIKit
@@ -22,20 +23,36 @@ enum OfflinePlaybackSupport {
         }
     }
 
-    /// HLS manifest/segment rời không được coi là tệp phát ngoài. Downloader
-    /// hiện lưu bản HLS đã nối thành `.ts`.
-    private static let supportedFileExtensions: Set<String> = ["ts", "mp4", "m4v", "mov", "mkv", "avi"]
+    private static let supportedFileExtensions: Set<String> = ["ts", "mp4", "m4v", "mov", "mkv", "avi", "m3u8"]
 
     static func validatePlayableFile(_ url: URL) -> Bool {
+        if url.pathExtension.lowercased() == "movpkg" {
+            var isDirectory: ObjCBool = false
+            guard url.isFileURL, FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
+                  let children = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil), !children.isEmpty else { return false }
+            return true
+        }
         guard url.isFileURL,
-              supportedFileExtensions.contains(url.pathExtension.lowercased()),
               let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-              values.isRegularFile == true,
-              (values.fileSize ?? 0) > 0 else { return false }
-        return true
+              values.isRegularFile == true, (values.fileSize ?? 0) > 0 else { return false }
+        if url.pathExtension.lowercased() == "m3u8" {
+            guard let playlist = try? String(contentsOf: url, encoding: .utf8),
+                  playlist.hasPrefix("#EXTM3U"), playlist.contains("#EXT-X-ENDLIST") else { return false }
+            let segmentNames = playlist.split(whereSeparator: \.isNewline).map(String.init)
+                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            guard !segmentNames.isEmpty else { return false }
+            return segmentNames.allSatisfy { name in
+                let segment = url.deletingLastPathComponent().appendingPathComponent(name)
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: segment.path),
+                      let size = attrs[.size] as? NSNumber else { return false }
+                return size.intValue > 0
+            }
+        }
+        return supportedFileExtensions.contains(url.pathExtension.lowercased())
     }
 
     static func vlcAvailability(for fileURL: URL) -> VLCAvailability {
+        if fileURL.pathExtension.lowercased() == "movpkg" { return .unsupportedFile("movpkg") }
         guard validatePlayableFile(fileURL) else {
             let extensionName = fileURL.pathExtension.isEmpty ? "không xác định" : fileURL.pathExtension.lowercased()
             return .unsupportedFile(extensionName)
