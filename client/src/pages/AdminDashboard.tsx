@@ -124,13 +124,6 @@ const QUICK_LINKS = [
     tone: "violet",
   },
   {
-    href: "/admin/movies/sources",
-    label: "Nguồn & tập phim",
-    description: "Kiểm soát nguồn phát",
-    icon: Database,
-    tone: "blue",
-  },
-  {
     href: "/admin/movie-requests",
     label: "Yêu cầu phim",
     description: "Theo dõi tiến trình",
@@ -703,7 +696,7 @@ export default function AdminDashboard() {
                 <h2>Đi nhanh đến mọi tính năng</h2>
               </div>
               <span className="admin-dashboard-section-note">
-                8 khu vực quản trị
+                7 khu vực quản trị
               </span>
             </div>
             <nav

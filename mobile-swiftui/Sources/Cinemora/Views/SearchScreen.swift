@@ -19,6 +19,8 @@ struct SearchScreen: View {
     @State private var sortField: SearchSortField = .updated
     @State private var newestFirst = true
     @State private var filtersExpanded = false
+    @State private var queryToRun: String?
+    @State private var showClearHistoryConfirmation = false
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     private var filterCategories: [String] {
@@ -74,6 +76,7 @@ struct SearchScreen: View {
                         .auroraReveal(0)
 
                     SearchField(
+                        queryToRun: $queryToRun,
                         onQuery: { query in
                             submitted = query
                             Task { await store.search(query) }
@@ -85,6 +88,11 @@ struct SearchScreen: View {
                     )
                     .id("search-box")
                         .auroraReveal(1)
+
+                    if store.accountUser != nil, !store.searchHistory.isEmpty {
+                        searchHistorySection
+                            .auroraReveal(2)
+                    }
 
                     HStack(alignment: .lastTextBaseline) {
                         SectionHeading(eyebrow: "KẾT QUẢ", title: submitted.isEmpty ? "Bạn đang tìm gì?" : "“\(submitted)”")
@@ -102,7 +110,7 @@ struct SearchScreen: View {
                         }
                     }
                     .id("search-results-header")
-                    .auroraReveal(2)
+                    .auroraReveal(store.accountUser != nil && !store.searchHistory.isEmpty ? 3 : 2)
 
                     results
                 }
@@ -115,6 +123,16 @@ struct SearchScreen: View {
         }
         .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Xóa lịch sử tìm kiếm?", isPresented: $showClearHistoryConfirmation) {
+            Button("Xóa tất cả", role: .destructive) { store.clearSearchHistory() }
+            Button("Hủy", role: .cancel) {}
+        } message: {
+            Text("Các tìm kiếm đã lưu trên thiết bị cho tài khoản này sẽ bị xóa.")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cinemoraConnectivityDidRecover)) { _ in
+            guard !submitted.isEmpty else { return }
+            Task { await store.search(submitted) }
+        }
     }
 
     // MARK: - Results
@@ -238,6 +256,66 @@ struct SearchScreen: View {
         }
     }
 
+    private var searchHistorySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .lastTextBaseline) {
+                SectionHeading(eyebrow: "LỊCH SỬ", title: "Tìm kiếm gần đây")
+                Spacer(minLength: 12)
+                Button("Xóa tất cả", role: .destructive) {
+                    showClearHistoryConfirmation = true
+                }
+                .font(.auroraLabel(10, weight: .bold))
+                .foregroundStyle(Color.auroraPink)
+                .buttonStyle(.auroraPress(scale: 0.95))
+                .accessibilityLabel("Xóa tất cả lịch sử tìm kiếm")
+            }
+
+            VStack(spacing: 8) {
+                ForEach(store.searchHistory) { item in
+                    HStack(spacing: 10) {
+                        Button {
+                            queryToRun = item.query
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Color.auroraViolet)
+                                Text(item.query)
+                                    .font(.auroraBody(13))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.left")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(Color.auroraTextTertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Tìm lại \(item.query)")
+
+                        Button(role: .destructive) {
+                            store.removeSearchHistory(item)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color.auroraTextTertiary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Xóa \(item.query) khỏi lịch sử")
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+            .padding(10)
+            .auroraCard(cornerRadius: 20, tint: .auroraViolet, fill: 0.55)
+        }
+    }
+
     private func resetFilters() {
         language = ""
         category = ""
@@ -294,6 +372,7 @@ struct SearchScreen: View {
 /// this small field re-renders per keystroke, and the screen hears about the
 /// query once typing pauses.
 private struct SearchField: View {
+    @Binding var queryToRun: String?
     /// Called with the query after a typing pause, and at once on Enter or the
     /// arrow button.
     let onQuery: (String) -> Void
@@ -363,6 +442,13 @@ private struct SearchField: View {
         .scaleEffect(focused ? 1.012 : 1)
         .animation(Motion.gentle, value: focused)
         .animation(Motion.gentle, value: keyword.isEmpty)
+        .onChange(of: queryToRun) { _, query in
+            guard let query else { return }
+            debounce?.cancel()
+            keyword = query
+            queryToRun = nil
+            searchNow()
+        }
     }
 
     /// Enter or the arrow button: search immediately, skipping the debounce.

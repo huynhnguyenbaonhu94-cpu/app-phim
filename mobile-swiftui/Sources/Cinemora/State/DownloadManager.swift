@@ -310,8 +310,23 @@ final class DownloadManager {
     func localURL(movieSlug: String, episodeSlug: String) -> URL? {
         guard let item = item(movieSlug: movieSlug, episodeSlug: episodeSlug),
               item.phase == .finished else { return nil }
+        return localURL(for: item)
+    }
+
+    /// Tệp video thực tế của một mục đã tải. Không trả về manifest, segment rời,
+    /// thư mục hoặc tệp rỗng để UI không báo phát thành công giả.
+    func localURL(for item: Item) -> URL? {
+        guard item.phase == .finished else { return nil }
         let url = root.appendingPathComponent(item.fileName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        return OfflinePlaybackSupport.validatePlayableFile(url) ? url : nil
+    }
+
+    /// Mô tả đúng cách downloader lưu HLS để hiển thị trên màn Đã tải.
+    func offlineStorageText(for item: Item) -> String {
+        if item.totalSegments > 0 {
+            return "HLS đã nối \(item.doneSegments) phân đoạn vào \(item.fileName)"
+        }
+        return "Tệp \(item.fileName)"
     }
 
     var finishedCount: Int { items.filter { $0.phase == .finished }.count }

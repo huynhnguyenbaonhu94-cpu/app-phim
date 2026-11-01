@@ -34,6 +34,11 @@
     <true/>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>vlc</string>
+        <string>vlc-x-callbacks</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIUserInterfaceStyle</key>

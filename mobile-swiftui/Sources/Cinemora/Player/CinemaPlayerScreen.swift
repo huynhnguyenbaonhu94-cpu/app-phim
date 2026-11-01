@@ -27,10 +27,18 @@ final class PlaybackController: ObservableObject {
     private var seekRequestID = UUID()
     /// Keep the user's play intent stable while AVPlayer is buffering or seeking.
     private var wantsToPlay = false
+    /// AVPlayer briefly reports `.paused` while a play/seek request is applied.
+    /// After this window, a real pause from PiP/remote controls is treated as
+    /// a new user intent instead of being overwritten on foreground recovery.
+    private var ignorePausedStateUntil = Date.distantPast
     private var suppressLoadingUntil = Date.distantPast
     private var overlayRecoveryTask: Task<Void, Never>?
     private var resumeAfterOverlay = false
     private var notificationTokens: [NSObjectProtocol] = []
+    /// PiP may be requested before AVPlayerItem exposes its media-selection
+    /// group. Remember the request so the native legible option is selected as
+    /// soon as the item becomes ready.
+    private var wantsNativeSubtitles = false
 
     init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -59,8 +67,16 @@ final class PlaybackController: ObservableObject {
                 case .playing:
                     self.isPlaying = self.wantsToPlay
                 case .paused:
-                    // A delayed observer callback must not erase a newer play
-                    // or pause button action while AVPlayer changes status.
+                    if self.wantsToPlay,
+                       !self.isSeeking,
+                       !self.isLoading,
+                       Date() >= self.ignorePausedStateUntil {
+                        // PiP and remote transport controls pause AVPlayer
+                        // directly, so update our intent before recovery can
+                        // resume the item unexpectedly.
+                        self.wantsToPlay = false
+                        self.resumeAfterOverlay = false
+                    }
                     self.isPlaying = self.wantsToPlay
                 case .waitingToPlayAtSpecifiedRate:
                     // Waiting is still playback from the controls' point of
@@ -82,6 +98,8 @@ final class PlaybackController: ObservableObject {
     /// over.
     func pauseForDismissal() {
         wantsToPlay = false
+        ignorePausedStateUntil = .distantPast
+        resumeAfterOverlay = false
         player.pause()
         isPlaying = false
         isLoading = false
@@ -92,6 +110,7 @@ final class PlaybackController: ObservableObject {
         overlayRecoveryTask?.cancel()
         overlayRecoveryTask = nil
         resumeAfterOverlay = false
+        wantsNativeSubtitles = false
         wantsToPlay = false
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -124,11 +143,12 @@ final class PlaybackController: ObservableObject {
         configureAudioSession()
         // Công tắc chuông/im lặng chỉ đổi audio route. Giữ nguyên item và
         // vị trí hiện tại, không replace/reload để tránh màn hình đen.
+        ignorePausedStateUntil = Date().addingTimeInterval(0.4)
         player.play()
         wantsToPlay = true
         isPlaying = true
     }
-    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, allowSubtitledPlaylist: Bool = true) {
+    func load(_ episode: MovieEpisode, startAt: Double? = nil, localURL: URL? = nil, subtitleURL: URL? = nil, allowSubtitledPlaylist: Bool = true) {
         configureAudioSession()
         loadTask?.cancel()
         activeRequestID = UUID()
@@ -137,18 +157,30 @@ final class PlaybackController: ObservableObject {
         isSeeking = false
         suppressLoadingUntil = .distantPast
         wantsToPlay = false
+        ignorePausedStateUntil = Date().addingTimeInterval(1)
         player.pause()
         errorMessage = nil; currentTime = 0; duration = 0
         didReachEnd = false
         itemObservation = nil
-        // Phụ đề rời: phát qua master playlist để PiP cũng hiện phụ đề.
-        let subtitledURL = (localURL == nil && allowSubtitledPlaylist) ? episode.subtitledPlaylistURL : nil
+        // Phụ đề rời: phát qua master playlist để PiP cũng hiện phụ đề. Một số
+        // response chỉ trả subtitleTracks mà không điền subtitleUrl ở cấp tập,
+        // nên lấy URL được caller chọn trước khi dựng master.
+        let sidecarSubtitleURL = subtitleURL ?? episode.subtitleURL
+        let subtitledURL: URL? = {
+            guard localURL == nil, allowSubtitledPlaylist,
+                  let sidecarSubtitleURL,
+                  let videoURL = episode.playbackURL else { return nil }
+            let path = videoURL.absoluteString.lowercased()
+            guard path.contains(".m3u8") || path.contains("/api/cinema/stream/") else { return nil }
+            return CinemaAPI.subtitledPlaylistURL(video: videoURL, subtitle: sidecarSubtitleURL)
+        }()
         fallbackPlaybackURL = subtitledURL == nil ? nil : episode.playbackURL
         usedSubtitledPlaylist = subtitledURL != nil
-        hasSidecarSubtitle = episode.subtitleURL != nil
+        hasSidecarSubtitle = sidecarSubtitleURL != nil
         legibleGroup = nil
         legibleOption = nil
         nativeSubtitleActive = false
+        wantsNativeSubtitles = false
         guard let url = localURL ?? subtitledURL ?? episode.playbackURL else {
             player.pause(); player.replaceCurrentItem(with: nil); activeURL = nil
             isLoading = false
@@ -158,7 +190,12 @@ final class PlaybackController: ObservableObject {
         activeURL = url
         isLoading = true
         loadTask = Task { @MainActor in
-            let item = await Self.makePlayerItem(videoURL: url, subtitleURL: episode.subtitleURL)
+            // The subtitled HLS master already owns a real AVMediaSelectionGroup.
+            // Do not compose the same VTT a second time: that can duplicate the
+            // track and, more importantly, replace a valid HLS item with a plain
+            // video item when the sidecar takes longer than the stream.
+            let itemSubtitleURL = subtitledURL == nil ? sidecarSubtitleURL : nil
+            let item = await Self.makePlayerItem(videoURL: url, subtitleURL: itemSubtitleURL)
             guard !Task.isCancelled, self.activeRequestID == requestID else { return }
             item.preferredForwardBufferDuration = 8
             self.itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -173,8 +210,9 @@ final class PlaybackController: ObservableObject {
                            let option = group.options.first {
                             self.legibleGroup = group
                             self.legibleOption = option
-                            if !self.hasSidecarSubtitle {
+                            if self.wantsNativeSubtitles || !self.hasSidecarSubtitle {
                                 item.select(option, in: group)
+                                self.nativeSubtitleActive = self.wantsNativeSubtitles
                             }
                         }
                         self.loadTask?.cancel(); self.errorMessage = nil; self.isLoading = false
@@ -227,18 +265,32 @@ final class PlaybackController: ObservableObject {
     /// PiP thì chọn nhóm phụ đề gốc và tạm ẩn lớp phụ đề app tự vẽ; khi tắt PiP
     /// thì trả lại lớp phụ đề theo thiết lập của người dùng.
     func setNativeSubtitles(_ enabled: Bool) {
-        guard hasSidecarSubtitle, let group = legibleGroup, let option = legibleOption else { return }
+        wantsNativeSubtitles = enabled
+        guard let group = legibleGroup, let option = legibleOption else {
+            nativeSubtitleActive = false
+            return
+        }
         if enabled {
             player.currentItem?.select(option, in: group)
             nativeSubtitleActive = true
         } else {
-            player.currentItem?.select(nil, in: group)
+            // An embedded track may have been selected for ordinary playback
+            // already. Only clear the selection we introduced for a sidecar;
+            // otherwise leaving PiP would unexpectedly turn embedded captions
+            // off in the inline player.
+            if hasSidecarSubtitle { player.currentItem?.select(nil, in: group) }
             nativeSubtitleActive = false
         }
     }
 
     private static func makePlayerItem(videoURL: URL, subtitleURL: URL?) async -> AVPlayerItem {
         guard let subtitleURL else { return AVPlayerItem(url: videoURL) }
+        // External VTT is only composed for non-HLS/local items. HLS gets its
+        // native PiP subtitle through the server-provided master playlist;
+        // AVFoundation cannot reliably turn an arbitrary remote VTT into a
+        // PiP-renderable legible track by itself.
+        let lowercasedURL = videoURL.absoluteString.lowercased()
+        guard !lowercasedURL.contains(".m3u8") else { return AVPlayerItem(url: videoURL) }
         return await withTaskGroup(of: AVPlayerItem.self) { group in
             group.addTask { await Self.makeComposedPlayerItem(videoURL: videoURL, subtitleURL: subtitleURL) }
             group.addTask {
@@ -280,18 +332,23 @@ final class PlaybackController: ObservableObject {
         // Keep the current AVPlayerItem alive. iOS may keep audio/video
         // running under Control Center; rebuilding or seeking here causes
         // buffering and loses the exact viewing position.
-        resumeAfterOverlay = isPlaying || player.timeControlStatus == .playing
+        resumeAfterOverlay = wantsToPlay && (isPlaying || player.timeControlStatus == .playing)
     }
     func recoverAfterForeground() {
-        guard resumeAfterOverlay, activeURL != nil else { return }
+        guard resumeAfterOverlay, wantsToPlay, activeURL != nil else {
+            resumeAfterOverlay = false
+            return
+        }
         // Resume the same item; never reload HLS or seek on this path.
         wantsToPlay = true
+        ignorePausedStateUntil = Date().addingTimeInterval(0.4)
         player.play()
         isPlaying = true
         resumeAfterOverlay = false
     }
     private func handleReachedEnd() {
         wantsToPlay = false
+        resumeAfterOverlay = false
         player.pause()
         isPlaying = false
         isLoading = false
@@ -303,6 +360,7 @@ final class PlaybackController: ObservableObject {
     func togglePlayback() {
         if wantsToPlay || player.timeControlStatus == .playing {
             wantsToPlay = false
+            resumeAfterOverlay = false
             player.pause()
             isPlaying = false
             return
@@ -311,18 +369,21 @@ final class PlaybackController: ObservableObject {
         if didReachEnd {
             didReachEnd = false
             wantsToPlay = true
+            ignorePausedStateUntil = Date().addingTimeInterval(0.4)
             seek(to: 0)
             player.play()
             isPlaying = true
             return
         }
         wantsToPlay = true
+        ignorePausedStateUntil = Date().addingTimeInterval(0.4)
         player.play()
         isPlaying = true
     }
 
     func pause() {
         wantsToPlay = false
+        resumeAfterOverlay = false
         player.pause()
         isPlaying = false
     }
@@ -372,7 +433,10 @@ final class PlaybackController: ObservableObject {
                     // Some items remain paused after a cancelled/replaced seek;
                     // restore the user's intent without changing a deliberate
                     // pause that happened while the seek was in flight.
-                    if self.player.timeControlStatus != .playing { self.player.play() }
+                    if self.player.timeControlStatus != .playing {
+                        self.ignorePausedStateUntil = Date().addingTimeInterval(0.4)
+                        self.player.play()
+                    }
                     self.isPlaying = true
                 } else {
                     self.player.pause()
@@ -684,6 +748,7 @@ struct CinemaPlayerScreen: View {
     let initialEpisode: Int
     let resumeTime: Double?
     let subtitleCustomizationEnabled: Bool
+    let offlineOnly: Bool
     let onOpenRelated: ((Movie) -> Void)?
     @Environment(CinemaStore.self) private var store
     @Environment(DownloadManager.self) private var downloads
@@ -803,13 +868,14 @@ struct CinemaPlayerScreen: View {
             .lowercased()
     }
 
-    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
+    init(movie: Movie, servers: [MovieServer], initialServer: Int, initialEpisode: Int, resumeTime: Double? = nil, subtitleCustomizationEnabled: Bool = false, offlineOnly: Bool = false, onOpenRelated: ((Movie) -> Void)? = nil) {
         self.movie = movie
         self.servers = servers
         self.initialServer = initialServer
         self.initialEpisode = initialEpisode
         self.resumeTime = resumeTime
         self.subtitleCustomizationEnabled = subtitleCustomizationEnabled
+        self.offlineOnly = offlineOnly
         self.onOpenRelated = onOpenRelated
         let server = servers.indices.contains(initialServer) ? initialServer : 0
         let episodes = servers.indices.contains(server) ? servers[server].episodes : []
@@ -827,11 +893,12 @@ struct CinemaPlayerScreen: View {
                 if playback.activeURL != nil {
                     NativeVideoSurface(player: playback.player, fit: videoFit, pipCoordinator: pipCoordinator).ignoresSafeArea().accessibilityLabel("Đang phát \(movie.name)")
                     subtitleOverlay(bottomInset: proxy.safeAreaInsets.bottom)
+                    pipSubtitleNotice(bottomInset: proxy.safeAreaInsets.bottom)
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { if controlsLocked { controlsLocked = false; controlsVisible = true } else { toggleControls() } }
                 } else {
-                    PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL).ignoresSafeArea().overlay(Color.black.opacity(0.4))
+                    playerPlaceholder
                 }
 
                 if playback.activeURL != nil {
@@ -917,7 +984,7 @@ struct CinemaPlayerScreen: View {
                         .transition(.asymmetric(insertion: .scale(scale: 0.82, anchor: .topTrailing).combined(with: .opacity), removal: .scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity)))
                         .zIndex(13)
                 }
-                if !connectivity.isConnected {
+                if !connectivity.isConnected && !offlineOnly {
                     NetworkUnavailableOverlay()
                         .transition(.opacity)
                         .zIndex(100)
@@ -926,11 +993,11 @@ struct CinemaPlayerScreen: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12, coordinateSpace: .local)
                     .onChanged { value in
-                        guard connectivity.isConnected else { return }
+                        guard offlineOnly || connectivity.isConnected else { return }
                         handleAdjustmentDrag(value, width: proxy.size.width, height: proxy.size.height)
                     }
                     .onEnded { _ in
-                        guard connectivity.isConnected else { return }
+                        guard offlineOnly || connectivity.isConnected else { return }
                         finishAdjustmentGesture()
                     }
             )
@@ -966,13 +1033,13 @@ struct CinemaPlayerScreen: View {
                 volume = systemVolume.value
             }
             .task {
-                await store.loadHome()
+                if !offlineOnly { await store.loadHome() }
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 forceLandscape()
             }
             .task(id: store.accountUser?.id) {
-                guard store.accountUser != nil else { return }
+                guard !offlineOnly, store.accountUser != nil else { return }
                 await store.synchronizeSubtitlePreferencesForCurrentAccount()
                 guard !Task.isCancelled else { return }
                 subtitlePreferences = store.playbackDefaults.subtitlePreferences
@@ -2091,7 +2158,11 @@ struct CinemaPlayerScreen: View {
             movieSlug: movie.slug,
             episodeSlug: source.slug.isEmpty ? source.name : source.slug
         )
-        playback.load(source, startAt: startAt, localURL: offlineURL)
+        // The inline renderer can switch among all tracks. For PiP, seed the
+        // AVPlayerItem with the same first/default track through the HLS master
+        // when the API only exposes it inside subtitleTracks.
+        let nativeSubtitleURL = source.availableSubtitleTracks.first?.subtitleURL
+        playback.load(source, startAt: startAt, localURL: offlineURL, subtitleURL: nativeSubtitleURL)
         if startAt != nil { hasAppliedResumeTime = true }
         pendingResumeTime = nil
         saveLocalWatchProgress()
@@ -2152,6 +2223,58 @@ struct CinemaPlayerScreen: View {
         }
     }
 
+    /// SwiftUI layers do not belong to the system PiP surface. If the stream
+    /// has no AVPlayer legible track, say so in the inline player instead of
+    /// implying that the custom VTT renderer will follow the video into PiP.
+    @ViewBuilder
+    private func pipSubtitleNotice(bottomInset: CGFloat) -> some View {
+        if pipCoordinator.isActive, hasCurrentSubtitle, !playback.nativeSubtitleActive {
+            HStack(spacing: 8) {
+                Image(systemName: "captions.bubble").font(.system(size: 13, weight: .semibold))
+                Text("PiP của iOS không hiển thị phụ đề tùy chỉnh; phụ đề sẽ trở lại khi xem trong Cinemora.")
+                    .font(.system(size: 10, weight: .semibold))
+                    .multilineTextAlignment(.leading)
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.8) }
+            .frame(maxWidth: 430)
+            .padding(.horizontal, 24)
+            .padding(.bottom, bottomInset + 68)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var playerPlaceholder: some View {
+        ZStack {
+            PosterArt(url: movie.backdropURL, fallbackURL: movie.posterURL)
+                .ignoresSafeArea()
+                .overlay(Color.black.opacity(0.58))
+            LinearGradient(
+                colors: [.black.opacity(0.18), .black.opacity(0.82)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            VStack(spacing: 11) {
+                cinemoraLogo
+                Text(movie.name)
+                    .font(.auroraLabel(13, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                if playback.errorMessage == nil {
+                    Text("Đang chuẩn bị trình phát…")
+                        .font(.auroraBody(10))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+            }
+            .padding(.horizontal, 28)
+        }
+    }
+
     /// Tách khỏi body: để nguyên trong chuỗi modifier thì trình biên dịch phải
     /// suy luận cả biểu thức khổng lồ và bị quá thời gian.
     private func handleScenePhaseChange(_ phase: ScenePhase) {
@@ -2180,6 +2303,7 @@ struct CinemaPlayerScreen: View {
     }
 
     private func saveLocalWatchProgress() {
+        guard !offlineOnly else { return }
         guard let episode else { return }
         store.recordLocalHistory(movie: movie, episode: episode, serverName: server?.name, watchedSeconds: playback.currentTime, durationSeconds: playback.duration)
         lastHistorySaveAt = Date()

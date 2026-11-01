@@ -32,6 +32,7 @@ struct MovieDetailScreen: View {
     var body: some View {
         GeometryReader { proxy in
             let contentWidth = min(max(proxy.size.width - 40, 280), 720)
+            let topContentPadding = max(58, proxy.safeAreaInsets.top + 12)
 
             ZStack {
                 CinemaBackground()
@@ -61,7 +62,6 @@ struct MovieDetailScreen: View {
                         } else if store.isDetailLoading(slug) {
                             loadingState(width: contentWidth)
                                 .frame(width: contentWidth)
-                                .padding(.top, 70)
                         } else {
                             StateMessage(icon: "wifi.exclamationmark", title: "Không tải được phim", detail: store.detailError(for: slug), actionTitle: "Thử lại") { store.loadDetail(slug: slug) }
                                 .frame(width: contentWidth)
@@ -69,7 +69,7 @@ struct MovieDetailScreen: View {
                         }
                     }
                     .frame(width: contentWidth, alignment: .leading)
-                    .padding(.top, 58)
+                    .padding(.top, topContentPadding)
                     .padding(.bottom, 112)
                 }
                 .frame(maxWidth: .infinity)

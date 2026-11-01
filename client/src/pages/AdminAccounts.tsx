@@ -137,15 +137,45 @@ export default function AdminAccounts() {
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [bulkPending, setBulkPending] = useState(false);
-  const accounts = trpc.adminAccounts.list.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: 10_000, retry: false });
-  const devices = trpc.adminAccounts.devices.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: 10_000, retry: false });
-  const logoutAll = trpc.adminAccounts.logoutAll.useMutation({ onSuccess: () => { toast.success("Đã đăng xuất tất cả thiết bị."); void accounts.refetch(); if (selectedUserId) void devices.refetch(); }, onError: error => toast.error("Không thể đăng xuất thiết bị", { description: error.message }) });
-  const setSpecialPrivileges = trpc.adminAccounts.setSpecialPrivileges.useMutation({ onSuccess: () => { void accounts.refetch(); }, onError: error => toast.error("Không thể cập nhật đặc quyền", { description: error.message }) });
-  const updateAccount = trpc.adminAccounts.update.useMutation({ onSuccess: async () => { setEditingUserId(null); setForm({ name: "", email: "", password: "", role: "user" }); toast.success("Đã cập nhật tài khoản."); await accounts.refetch(); }, onError: error => toast.error("Không thể cập nhật tài khoản", { description: error.message }) });
-  const saveBadges = trpc.adminAccounts.setBadges.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu nhãn hiển thị."); toast.success("Đã lưu nhãn hiển thị."); await accounts.refetch(); }, onError: error => toast.error("Không thể lưu nhãn", { description: error.message }) });
-  const saveNameStyle = trpc.adminAccounts.setNameStyle.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu kiểu tên người dùng."); toast.success("Đã lưu kiểu tên người dùng."); await accounts.refetch(); }, onError: error => toast.error("Không thể lưu kiểu tên", { description: error.message }) });
-  const setAvatar = trpc.adminAccounts.setAvatar.useMutation({ onSuccess: async () => { setAvatarNote("Đã cập nhật ảnh đại diện."); toast.success("Đã cập nhật ảnh đại diện."); await accounts.refetch(); }, onError: error => toast.error("Không thể cập nhật ảnh đại diện", { description: error.message }) });
-  const clearAvatar = trpc.adminAccounts.clearAvatar.useMutation({ onSuccess: async () => { setAvatarDraft(""); setAvatarNote("Đã xoá ảnh đại diện."); toast.success("Đã xoá ảnh đại diện."); await accounts.refetch(); }, onError: error => toast.error("Không thể xoá ảnh đại diện", { description: error.message }) });
+  const utils = trpc.useUtils();
+  const queryBehavior = {
+    staleTime: 0,
+    refetchOnMount: "always" as const,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    retry: false,
+  };
+  const accounts = trpc.adminAccounts.list.useQuery(undefined, { ...queryBehavior, enabled: user?.role === "admin" });
+  const devices = trpc.adminAccounts.devices.useQuery({ userId: selectedUserId || 0 }, { ...queryBehavior, enabled: user?.role === "admin" && selectedUserId !== null });
+
+  async function refetchAccountData() {
+    await Promise.all([
+      accounts.refetch(),
+      selectedUserId !== null ? devices.refetch() : Promise.resolve(),
+    ]);
+  }
+
+  // Login/logout can leave React Query data mounted because this page is not
+  // necessarily unmounted. Clear the admin snapshot and fetch a fresh one for
+  // the newly authenticated admin instead of showing another account's data.
+  useEffect(() => {
+    if (user?.role !== "admin") {
+      setSelectedUserId(null);
+      utils.adminAccounts.list.setData(undefined, undefined);
+      return;
+    }
+    void refetchAccountData();
+  }, [user?.id, user?.role]);
+
+  const logoutAll = trpc.adminAccounts.logoutAll.useMutation({ onSuccess: async () => { toast.success("Đã đăng xuất tất cả thiết bị."); await refetchAccountData(); }, onError: error => toast.error("Không thể đăng xuất thiết bị", { description: error.message }) });
+  const setSpecialPrivileges = trpc.adminAccounts.setSpecialPrivileges.useMutation({ onSuccess: () => { void refetchAccountData(); }, onError: error => toast.error("Không thể cập nhật đặc quyền", { description: error.message }) });
+  const updateAccount = trpc.adminAccounts.update.useMutation({ onSuccess: async () => { setEditingUserId(null); setForm({ name: "", email: "", password: "", role: "user" }); toast.success("Đã cập nhật tài khoản."); await refetchAccountData(); }, onError: error => toast.error("Không thể cập nhật tài khoản", { description: error.message }) });
+  const saveBadges = trpc.adminAccounts.setBadges.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu nhãn hiển thị."); toast.success("Đã lưu nhãn hiển thị."); await refetchAccountData(); }, onError: error => toast.error("Không thể lưu nhãn", { description: error.message }) });
+  const saveNameStyle = trpc.adminAccounts.setNameStyle.useMutation({ onSuccess: async () => { setStyleNote("Đã lưu kiểu tên người dùng."); toast.success("Đã lưu kiểu tên người dùng."); await refetchAccountData(); }, onError: error => toast.error("Không thể lưu kiểu tên", { description: error.message }) });
+  const setAvatar = trpc.adminAccounts.setAvatar.useMutation({ onSuccess: async () => { setAvatarNote("Đã cập nhật ảnh đại diện."); toast.success("Đã cập nhật ảnh đại diện."); await refetchAccountData(); }, onError: error => toast.error("Không thể cập nhật ảnh đại diện", { description: error.message }) });
+  const clearAvatar = trpc.adminAccounts.clearAvatar.useMutation({ onSuccess: async () => { setAvatarDraft(""); setAvatarNote("Đã xoá ảnh đại diện."); toast.success("Đã xoá ảnh đại diện."); await refetchAccountData(); }, onError: error => toast.error("Không thể xoá ảnh đại diện", { description: error.message }) });
   const uploadImage = trpc.customMovies.uploadImage.useMutation();
 
   const visibleAccounts = useMemo(() => {

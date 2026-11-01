@@ -1,13 +1,23 @@
 import SwiftUI
 
+private struct VLCShareItem: Identifiable {
+    let id = UUID()
+    let fileURL: URL
+}
+
 /// Danh sách phim đã tải về: tách rõ **đang tải** và **đã tải**, thanh tiến trình
 /// kèm dung lượng thực tế trên dung lượng ước tính, có dừng và xoá từng bản.
 struct DownloadsScreen: View {
     @Environment(DownloadManager.self) private var downloads
+    @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(\.dismiss) private var dismiss
     @State private var filter: DownloadFilter = .active
     @State private var pendingRemoval: DownloadManager.Item?
     @State private var showRemoveAll = false
+    @State private var itemForPlayback: DownloadManager.Item?
+    @State private var internalPlaybackItem: DownloadManager.Item?
+    @State private var vlcShareItem: VLCShareItem?
+    @State private var playbackNotice: String?
 
     enum DownloadFilter: String, CaseIterable, Identifiable {
         case active, done
@@ -73,6 +83,68 @@ struct DownloadsScreen: View {
         } message: {
             Text("Toàn bộ \(doneItems.count) tập đã tải sẽ bị xoá khỏi máy. Phim đang tải dở không bị ảnh hưởng.")
         }
+        .confirmationDialog("Chọn cách phát", isPresented: Binding(get: { itemForPlayback != nil }, set: { if !$0 { itemForPlayback = nil } }), titleVisibility: .visible) {
+            if let item = itemForPlayback {
+                Button("Xem trong Cinemora") {
+                    itemForPlayback = nil
+                    openInternally(item)
+                }
+                if let fileURL = downloads.localURL(for: item), case .available = OfflinePlaybackSupport.vlcAvailability(for: fileURL) {
+                    Button("Mở bằng VLC") {
+                        itemForPlayback = nil
+                        vlcShareItem = VLCShareItem(fileURL: fileURL)
+                    }
+                } else {
+                    Button("VLC không khả dụng") { }
+                        .disabled(true)
+                }
+                Button("Huỷ", role: .cancel) { itemForPlayback = nil }
+            }
+        } message: {
+            Text(playbackDialogMessage)
+        }
+        .alert("Không thể phát bản tải", isPresented: Binding(get: { playbackNotice != nil }, set: { if !$0 { playbackNotice = nil } })) {
+            Button("Đã hiểu", role: .cancel) { playbackNotice = nil }
+        } message: {
+            Text(playbackNotice ?? "Tệp tải xuống không khả dụng.")
+        }
+        .sheet(item: $vlcShareItem) { item in
+            OfflineFileActivityView(fileURL: item.fileURL)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(item: $internalPlaybackItem) { item in
+            if let fileURL = downloads.localURL(for: item) {
+                OfflineDownloadPlayerScreen(item: item, fileURL: fileURL)
+            } else {
+                StateMessage(icon: "exclamationmark.triangle", title: "Tệp không còn trên máy", detail: "Hãy xoá mục này rồi tải lại tập phim khi có mạng.")
+                    .presentationBackground(Color.black)
+            }
+        }
+    }
+
+    private var playbackDialogMessage: String {
+        guard let item = itemForPlayback, let fileURL = downloads.localURL(for: item) else {
+            return "Tệp đã tải không còn tồn tại hoặc không phải định dạng video phát được."
+        }
+        let availability = OfflinePlaybackSupport.vlcAvailability(for: fileURL)
+        return "\(downloads.offlineStorageText(for: item)). \(availability.message)"
+    }
+
+    private func choosePlayback(_ item: DownloadManager.Item) {
+        guard downloads.localURL(for: item) != nil else {
+            playbackNotice = "Tệp tải xuống không còn tồn tại, rỗng hoặc không đúng định dạng video. Cinemora không gọi VLC và không báo đã mở tệp. Hãy xoá mục này rồi tải lại."
+            return
+        }
+        itemForPlayback = item
+    }
+
+    private func openInternally(_ item: DownloadManager.Item) {
+        guard downloads.localURL(for: item) != nil else {
+            playbackNotice = "Không tìm thấy tệp video trên máy. Hãy xoá mục này rồi tải lại; không có kết nối mạng nào được gọi để thay thế tệp."
+            return
+        }
+        internalPlaybackItem = item
     }
 
     /// Nhắc rõ vì sao bản tải đang chờ: phim chỉ tải qua Wi-Fi.
@@ -214,9 +286,10 @@ struct DownloadsScreen: View {
     }
 
     private func row(_ item: DownloadManager.Item) -> some View {
+        let localFile = downloads.localURL(for: item)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                PosterArt(url: URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL)
+                PosterArt(url: connectivity.isConnected ? URL(string: item.poster ?? "", relativeTo: CinemaAPI.baseURL)?.absoluteURL : nil)
                     .frame(width: 54, height: 78)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 5) {
@@ -265,13 +338,18 @@ struct DownloadsScreen: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    Text(item.sizeText)
-                        .font(.auroraLabel(11, weight: .bold))
-                        .foregroundStyle(Color.auroraMint)
-                    Text("Đã tải xong, xem được offline")
+                    Image(systemName: localFile == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(localFile == nil ? Color.auroraAmber : Color.auroraMint)
+                    Text(localFile == nil ? "Tệp không còn hoặc không đọc được" : "Đã tải xong, phát được offline")
                         .font(.auroraBody(10))
-                        .foregroundStyle(Color.auroraTextSecondary)
+                        .foregroundStyle(localFile == nil ? Color.auroraAmber : Color.auroraTextSecondary)
                     Spacer(minLength: 0)
+                }
+                if localFile != nil {
+                    Text(downloads.offlineStorageText(for: item))
+                        .font(.auroraBody(9))
+                        .foregroundStyle(Color.auroraTextTertiary)
+                        .lineLimit(2)
                 }
             }
 
@@ -288,7 +366,13 @@ struct DownloadsScreen: View {
                     actionButton("Dừng tải", icon: "pause.fill", tint: .auroraAmber) { downloads.pause(item.id) }
                 case .paused, .failed:
                     actionButton("Tiếp tục", icon: "play.fill", tint: .auroraMint) { downloads.retry(item.id) }
-                case .finished, .unsupported:
+                case .finished:
+                    if localFile != nil {
+                        actionButton("Xem", icon: "play.fill", tint: .auroraMint) { choosePlayback(item) }
+                    } else {
+                        EmptyView()
+                    }
+                case .unsupported:
                     EmptyView()
                 }
                 Spacer(minLength: 0)
@@ -338,6 +422,26 @@ struct DownloadsScreen: View {
             .background(tint.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Player dành riêng cho bản tải: episode chỉ có file://, không có URL mạng hay
+/// subtitle từ server, và CinemaPlayerScreen được đánh dấu offlineOnly.
+private struct OfflineDownloadPlayerScreen: View {
+    let item: DownloadManager.Item
+    let fileURL: URL
+
+    var body: some View {
+        let episode = item.offlineEpisode(fileURL: fileURL)
+        let server = MovieServer(name: item.serverName, isAi: false, episodes: [episode])
+        CinemaPlayerScreen(
+            movie: item.offlineMovie(),
+            servers: [server],
+            initialServer: 0,
+            initialEpisode: 0,
+            subtitleCustomizationEnabled: true,
+            offlineOnly: true
+        )
     }
 }
 

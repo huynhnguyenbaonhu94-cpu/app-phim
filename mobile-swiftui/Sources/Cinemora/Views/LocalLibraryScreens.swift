@@ -271,9 +271,9 @@ struct SavedHubScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 8) {
-                        SectionEyebrow(text: "LƯU TRÊN TÀI KHOẢN")
-                        AuroraGradientText(text: "Lịch sử & Yêu thích", font: .auroraDisplay(28))
-                        Text("Đăng nhập để lưu lịch sử xem và phim yêu thích; các cài đặt khác vẫn dùng được khi offline.")
+                        SectionEyebrow(text: "CÀI ĐẶT & THƯ VIỆN")
+                        AuroraGradientText(text: "Cài đặt & dữ liệu", font: .auroraDisplay(28))
+                        Text("Quản lý tài khoản, tùy chỉnh trình phát và phụ đề, xem lịch sử, phim yêu thích hoặc tiếp tục xem nội dung đã tải khi offline.")
                             .font(.auroraBody(12))
                             .foregroundStyle(Color.auroraTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -344,7 +344,7 @@ struct AuroraChip: View {
 // MARK: - Tab bar
 
 enum CinemoraTab: Int, CaseIterable, Identifiable {
-    case home, tv, library, search, saved
+    case home, tv, library, search, settings
 
     var id: Int { rawValue }
 
@@ -354,7 +354,7 @@ enum CinemoraTab: Int, CaseIterable, Identifiable {
         case .tv: return "Truyền Hình"
         case .library: return "Thư Viện"
         case .search: return "Tìm Kiếm"
-        case .saved: return "Lưu"
+        case .settings: return "Cài Đặt"
         }
     }
 
@@ -364,7 +364,7 @@ enum CinemoraTab: Int, CaseIterable, Identifiable {
         case .tv: return "tv"
         case .library: return "square.grid.2x2"
         case .search: return "magnifyingglass"
-        case .saved: return "bookmark"
+        case .settings: return "gearshape"
         }
     }
 
@@ -374,7 +374,7 @@ enum CinemoraTab: Int, CaseIterable, Identifiable {
         case .tv: return "tv.fill"
         case .library: return "square.grid.2x2.fill"
         case .search: return "magnifyingglass"
-        case .saved: return "bookmark.fill"
+        case .settings: return "gearshape.fill"
         }
     }
 }

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Request } from "express";
-import { accountSessions, users } from "../drizzle/schema";
+import { accountSessions, movieFavorites, movieWatchHistory, users } from "../drizzle/schema";
 import { COOKIE_NAME } from "@shared/const";
 import { getDb } from "./db";
 
@@ -139,12 +139,21 @@ export async function revokeDevice(userId: number, id: number) {
   await db.update(accountSessions).set({ revokedAt: new Date() }).where(and(eq(accountSessions.userId, userId), eq(accountSessions.id, id), isNull(accountSessions.revokedAt)));
 }
 
-export async function listAccountDevices(userId: number): Promise<AccountDevice[]> {
+/**
+ * The single source of truth for an active device: every non-revoked session.
+ * Both the admin card count and its device modal must use this exact predicate.
+ */
+async function listActiveAccountSessionRows(userId?: number) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(accountSessions)
-    .where(and(eq(accountSessions.userId, userId), isNull(accountSessions.revokedAt)))
-    .orderBy(desc(accountSessions.lastSeenAt));
+  const activeWhere = userId === undefined
+    ? isNull(accountSessions.revokedAt)
+    : and(eq(accountSessions.userId, userId), isNull(accountSessions.revokedAt));
+  return db.select().from(accountSessions).where(activeWhere).orderBy(desc(accountSessions.lastSeenAt));
+}
+
+export async function listAccountDevices(userId: number): Promise<AccountDevice[]> {
+  const rows = await listActiveAccountSessionRows(userId);
   const now = Date.now();
   return rows.map((row) => ({
     id: row.id,
@@ -162,23 +171,40 @@ export async function listAccountDevices(userId: number): Promise<AccountDevice[
 export async function listAllAccountSummaries(): Promise<AdminAccountSummary[]> {
   const db = await getDb();
   if (!db) return [];
-  const [rows] = await db.execute(sql.raw(`
-    SELECT u.id, u.openId, u.name, u.email, u.role, u.hasSpecialPrivileges, u.avatar, u.badge, u.badges, u.nameStyle, u.loginMethod, u.createdAt, u.updatedAt, u.lastSignedIn,
-      COUNT(DISTINCT CASE WHEN s.revokedAt IS NULL THEN s.id END) AS activeDeviceCount,
-      COUNT(DISTINCT f.id) AS favoriteCount, COUNT(DISTINCT h.id) AS historyCount,
-      MAX(CASE WHEN s.revokedAt IS NULL THEN s.lastSeenAt END) AS latestDeviceSeenAt
-    FROM users u
-    LEFT JOIN account_sessions s ON s.userId = u.id
-    LEFT JOIN movie_favorites f ON f.userId = u.id
-    LEFT JOIN movie_watch_history h ON h.userId = u.id
-    GROUP BY u.id, u.openId, u.name, u.email, u.role, u.hasSpecialPrivileges, u.avatar, u.badge, u.badges, u.nameStyle, u.loginMethod, u.createdAt, u.updatedAt, u.lastSignedIn
-    ORDER BY u.createdAt DESC
-  `));
-  return (rows as unknown as Array<Record<string, unknown>>).map((row) => ({
-    id: Number(row.id), openId: String(row.openId), name: row.name as string | null, email: row.email as string | null, role: String(row.role), hasSpecialPrivileges: Boolean(row.hasSpecialPrivileges), avatar: (row.avatar as string | null) ?? null, badge: (row.badge as string | null) ?? null, badges: (row.badges as string | null) ?? null, nameStyle: (row.nameStyle as string | null) ?? null, loginMethod: row.loginMethod as string | null,
-    createdAt: new Date(String(row.createdAt)), updatedAt: new Date(String(row.updatedAt)), lastSignedIn: new Date(String(row.lastSignedIn)),
-    activeDeviceCount: Number(row.activeDeviceCount || 0), favoriteCount: Number(row.favoriteCount || 0), historyCount: Number(row.historyCount || 0),
-    latestDeviceSeenAt: row.latestDeviceSeenAt ? new Date(String(row.latestDeviceSeenAt)) : null,
+  const [userRows, activeSessionRows, favoriteCountRows, historyCountRows] = await Promise.all([
+    db.select().from(users).orderBy(desc(users.createdAt)),
+    // Reuse the exact active-session helper used by listAccountDevices().
+    listActiveAccountSessionRows(),
+    db.select({ userId: movieFavorites.userId, total: count() }).from(movieFavorites).groupBy(movieFavorites.userId),
+    db.select({ userId: movieWatchHistory.userId, total: count() }).from(movieWatchHistory).groupBy(movieWatchHistory.userId),
+  ]);
+  const activeDeviceCounts = new Map<number, number>();
+  const latestDeviceSeenAt = new Map<number, Date>();
+  for (const row of activeSessionRows) {
+    activeDeviceCounts.set(row.userId, (activeDeviceCounts.get(row.userId) ?? 0) + 1);
+    if (!latestDeviceSeenAt.has(row.userId)) latestDeviceSeenAt.set(row.userId, row.lastSeenAt);
+  }
+  const favoriteCounts = new Map(favoriteCountRows.map((row) => [row.userId, Number(row.total)]));
+  const historyCounts = new Map(historyCountRows.map((row) => [row.userId, Number(row.total)]));
+  return userRows.map((row) => ({
+    id: row.id,
+    openId: row.openId,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    hasSpecialPrivileges: Boolean(row.hasSpecialPrivileges),
+    avatar: row.avatar ?? null,
+    badge: row.badge ?? null,
+    badges: row.badges ?? null,
+    nameStyle: row.nameStyle ?? null,
+    loginMethod: row.loginMethod ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastSignedIn: row.lastSignedIn,
+    activeDeviceCount: activeDeviceCounts.get(row.id) ?? 0,
+    favoriteCount: favoriteCounts.get(row.id) ?? 0,
+    historyCount: historyCounts.get(row.id) ?? 0,
+    latestDeviceSeenAt: latestDeviceSeenAt.get(row.id) ?? null,
   }));
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, Maximize2, MessageCircle, Paperclip, Pause, Play, RefreshCw, Send, ShieldCheck, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Link } from "wouter";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
@@ -72,13 +73,22 @@ function fitPreviewSize(width: number, height: number) {
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
+function validMediaDimensions(width: number, height: number) {
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? { width: Math.round(width), height: Math.round(height) }
+    : null;
+}
+
 function AdminChatAttachment({ url, mimeType, mediaWidth, mediaHeight }: { url: string; mimeType: string | null; mediaWidth?: number | null; mediaHeight?: number | null }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const metadataPreviewSize = fitPreviewSize(Number(mediaWidth), Number(mediaHeight));
-  const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(metadataPreviewSize);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isImageDragging, setIsImageDragging] = useState(false);
+  const metadataVideoDimensions = validMediaDimensions(Number(mediaWidth), Number(mediaHeight));
+  const [videoDimensions, setVideoDimensions] = useState<{ width: number; height: number } | null>(metadataVideoDimensions);
+  const previewSize = videoDimensions ? fitPreviewSize(videoDimensions.width, videoDimensions.height) : null;
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -87,17 +97,65 @@ function AdminChatAttachment({ url, mimeType, mediaWidth, mediaHeight }: { url: 
   const seekTargetRef = useRef<number | null>(null);
   const isScrubbingRef = useRef(false);
   const viewerRef = useRef<HTMLElement>(null);
+  const imageStageRef = useRef<HTMLDivElement>(null);
+  const imageDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const isVideo = mimeType?.startsWith("video/") ?? false;
   const source = attempt ? `${url}${url.includes("?") ? "&" : "?"}retry=${attempt}` : url;
-  useEffect(() => { setPreviewSize(metadataPreviewSize); }, [source, mediaWidth, mediaHeight]);
+  useEffect(() => {
+    setPan({ x: 0, y: 0 });
+    setZoom(1);
+    setVideoDimensions(metadataVideoDimensions);
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+    setIsMuted(false);
+    seekTargetRef.current = null;
+    imageDragRef.current = null;
+    setIsImageDragging(false);
+  }, [source, mediaWidth, mediaHeight]);
   useEffect(() => {
     if (!viewerOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setViewerOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeViewer(); };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [viewerOpen]);
   function retry() { setFailed(false); setAttempt(value => value + 1); }
-  function closeViewer() { videoRef.current?.pause(); setViewerOpen(false); setZoom(1); }
+  function resetImageTransform() { setZoom(1); setPan({ x: 0, y: 0 }); }
+  function changeZoom(nextZoom: number, focalPoint?: { x: number; y: number }) {
+    const next = Math.max(0.5, Math.min(4, nextZoom));
+    if (focalPoint && zoom > 0 && next !== zoom) {
+      setPan(current => ({
+        x: focalPoint.x - (focalPoint.x - current.x) * (next / zoom),
+        y: focalPoint.y - (focalPoint.y - current.y) * (next / zoom),
+      }));
+    }
+    setZoom(next);
+  }
+  function closeViewer() {
+    videoRef.current?.pause();
+    imageDragRef.current = null;
+    setIsImageDragging(false);
+    resetImageTransform();
+    setViewerOpen(false);
+  }
+  function handleImagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    imageDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+    setIsImageDragging(true);
+  }
+  function handleImagePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = imageDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPan({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+  }
+  function finishImagePointer(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = imageDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    imageDragRef.current = null;
+    setIsImageDragging(false);
+  }
   function seekBy(delta: number) {
     const video = videoRef.current;
     if (!video) return;
@@ -143,18 +201,18 @@ function AdminChatAttachment({ url, mimeType, mediaWidth, mediaHeight }: { url: 
   }
   if (failed) return <button type="button" className="admin-chat-media-fallback" onClick={retry}><RefreshCw size={15} /> Không tải được tệp · thử lại</button>;
   return <>
-    {isVideo ? <button type="button" className={`admin-chat-video-preview${previewSize ? " has-dimensions" : ""}`} style={previewSize ? { width: `min(${previewSize.width}px, 100%)`, aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined} onClick={() => { setViewerOpen(true); setIsPlaying(false); }} aria-label="Mở trình phát video">
-          <video key={source} muted preload="metadata" playsInline src={source} onLoadedMetadata={event => { const { videoWidth, videoHeight } = event.currentTarget; const dimensions = fitPreviewSize(videoWidth, videoHeight); if (dimensions && !metadataPreviewSize) setPreviewSize(dimensions); }} onError={() => setFailed(true)} />
+    {isVideo ? <button type="button" className={`admin-chat-video-preview${previewSize ? " has-dimensions" : ""}`} style={previewSize ? { width: `min(${previewSize.width}px, 100%)`, aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined} onClick={() => { setViewerOpen(true); setIsPlaying(false); setCurrentTime(0); }} aria-label="Mở trình phát video">
+          <video key={source} muted controls={false} preload="metadata" playsInline src={source} onLoadedMetadata={event => { const { videoWidth, videoHeight } = event.currentTarget; const dimensions = validMediaDimensions(videoWidth, videoHeight); if (dimensions) setVideoDimensions(dimensions); }} onError={() => setFailed(true)} />
       <span className="admin-chat-video-play"><Play size={21} fill="currentColor" /></span><span className="admin-chat-video-caption">Mở video</span>
-    </button> : <button type="button" className="admin-chat-image-preview" onClick={() => { setViewerOpen(true); setZoom(1); }} aria-label="Phóng to ảnh">
+    </button> : <button type="button" className="admin-chat-image-preview" onClick={() => { resetImageTransform(); setViewerOpen(true); }} aria-label="Phóng to ảnh">
       <img key={source} loading="lazy" src={source} alt="Media từ cuộc trò chuyện" onError={() => setFailed(true)} />
     </button>}
     {viewerOpen && <div className="admin-chat-viewer-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeViewer(); }}>
       <section ref={viewerRef} className="admin-chat-viewer" role="dialog" aria-modal="true" aria-label={isVideo ? "Trình phát video trong tin nhắn" : "Ảnh trong tin nhắn"}>
         <header className="admin-chat-viewer-head"><strong>{isVideo ? "Video trong tin nhắn" : "Ảnh trong tin nhắn"}</strong><button type="button" onClick={closeViewer} aria-label="Đóng"><X size={20} /></button></header>
         {isVideo ? <>
-          <div className="admin-chat-video-stage"><video ref={videoRef} key={source} src={source} autoPlay loop playsInline preload="metadata"
-            onLoadedMetadata={event => { setDuration(event.currentTarget.duration || 0); }}
+          <div className="admin-chat-video-stage" style={videoDimensions ? { aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}` } : undefined}><video ref={videoRef} key={source} src={source} autoPlay loop controls={false} playsInline preload="metadata"
+            onLoadedMetadata={event => { const { videoWidth, videoHeight } = event.currentTarget; const dimensions = validMediaDimensions(videoWidth, videoHeight); if (dimensions) setVideoDimensions(dimensions); setDuration(event.currentTarget.duration || 0); }}
             onTimeUpdate={event => { if (!isScrubbingRef.current && seekTargetRef.current === null) setCurrentTime(event.currentTarget.currentTime); setDuration(event.currentTarget.duration || 0); }}
             onSeeked={event => { if (!isScrubbingRef.current) { const actual = event.currentTarget.currentTime; const pending = seekTargetRef.current; if (pending !== null && Math.abs(actual - pending) > 0.25) return; seekTargetRef.current = null; setCurrentTime(actual); } }}
             onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onError={() => setFailed(true)} />
@@ -164,8 +222,10 @@ function AdminChatAttachment({ url, mimeType, mediaWidth, mediaHeight }: { url: 
             <div className="admin-chat-video-buttons"><button type="button" onClick={() => seekBy(-10)} aria-label="Tua lùi 10 giây">−10 giây</button><button type="button" className="is-primary" onClick={togglePlay} aria-label={isPlaying ? "Tạm dừng" : "Phát"}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button type="button" onClick={() => seekBy(10)} aria-label="Tua tới 10 giây">+10 giây</button><button type="button" className="is-utility" onClick={toggleMute} aria-label={isMuted ? "Bật âm thanh" : "Tắt âm thanh"} title={isMuted ? "Bật âm thanh" : "Tắt âm thanh"}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button type="button" className="is-utility" onClick={toggleFullscreen} aria-label="Toàn màn hình" title="Toàn màn hình"><Maximize2 size={16} /></button></div>
           </div>
         </> : <>
-          <div className="admin-chat-image-stage" onWheel={event => { event.preventDefault(); setZoom(value => Math.max(0.5, Math.min(4, value + (event.deltaY < 0 ? 0.15 : -0.15)))); }}><img key={source} src={source} alt="Ảnh cuộc trò chuyện" onError={() => setFailed(true)} style={{ transform: `scale(${zoom})` }} /></div>
-          <div className="admin-chat-image-tools"><button type="button" onClick={() => setZoom(value => Math.max(0.5, value - 0.2))} aria-label="Thu nhỏ"><ZoomOut size={17} /></button><input aria-label="Mức thu phóng ảnh" type="range" min="0.5" max="4" step="0.1" value={zoom} onChange={event => setZoom(Number(event.target.value))} /><strong>{Math.round(zoom * 100)}%</strong><button type="button" onClick={() => setZoom(value => Math.min(4, value + 0.2))} aria-label="Phóng to"><ZoomIn size={17} /></button><button type="button" onClick={() => setZoom(1)}>Vừa khung</button></div>
+          <div ref={imageStageRef} className={`admin-chat-image-stage${isImageDragging ? " is-dragging" : ""}`} onWheel={event => { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); changeZoom(zoom + (event.deltaY < 0 ? 0.15 : -0.15), { x: event.clientX - (rect.left + rect.width / 2), y: event.clientY - (rect.top + rect.height / 2) }); }} onPointerDown={handleImagePointerDown} onPointerMove={handleImagePointerMove} onPointerUp={finishImagePointer} onPointerCancel={finishImagePointer}>
+            <img key={source} src={source} alt="Ảnh cuộc trò chuyện" draggable={false} onError={() => setFailed(true)} style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }} />
+          </div>
+          <div className="admin-chat-image-tools"><button type="button" onClick={() => changeZoom(zoom - 0.2)} aria-label="Thu nhỏ"><ZoomOut size={17} /></button><input aria-label="Mức thu phóng ảnh" type="range" min="0.5" max="4" step="0.1" value={zoom} onChange={event => changeZoom(Number(event.target.value))} /><strong>{Math.round(zoom * 100)}%</strong><button type="button" onClick={() => changeZoom(zoom + 0.2)} aria-label="Phóng to"><ZoomIn size={17} /></button><button type="button" onClick={resetImageTransform}>Vừa khung</button></div>
         </>}
       </section>
     </div>}
@@ -194,7 +254,7 @@ export default function AdminSpecialChat() {
   const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
   const soundEnabledRef = useRef(soundEnabled);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const conversations = trpc.adminSpecialChat.conversations.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: isPageVisible ? 2_000 : 10_000, refetchIntervalInBackground: true, retry: false });
+  const conversations = trpc.adminSpecialChat.conversations.useQuery(undefined, { enabled: user?.role === "admin", refetchInterval: isPageVisible ? 1_000 : 10_000, refetchIntervalInBackground: true, retry: false });
   const messages = trpc.adminSpecialChat.messages.useQuery({ userId: selectedUserId || 0 }, { enabled: user?.role === "admin" && selectedUserId !== null, refetchInterval: isPageVisible ? 1_000 : 10_000, refetchIntervalInBackground: true, retry: false });
   const sendMessage = trpc.adminSpecialChat.sendMessage.useMutation({ onSuccess: async () => { setDraft(""); await Promise.all([messages.refetch(), conversations.refetch()]); }, onError: error => toast.error("Không gửi được tin nhắn", { description: error.message }) });
   const uploadMedia = trpc.adminSpecialChat.uploadMedia.useMutation();
@@ -268,14 +328,15 @@ export default function AdminSpecialChat() {
   }, [soundEnabled]);
   useEffect(() => {
     if (!conversations.data) return;
-    const current = new Map(conversations.data.map(item => [item.userId, item.latestUserMessageId]));
     const previous = incomingMessageIdsRef.current;
     const newMessageKeys: string[] = [];
-    if (previous) {
-      for (const item of conversations.data) {
-        if (item.latestUserMessageId > (previous.get(item.userId) ?? 0)) {
-          newMessageKeys.push(`${item.userId}:${item.latestUserMessageId}`);
-        }
+    const current = new Map(previous ?? []);
+    for (const item of conversations.data) {
+      const latestUserMessageId = Number(item.latestUserMessageId) || 0;
+      const previousId = current.get(item.userId) ?? 0;
+      if (latestUserMessageId > previousId) {
+        if (previous) newMessageKeys.push(`${item.userId}:${latestUserMessageId}`);
+        current.set(item.userId, latestUserMessageId);
       }
     }
     incomingMessageIdsRef.current = current;

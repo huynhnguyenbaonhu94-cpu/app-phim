@@ -88,6 +88,10 @@ struct LibraryScreen: View {
         .animation(Motion.sheet, value: filtersExpanded)
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.loadMeta(); loadIfNeeded() }
+        .onReceive(NotificationCenter.default.publisher(for: .cinemoraConnectivityDidRecover)) { _ in
+            guard store.catalogError != nil || store.catalogMovies.isEmpty else { return }
+            load()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { loadIfNeeded() }
         }

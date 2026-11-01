@@ -160,6 +160,16 @@ struct CinemoraTabShell: View {
                 LaunchLoader()
                     .transition(.opacity.combined(with: .scale(scale: 1.04)))
             }
+
+            // The offline state belongs to the four server-backed tabs. Keep
+            // the tab bar above this gate so Settings remains reachable, and
+            // keep its local Downloads/Favorites routes usable without a
+            // network connection.
+            if connectivity.isOffline && selection != .settings {
+                NetworkUnavailableOverlay()
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
         .overlay(alignment: .bottom) {
             AuroraTabBar(selection: $selection)
@@ -177,16 +187,10 @@ struct CinemoraTabShell: View {
                 .opacity(showLaunchLoader ? 0 : 1)
                 .animation(Motion.enter, value: showLaunchLoader)
         }
-        .overlay {
-            if !connectivity.isConnected {
-                NetworkUnavailableOverlay()
-                    .transition(.opacity)
-                    .zIndex(100)
-            }
-        }
         .animation(.easeInOut(duration: 0.28), value: connectivity.isConnected)
         .onChange(of: connectivity.isConnected) { wasConnected, isConnected in
             guard !wasConnected, isConnected else { return }
+            NotificationCenter.default.post(name: .cinemoraConnectivityDidRecover, object: nil)
             Task { @MainActor in
                 // An offline request may still be unwinding. Wait for its loading
                 // flag to clear before retrying, otherwise refreshHome's guard
@@ -224,6 +228,8 @@ struct CinemoraTabShell: View {
 extension Notification.Name {
     /// Bắn khi người dùng đổi tab để tab đang mở tự làm mới dữ liệu.
     static let cinemoraTabDidChange = Notification.Name("cinemora.tab.didChange")
+    /// Bắn sau khi màn offline rời đi để các tab đang hiển thị tự thử lại.
+    static let cinemoraConnectivityDidRecover = Notification.Name("cinemora.connectivity.didRecover")
 }
 
 // MARK: - Tab container
@@ -384,7 +390,7 @@ private struct AuroraTabScreen: View {
         case .tv: TVScreen(store: store)
         case .library: LibraryScreen()
         case .search: SearchScreen()
-        case .saved: SavedHubScreen()
+        case .settings: SavedHubScreen()
         }
     }
 
@@ -499,7 +505,7 @@ struct NetworkUnavailableOverlay: View {
                         .font(.auroraDisplay(23))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                    Text("Bạn chưa thể sử dụng app khi thiết bị ngoại tuyến. Hãy bật Wi‑Fi hoặc dữ liệu di động; Cinemora sẽ tự tiếp tục khi có kết nối.")
+                        Text("Các tab nội dung tạm dừng khi thiết bị ngoại tuyến. Bạn vẫn có thể mở Cài Đặt và xem phim đã tải; Cinemora sẽ tự tiếp tục khi có kết nối.")
                         .font(.auroraBody(12))
                         .foregroundStyle(Color.auroraTextSecondary)
                         .multilineTextAlignment(.center)

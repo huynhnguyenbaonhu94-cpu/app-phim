@@ -445,6 +445,9 @@ struct TVScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await tv.startLive() }
+        .onReceive(NotificationCenter.default.publisher(for: .cinemoraConnectivityDidRecover)) { _ in
+            Task { await tv.refresh() }
+        }
         // Thanh trượt âm lượng trong trình phát ghi thẳng vào âm lượng của máy, và khi
         // người dùng bấm nút cứng bên hông máy thì thanh trượt cập nhật theo. Việc ghi
         // chỉ diễn ra khi người dùng kéo thanh trượt (xem `volumeBinding`); trước đây có

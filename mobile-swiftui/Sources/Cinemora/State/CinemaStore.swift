@@ -43,6 +43,7 @@ final class CinemaStore {
     /// Nhóm lọc đang được đếm.
     private(set) var filterCountsPending: Set<String> = []
     private(set) var searchResults: [Movie] = []
+    private(set) var searchHistory: [SearchHistoryItem] = []
     private(set) var searchLoading = false
     private(set) var searchError: String?
     private(set) var detailMovie: Movie?
@@ -89,6 +90,7 @@ final class CinemaStore {
     @ObservationIgnored private var subtitlePreferencesLoadedUserID: Int?
     @ObservationIgnored private var subtitlePreferencesRevision = 0
     private let accountUserCacheKey = "cinemora.account.user.cache.v1"
+    private let searchHistoryKeyPrefix = "cinemora.search.history.v1."
     private let homeSectionConfig: [(kind: String, title: String)] = [
         ("latest", "Phim Mới"),
         ("series", "Phim Bộ"),
@@ -111,6 +113,7 @@ final class CinemaStore {
         clearLegacyLocalLibrary()
         if let data = localDefaults.data(forKey: accountUserCacheKey), let cached = try? decoder.decode(RemoteAccountUser.self, from: data) {
             accountUser = cached
+            searchHistory = loadSearchHistory(for: cached.id)
             CinemoraAppIconController.resetIfNotPrivileged(cached.hasSpecialPrivileges)
         }
         if let data = localDefaults.data(forKey: playbackDefaultsKey), let defaults = try? decoder.decode(PlaybackDefaults.self, from: data) {
@@ -463,6 +466,7 @@ final class CinemaStore {
         accountDevices = []
         movieRequests = []
         movieRequestsError = nil
+        searchHistory = []
         localFavorites = []
         localHistory = []
         accountError = nil
@@ -479,6 +483,7 @@ final class CinemaStore {
             playbackDefaults.subtitlePreferences = deviceSubtitlePreferences
             savePlaybackDefaults()
             subtitlePreferencesSyncMessage = nil
+            searchHistory = user.map { loadSearchHistory(for: $0.id) } ?? []
         }
         CinemoraAppIconController.resetIfNotPrivileged(user?.hasSpecialPrivileges == true)
         if let user, let data = try? JSONEncoder().encode(user) {
@@ -662,6 +667,7 @@ final class CinemaStore {
     func search(_ keyword: String) async {
         let value = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { searchResults = []; return }
+        recordSearchHistory(value)
         searchRequestID += 1
         let requestID = searchRequestID
         searchLoading = true; searchError = nil
@@ -681,6 +687,55 @@ final class CinemaStore {
         searchResults = []
         searchError = nil
         searchLoading = false
+    }
+
+    func removeSearchHistory(_ item: SearchHistoryItem) {
+        guard let userID = accountUser?.id else {
+            searchHistory = []
+            return
+        }
+        searchHistory.removeAll { $0.id == item.id }
+        saveSearchHistory(for: userID)
+    }
+
+    func clearSearchHistory() {
+        guard let userID = accountUser?.id else {
+            searchHistory = []
+            return
+        }
+        searchHistory.removeAll()
+        saveSearchHistory(for: userID)
+    }
+
+    private func recordSearchHistory(_ query: String) {
+        guard let userID = accountUser?.id else { return }
+
+        // Keep the newest spelling of a query while avoiding duplicate rows from
+        // retries or repeated searches with different letter casing.
+        searchHistory.removeAll { $0.query.caseInsensitiveCompare(query) == .orderedSame }
+        searchHistory.insert(SearchHistoryItem(query: query), at: 0)
+        searchHistory = Array(searchHistory.prefix(20))
+        saveSearchHistory(for: userID)
+    }
+
+    private func loadSearchHistory(for userID: Int) -> [SearchHistoryItem] {
+        let key = searchHistoryKeyPrefix + String(userID)
+        guard let data = localDefaults.data(forKey: key) else { return [] }
+        guard let history = try? JSONDecoder().decode([SearchHistoryItem].self, from: data) else {
+            localDefaults.removeObject(forKey: key)
+            return []
+        }
+        return Array(history.prefix(20))
+    }
+
+    private func saveSearchHistory(for userID: Int) {
+        let key = searchHistoryKeyPrefix + String(userID)
+        guard !searchHistory.isEmpty else {
+            localDefaults.removeObject(forKey: key)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(searchHistory) else { return }
+        localDefaults.set(data, forKey: key)
     }
 
     func loadDetail(slug: String) {

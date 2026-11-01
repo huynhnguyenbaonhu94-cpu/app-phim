@@ -15,6 +15,7 @@ struct SpecialAccountChatScreen: View {
     @State private var draft = ""
     @State private var pendingTextRequestID: String?
     @State private var pendingTextValue: String?
+    @State private var refreshInFlight = false
     @State private var isPhotoPickerPresented = false
     @State private var isLoading = true
     @State private var isSending = false
@@ -100,7 +101,10 @@ struct SpecialAccountChatScreen: View {
             }
             await refreshMessages(initial: messages.isEmpty)
             while !Task.isCancelled {
-                let interval: Duration = scenePhase == .active ? .seconds(1) : .seconds(10)
+                // Keep the active cadence responsive, but never start another
+                // request while the previous one is still in flight. Background
+                // scenes back off substantially to avoid needless polling.
+                let interval: Duration = scenePhase == .active ? .milliseconds(800) : .seconds(30)
                 try? await Task.sleep(for: interval)
                 if !Task.isCancelled { await refreshMessages(initial: false) }
             }
@@ -294,6 +298,9 @@ struct SpecialAccountChatScreen: View {
 
     @MainActor
     private func refreshMessages(initial: Bool) async {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
         do {
             let incoming = try await api.specialChatMessages(afterId: initial ? nil : messages.last?.id)
             if initial {
@@ -534,17 +541,20 @@ private struct SpecialChatMediaPreview: View {
         }
         return nil
     }
+    private var displayAspectRatio: CGFloat {
+        max(0.1, mediaAspectRatio ?? (isVideo ? (16.0 / 9.0) : (4.0 / 3.0)))
+    }
+    private func displaySize(maxHeight: CGFloat) -> CGSize {
+        let width = min(max(1, maxWidth), max(1, maxHeight) * displayAspectRatio)
+        return CGSize(width: width, height: width / displayAspectRatio)
+    }
     private var videoDisplaySize: CGSize {
-        let ratio = mediaAspectRatio ?? (16.0 / 9.0)
-        let width = min(max(1, maxWidth), 320 * ratio)
-        return CGSize(width: width, height: width / ratio)
+        displaySize(maxHeight: 320)
     }
     private var imageDisplaySize: CGSize {
-        guard let image = image ?? SpecialChatMediaCache.shared.image(for: cacheKey), image.size.width > 0, image.size.height > 0 else {
-            return CGSize(width: min(maxWidth, 220), height: 160)
-        }
-        let factor = min(1, min(maxWidth / image.size.width, 280 / image.size.height))
-        return CGSize(width: max(1, image.size.width * factor), height: max(1, image.size.height * factor))
+        // The server-saved dimensions are the source of truth. Do not derive
+        // the bubble frame from decoded pixels, otherwise it jumps on load.
+        displaySize(maxHeight: 280)
     }
 
     var body: some View {
@@ -597,6 +607,7 @@ private struct SpecialChatMediaPreview: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Mở ảnh đính kèm toàn màn hình")
+                .transition(.opacity)
             } else {
                 Button {
                     guard error, !isLoading else { return }
@@ -604,15 +615,25 @@ private struct SpecialChatMediaPreview: View {
                     errorMessage = nil
                     retryToken += 1
                 } label: {
-                    HStack(spacing: 8) {
-                        if isLoading { ProgressView().tint(.auroraSky) }
-                        else { Image(systemName: error ? "arrow.clockwise.circle" : "photo.fill").foregroundStyle(Color.auroraSky) }
-                        Text(error ? (errorMessage ?? "Không tải được ảnh · chạm để thử lại") : "Đang tải ảnh…")
-                            .font(.auroraBody(10))
-                            .foregroundStyle(Color.auroraTextSecondary)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(LinearGradient(colors: [.auroraRaised, .auroraInk], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        VStack(spacing: 8) {
+                            if isLoading {
+                                ProgressView().tint(Color.auroraSky)
+                            } else {
+                                Image(systemName: error ? "arrow.clockwise.circle" : "photo.fill")
+                                    .font(.system(size: 24, weight: .medium))
+                                    .foregroundStyle(Color.auroraSky)
+                            }
+                            Text(error ? (errorMessage ?? "Không tải được ảnh · chạm để thử lại") : "Đang tải ảnh…")
+                                .font(.auroraBody(10))
+                                .foregroundStyle(Color.auroraTextSecondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 10)
+                        }
                     }
-                    .frame(maxWidth: maxWidth, minHeight: 64)
-                    .padding(.horizontal, 10)
+                    .frame(width: imageDisplaySize.width, height: imageDisplaySize.height)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -642,6 +663,7 @@ private struct SpecialChatMediaPreview: View {
             }
             isLoading = false
         }
+        .animation(.easeOut(duration: 0.18), value: image != nil)
     }
 
     @MainActor
@@ -674,9 +696,10 @@ private struct SpecialChatMediaPreview: View {
                 .appendingPathExtension(ext)
             try data.write(to: fileURL, options: .atomic)
             let measuredRatio = await Self.videoAspectRatio(at: fileURL)
-            // The measured ratio is passed to the full-screen viewer only. Mutating
-            // preview state here caused its bubble to jump orientation on dismissal.
-            onPlayVideo(fileURL, measuredRatio ?? mediaAspectRatio)
+            // Prefer server metadata. A locally measured ratio is only a
+            // viewer fallback for legacy messages without saved dimensions;
+            // it never mutates the bubble's layout.
+            onPlayVideo(fileURL, mediaAspectRatio ?? measuredRatio)
         } catch {
             self.error = true
             errorMessage = "Không tải được video · chạm để thử lại"
@@ -766,6 +789,24 @@ private struct SpecialChatImageViewer: View {
     }
 }
 
+private struct SpecialChatVideoLoadingPlaceholder: View {
+    let aspectRatio: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(colors: [.auroraRaised, .auroraInk], startPoint: .topLeading, endPoint: .bottomTrailing))
+            VStack(spacing: 10) {
+                ProgressView().tint(Color.auroraAccent).scaleEffect(1.1)
+                Text("Đang chuẩn bị video…")
+                    .font(.auroraBody(10))
+                    .foregroundStyle(Color.auroraTextSecondary)
+            }
+        }
+        .aspectRatio(max(0.1, aspectRatio), contentMode: .fit)
+    }
+}
+
 private struct SpecialChatVideoPlayerSheet: View {
     let fileURL: URL
     let initialAspectRatio: CGFloat?
@@ -782,12 +823,12 @@ private struct SpecialChatVideoPlayerSheet: View {
     @State private var pendingSeekTarget: Double?
     @State private var wantsToPlay = true
     @State private var playbackError: String?
-    @State private var videoAspectRatio: CGFloat
+    @State private var isPlayerReady = false
+    private var videoAspectRatio: CGFloat { max(0.1, initialAspectRatio ?? (16.0 / 9.0)) }
 
     init(fileURL: URL, initialAspectRatio: CGFloat?) {
         self.fileURL = fileURL
         self.initialAspectRatio = initialAspectRatio
-        _videoAspectRatio = State(initialValue: initialAspectRatio ?? (16.0 / 9.0))
     }
 
     var body: some View {
@@ -819,13 +860,14 @@ private struct SpecialChatVideoPlayerSheet: View {
                 .padding(.top, 8)
 
                 Spacer(minLength: 18)
-                if let player {
+                if let player, isPlayerReady {
                     SpecialChatPlayerSurface(player: player)
                         .aspectRatio(videoAspectRatio, contentMode: .fit)
                         .frame(maxWidth: .infinity)
                         .background(Color.black)
                 } else {
-                    ProgressView().tint(Color.auroraAccent).frame(maxWidth: .infinity).aspectRatio(videoAspectRatio, contentMode: .fit)
+                    SpecialChatVideoLoadingPlaceholder(aspectRatio: videoAspectRatio)
+                        .frame(maxWidth: .infinity)
                 }
                 Spacer(minLength: 22)
 
@@ -893,21 +935,7 @@ private struct SpecialChatVideoPlayerSheet: View {
             } catch {
                 playbackError = "Không đọc được thời lượng video này."
             }
-            // Use the encoded orientation so phone-shot portrait clips fill the
-            // available screen height instead of being letterboxed in a 16:9 frame.
-            do {
-                let tracks = try await asset.loadTracks(withMediaType: .video)
-                if let track = tracks.first {
-                    let naturalSize = try await track.load(.naturalSize)
-                    let preferredTransform = try await track.load(.preferredTransform)
-                    let displayedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform).standardized
-                    if displayedRect.width > 0, displayedRect.height > 0 {
-                        videoAspectRatio = displayedRect.width / displayedRect.height
-                    }
-                }
-            } catch {
-                // Keep the supplied aspect-ratio fallback; playback does not depend on metadata.
-            }
+            await waitForPlayerReady()
         }
         .onDisappear(perform: stopPlayback)
     }
@@ -915,6 +943,7 @@ private struct SpecialChatVideoPlayerSheet: View {
     private func startPlayback() {
         let item = AVPlayerItem(url: fileURL)
         let playerInstance = AVPlayer(playerItem: item)
+        isPlayerReady = false
         player = playerInstance
         wantsToPlay = true
         playerInstance.play()
@@ -960,8 +989,29 @@ private struct SpecialChatVideoPlayerSheet: View {
         }
     }
 
+    private func waitForPlayerReady() async {
+        for _ in 0..<100 {
+            guard !Task.isCancelled else { return }
+            if let item = player?.currentItem {
+                if item.status == .readyToPlay {
+                    isPlayerReady = true
+                    return
+                }
+                if item.status == .failed {
+                    playbackError = "Không phát được video này."
+                    return
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+        if !isPlayerReady, playbackError == nil {
+            playbackError = "Video tải quá lâu. Hãy thử mở lại."
+        }
+    }
+
     private func stopPlayback() {
         seekRequestID = UUID()
+        isPlayerReady = false
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         player?.pause()
