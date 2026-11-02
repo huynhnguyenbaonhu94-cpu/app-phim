@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { checkR2Connection } from "./r2Backup";
 import { mirrorMovieArtwork } from "./movieArtwork";
@@ -14,7 +14,8 @@ const STATE_ID = 1;
 const LEASE_MS = 3 * 60_000;
 const RECOVERY_INTERVAL_MS = 30_000;
 const PAGE_DELAY_MS = 160;
-const ITEM_BATCH_SIZE = 2;
+const MAX_ITEM_CONCURRENCY = 4;
+const MAX_AUTOMATIC_ATTEMPTS = 2;
 const R2_FAILURE_CHECK_THRESHOLD = 6;
 
 type RunState = typeof r2PosterBackfillState.$inferSelect;
@@ -77,6 +78,7 @@ async function ensurePosterBackfillSchema() {
         sourceHash varchar(64) NOT NULL UNIQUE,
         sourceUrl text NOT NULL,
         sourceType varchar(20) NOT NULL,
+        r2Url text NULL,
         movieSlug varchar(200) NULL,
         movieName varchar(255) NULL,
         status varchar(20) NOT NULL DEFAULT 'pending',
@@ -88,6 +90,9 @@ async function ensurePosterBackfillSchema() {
         completedAt timestamp NULL,
         INDEX r2_poster_backfill_status_id_idx (status, id)
       ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`));
+      for (const statement of [
+        "ALTER TABLE `r2_poster_backfill_items` ADD COLUMN `r2Url` text NULL",
+      ]) { try { await db.execute(sql.raw(statement)); } catch { /* Column already exists on an upgraded database. */ } }
       await db.insert(r2PosterBackfillState).values({ id: STATE_ID }).onDuplicateKeyUpdate({ set: { id: STATE_ID } });
     })();
   }
@@ -118,10 +123,9 @@ function statusText(status: string) {
 
 export async function getPosterBackfillStatus() {
   const db = await database();
-  const [state, groupedCounts, failures] = await Promise.all([
+  const [state, groupedCounts] = await Promise.all([
     readState(db),
     db.select({ status: r2PosterBackfillItems.status, total: count() }).from(r2PosterBackfillItems).groupBy(r2PosterBackfillItems.status),
-    db.select({ id: r2PosterBackfillItems.id, sourceType: r2PosterBackfillItems.sourceType, movieSlug: r2PosterBackfillItems.movieSlug, movieName: r2PosterBackfillItems.movieName, attempts: r2PosterBackfillItems.attempts, lastError: r2PosterBackfillItems.lastError, updatedAt: r2PosterBackfillItems.updatedAt }).from(r2PosterBackfillItems).where(eq(r2PosterBackfillItems.status, "failed")).orderBy(desc(r2PosterBackfillItems.updatedAt)).limit(8),
   ]);
   const counts = { pending: 0, running: 0, succeeded: 0, failed: 0 };
   for (const row of groupedCounts) {
@@ -151,7 +155,6 @@ export async function getPosterBackfillStatus() {
   return {
     run,
     counts: { ...counts, total: state?.itemsTotal ?? 0, processed: counts.succeeded + counts.failed },
-    failureSamples: failures,
   };
 }
 
@@ -272,10 +275,11 @@ async function processPendingBatch(token: string): Promise<{ processed: number; 
   const current = await getCurrentRunningState(token);
   if (!current) return { processed: 0, failed: 0 };
   const { db } = current;
+  const concurrency = MAX_ITEM_CONCURRENCY;
   const rows = await db.select().from(r2PosterBackfillItems)
     .where(eq(r2PosterBackfillItems.status, "pending"))
     .orderBy(asc(r2PosterBackfillItems.id))
-    .limit(ITEM_BATCH_SIZE);
+    .limit(concurrency);
   if (!rows.length) return { processed: 0, failed: 0 };
 
   const ids = rows.map((row) => row.id);
@@ -300,9 +304,11 @@ async function processPendingBatch(token: string): Promise<{ processed: number; 
   let failures = 0;
   await Promise.all(claimed.map(async (item: BackfillItem) => {
     let saved = false;
+    let r2Url: string | null = null;
     try {
       const result = await mirrorMovieArtwork(item.sourceUrl);
-      saved = Boolean(result?.url);
+      r2Url = result?.url || null;
+      saved = Boolean(r2Url);
     } catch {
       saved = false;
     }
@@ -310,6 +316,7 @@ async function processPendingBatch(token: string): Promise<{ processed: number; 
     const finishedAt = new Date();
     await db.update(r2PosterBackfillItems).set({
       status: saved ? "succeeded" : "failed",
+      r2Url,
       workerToken: null,
       lastError: saved ? null : "Không tải được ảnh hợp lệ từ nguồn hoặc không ghi được vào R2.",
       completedAt: finishedAt,
@@ -342,6 +349,28 @@ async function finishIfDrained(token: string) {
   const values = new Map(counts.map((row) => [row.status, Number(row.total) || 0]));
   const unsettled = (values.get("pending") || 0) + (values.get("running") || 0);
   if (unsettled > 0) return false;
+
+  const retryable = await db.select({ id: r2PosterBackfillItems.id }).from(r2PosterBackfillItems).where(and(
+    eq(r2PosterBackfillItems.status, "failed"), lt(r2PosterBackfillItems.attempts, MAX_AUTOMATIC_ATTEMPTS),
+  )).limit(1);
+  if (retryable.length) {
+    const requeued = await db.transaction(async (tx) => {
+      const stateRows = await tx.select().from(r2PosterBackfillState).where(eq(r2PosterBackfillState.id, STATE_ID)).for("update");
+      const current = stateRows[0];
+      if (!current || current.status !== "running" || current.workerToken !== token || current.phase !== "processing") return false;
+      const stillRetryable = await tx.select({ id: r2PosterBackfillItems.id }).from(r2PosterBackfillItems).where(and(
+        eq(r2PosterBackfillItems.status, "failed"), lt(r2PosterBackfillItems.attempts, MAX_AUTOMATIC_ATTEMPTS),
+      )).limit(1);
+      if (!stillRetryable.length) return false;
+      await tx.update(r2PosterBackfillItems).set({ status: "pending", workerToken: null, lastError: null, completedAt: null }).where(and(
+        eq(r2PosterBackfillItems.status, "failed"), lt(r2PosterBackfillItems.attempts, MAX_AUTOMATIC_ATTEMPTS),
+      ));
+      await tx.update(r2PosterBackfillState).set({ currentItemName: "Đang tự thử lại các ảnh lỗi", heartbeatAt: new Date(), leaseExpiresAt: leaseExpiry() }).where(eq(r2PosterBackfillState.id, STATE_ID));
+      return true;
+    });
+    if (requeued) return false;
+  }
+
   const failed = values.get("failed") || 0;
   await db.update(r2PosterBackfillState).set({
     status: failed > 0 ? "completed_with_errors" : "completed",

@@ -30,6 +30,7 @@ export type R2PublicSettings = {
   publicBaseUrl: string | null;
   hasAccessKeyId: boolean;
   hasSecretAccessKey: boolean;
+  hasCloudflareAnalyticsToken: boolean;
   encryptionKeyConfigured: boolean;
   backupEnabled: boolean;
   backupFrequency: "daily" | "weekly";
@@ -43,6 +44,7 @@ export type SaveR2SettingsInput = {
   region?: string | null;
   accessKeyId?: string | null;
   secretAccessKey?: string | null;
+  cloudflareAnalyticsApiToken?: string | null;
   publicBaseUrl?: string | null;
   backupEnabled?: boolean;
   backupFrequency?: "daily" | "weekly";
@@ -385,7 +387,8 @@ export async function getR2PublicSettings(): Promise<R2PublicSettings> {
   const accessConfigured = Boolean(row?.accessKeyIdEncrypted || env?.accessKeyId);
   const secretConfigured = Boolean(row?.secretAccessKeyEncrypted || env?.secretAccessKey);
   const encryptionKeyConfigured = Buffer.byteLength(clean(process.env.R2_SETTINGS_ENCRYPTION_KEY) || "", "utf8") >= 32;
-  const storedSecretsNeedKey = Boolean(row?.accessKeyIdEncrypted || row?.secretAccessKeyEncrypted);
+  const storedSecretsNeedKey = Boolean(row?.accessKeyIdEncrypted || row?.secretAccessKeyEncrypted || row?.cloudflareAnalyticsTokenEncrypted);
+  const hasAnalyticsToken = Boolean(row?.cloudflareAnalyticsTokenEncrypted || clean(process.env.CLOUDFLARE_ANALYTICS_API_TOKEN));
   const configured = Boolean(endpoint && bucket && accessConfigured && secretConfigured && (!storedSecretsNeedKey || encryptionKeyConfigured));
   return {
     configured,
@@ -396,6 +399,7 @@ export async function getR2PublicSettings(): Promise<R2PublicSettings> {
     publicBaseUrl,
     hasAccessKeyId: accessConfigured,
     hasSecretAccessKey: secretConfigured,
+    hasCloudflareAnalyticsToken: hasAnalyticsToken,
     encryptionKeyConfigured,
     backupEnabled: Boolean(row?.backupEnabled),
     backupFrequency: row?.backupFrequency === "weekly" ? "weekly" : "daily",
@@ -411,6 +415,7 @@ export async function saveR2Settings(input: SaveR2SettingsInput): Promise<R2Publ
   const environment = current ? null : envConfig();
   const accessKeyId = clean(input.accessKeyId) || (current?.accessKeyIdEncrypted ? decryptSecret(current.accessKeyIdEncrypted) : environment?.accessKeyId || null);
   const secretAccessKey = clean(input.secretAccessKey) || (current?.secretAccessKeyEncrypted ? decryptSecret(current.secretAccessKeyEncrypted) : environment?.secretAccessKey || null);
+  const cloudflareAnalyticsApiToken = clean(input.cloudflareAnalyticsApiToken) || (current?.cloudflareAnalyticsTokenEncrypted ? decryptSecret(current.cloudflareAnalyticsTokenEncrypted) : clean(process.env.CLOUDFLARE_ANALYTICS_API_TOKEN));
   const rawEndpoint = clean(input.endpoint) ?? clean(current?.endpoint) ?? environment?.endpoint ?? null;
   const endpoint = rawEndpoint ? validateR2Endpoint(rawEndpoint) : null;
   const bucket = clean(input.bucket) ?? clean(current?.bucket) ?? environment?.bucket ?? null;
@@ -420,6 +425,7 @@ export async function saveR2Settings(input: SaveR2SettingsInput): Promise<R2Publ
   }
   const encryptedAccess = accessKeyId ? encryptSecret(accessKeyId) : null;
   const encryptedSecret = secretAccessKey ? encryptSecret(secretAccessKey) : null;
+  const encryptedAnalyticsToken = cloudflareAnalyticsApiToken ? encryptSecret(cloudflareAnalyticsApiToken) : null;
   const scheduleHourVietnam = Math.min(23, Math.max(0, Math.floor(input.scheduleHourVietnam ?? Number(current?.scheduleHourVietnam ?? ((Number(current?.scheduleHourUtc ?? 2) + 7) % 24)))));
   const scheduleHourUtc = (scheduleHourVietnam + 17) % 24;
   const values = {
@@ -429,12 +435,42 @@ export async function saveR2Settings(input: SaveR2SettingsInput): Promise<R2Publ
     region: clean(input.region) ?? clean(current?.region) ?? environment?.region ?? DEFAULT_REGION,
     accessKeyIdEncrypted: encryptedAccess,
     secretAccessKeyEncrypted: encryptedSecret,
+    cloudflareAnalyticsTokenEncrypted: encryptedAnalyticsToken,
     publicBaseUrl: input.publicBaseUrl !== undefined ? validatePublicBaseUrl(clean(input.publicBaseUrl)) : validatePublicBaseUrl(clean(current?.publicBaseUrl) ?? environment?.publicBaseUrl ?? null),
     backupEnabled: input.backupEnabled ?? Boolean(current?.backupEnabled),
     backupFrequency: input.backupFrequency ?? (current?.backupFrequency === "weekly" ? "weekly" : "daily"),
     scheduleHourUtc,
     scheduleHourVietnam,
   } as const;
-  await db.insert(r2Settings).values(values).onDuplicateKeyUpdate({ set: { endpoint: values.endpoint, bucket: values.bucket, region: values.region, accessKeyIdEncrypted: values.accessKeyIdEncrypted, secretAccessKeyEncrypted: values.secretAccessKeyEncrypted, publicBaseUrl: values.publicBaseUrl, backupEnabled: values.backupEnabled, backupFrequency: values.backupFrequency, scheduleHourUtc: values.scheduleHourUtc, scheduleHourVietnam: values.scheduleHourVietnam } });
+  await db.insert(r2Settings).values(values).onDuplicateKeyUpdate({ set: { endpoint: values.endpoint, bucket: values.bucket, region: values.region, accessKeyIdEncrypted: values.accessKeyIdEncrypted, secretAccessKeyEncrypted: values.secretAccessKeyEncrypted, cloudflareAnalyticsTokenEncrypted: values.cloudflareAnalyticsTokenEncrypted, publicBaseUrl: values.publicBaseUrl, backupEnabled: values.backupEnabled, backupFrequency: values.backupFrequency, scheduleHourUtc: values.scheduleHourUtc, scheduleHourVietnam: values.scheduleHourVietnam } });
   return getR2PublicSettings();
+}
+
+/** Private credentials for the R2 analytics service; never return these from an admin query. */
+export async function getCloudflareAnalyticsCredentials(): Promise<{ apiToken: string; accountTag: string; bucketName: string } | null> {
+  const row = await savedSettings();
+  const settings = await getR2PublicSettings();
+  if (!settings.configured || !settings.bucket) return null;
+  const apiToken = row?.cloudflareAnalyticsTokenEncrypted
+    ? decryptSecret(row.cloudflareAnalyticsTokenEncrypted)
+    : clean(process.env.CLOUDFLARE_ANALYTICS_API_TOKEN);
+  const endpoint = clean(row?.endpoint) || clean(process.env.R2_ENDPOINT || process.env.CLOUDFLARE_R2_ENDPOINT);
+  let accountTag = clean(process.env.CLOUDFLARE_ACCOUNT_ID) || "";
+  let analyticsBucketName = settings.bucket;
+  if (!accountTag && endpoint) {
+    try {
+      const labels = new URL(endpoint).hostname.split(".");
+      accountTag = labels[0] || "";
+      const jurisdiction = labels[1]?.toLowerCase();
+      if (["eu", "us", "fedramp"].includes(jurisdiction || "")) analyticsBucketName = `${jurisdiction}_${settings.bucket}`;
+    } catch { /* handled below */ }
+  }
+  if (endpoint && process.env.CLOUDFLARE_ACCOUNT_ID) {
+    try {
+      const jurisdiction = new URL(endpoint).hostname.split(".")[1]?.toLowerCase();
+      if (["eu", "us", "fedramp"].includes(jurisdiction || "")) analyticsBucketName = `${jurisdiction}_${settings.bucket}`;
+    } catch { /* configured Account ID is still usable */ }
+  }
+  if (!apiToken || !accountTag) return null;
+  return { apiToken, accountTag, bucketName: analyticsBucketName };
 }

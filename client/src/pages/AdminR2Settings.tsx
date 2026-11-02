@@ -7,6 +7,7 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { PageShell, SectionHeading } from "@/components/CinemaChrome";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
+import AdminR2AnalyticsPanel from "@/components/AdminR2AnalyticsPanel";
 
 type BackupFrequency = "daily" | "weekly";
 type BackupSchedule = { enabled: boolean; frequency: BackupFrequency; scheduleHourVietnam: number };
@@ -15,6 +16,7 @@ type R2SettingsDraft = {
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
+  cloudflareAnalyticsApiToken: string;
   endpoint: string;
   region: string;
   publicBaseUrl: string;
@@ -26,7 +28,7 @@ type BackupStatus = {
   latest?: { status?: string | null; startedAt?: string | Date | null; completedAt?: string | Date | null; errorMessage?: string | null; backupKey?: string | null; byteSize?: number | null } | null;
 };
 
-const emptyForm: R2SettingsDraft = { accountId: "", bucket: "", accessKeyId: "", secretAccessKey: "", endpoint: "", region: "auto", publicBaseUrl: "" };
+const emptyForm: R2SettingsDraft = { accountId: "", bucket: "", accessKeyId: "", secretAccessKey: "", cloudflareAnalyticsApiToken: "", endpoint: "", region: "auto", publicBaseUrl: "" };
 const defaultEndpoint = (accountId: string) => accountId.trim() ? `https://${accountId.trim()}.r2.cloudflarestorage.com` : "";
 
 function accountIdFromEndpoint(endpoint: string) {
@@ -51,14 +53,34 @@ function formatBytes(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatUsageBytes(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value < 1024) return `${Math.round(value)} B`;
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let amount = value;
+  let unit = "B";
+  for (const next of units) { amount /= 1024; unit = next; if (amount < 1024) break; }
+  return `${amount.toFixed(amount >= 100 ? 0 : 1)} ${unit}`;
+}
+
+function formatUsageCount(value?: number | null) {
+  return value === null || value === undefined ? "—" : Math.round(value).toLocaleString("vi-VN");
+}
+
 export default function AdminR2Settings() {
   const { user, loading } = useAuth();
+  const utils = trpc.useUtils();
   const [authOpen, setAuthOpen] = useState(false);
   const [form, setForm] = useState<R2SettingsDraft>(emptyForm);
   const [schedule, setSchedule] = useState<BackupSchedule>({ enabled: false, frequency: "daily", scheduleHourVietnam: 9 });
   const settings = trpc.adminR2.getSettings.useQuery(undefined, { enabled: user?.role === "admin", retry: false });
   const backupStatusQuery = trpc.adminR2.getBackupStatus.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 10_000 });
-  const artworkBackfillQuery = trpc.adminR2.getPosterBackfillStatus.useQuery(undefined, { enabled: user?.role === "admin", retry: false, refetchInterval: 5_000 });
+  const artworkBackfillQuery = trpc.adminR2.getPosterBackfillStatus.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    retry: false,
+    refetchInterval: (query) => query.state.data?.run?.status === "running" ? 8_000 : false,
+    refetchIntervalInBackground: false,
+  });
   const saveSettings = trpc.adminR2.saveSettings.useMutation();
   const testConnection = trpc.adminR2.testConnection.useMutation();
   const runBackup = trpc.adminR2.runBackup.useMutation();
@@ -77,6 +99,7 @@ export default function AdminR2Settings() {
       bucket: value.bucket || "",
       accessKeyId: "",
       secretAccessKey: "",
+      cloudflareAnalyticsApiToken: "",
       endpoint: value.endpoint || "",
       region: value.region || "auto",
       publicBaseUrl: value.publicBaseUrl || "",
@@ -136,6 +159,7 @@ export default function AdminR2Settings() {
       scheduleHourVietnam: Math.min(23, Math.max(0, Number(schedule.scheduleHourVietnam) || 0)),
       ...(form.accessKeyId.trim() ? { accessKeyId: form.accessKeyId.trim() } : {}),
       ...(form.secretAccessKey.trim() ? { secretAccessKey: form.secretAccessKey.trim() } : {}),
+      ...(form.cloudflareAnalyticsApiToken.trim() ? { cloudflareAnalyticsApiToken: form.cloudflareAnalyticsApiToken.trim() } : {}),
     };
   }
 
@@ -143,8 +167,9 @@ export default function AdminR2Settings() {
     if (!validateSettings()) return false;
     try {
       await saveSettings.mutateAsync(settingsPayload());
-      setForm(current => ({ ...current, accessKeyId: "", secretAccessKey: "" }));
+      setForm(current => ({ ...current, accessKeyId: "", secretAccessKey: "", cloudflareAnalyticsApiToken: "" }));
       await settings.refetch();
+      await utils.adminR2.getAnalytics.invalidate();
       toast.success("Đã lưu cấu hình Cloudflare R2.");
       return true;
     } catch (error) {
@@ -192,11 +217,11 @@ export default function AdminR2Settings() {
 
   async function controlArtworkBackfill(action: "start" | "pause" | "resume" | "retry") {
     try {
-      if (action === "start") await startArtworkBackfill.mutateAsync({});
-      else if (action === "pause") await pauseArtworkBackfill.mutateAsync({});
-      else if (action === "resume") await resumeArtworkBackfill.mutateAsync({});
-      else await retryArtworkBackfill.mutateAsync({});
-      await artworkBackfillQuery.refetch();
+      const result = action === "start" ? await startArtworkBackfill.mutateAsync({})
+        : action === "pause" ? await pauseArtworkBackfill.mutateAsync({})
+          : action === "resume" ? await resumeArtworkBackfill.mutateAsync({})
+            : await retryArtworkBackfill.mutateAsync({});
+      utils.adminR2.getPosterBackfillStatus.setData(undefined, result);
       const messages = {
         start: "Đã bắt đầu quét và sao lưu poster/thumbnail lên R2.",
         pause: "Đã yêu cầu tạm dừng sau ảnh đang xử lý.",
@@ -242,9 +267,11 @@ export default function AdminR2Settings() {
           <label>Bucket<input value={form.bucket} onChange={event => updateField("bucket", event.target.value)} placeholder="cinemora-media" autoComplete="off" /></label>
           <label>Access Key ID<small>{settings.data?.hasAccessKeyId ? "Đã lưu an toàn; để trống để giữ nguyên." : "Nhập Access Key ID của R2."}</small><input value={form.accessKeyId} onChange={event => updateField("accessKeyId", event.target.value)} placeholder={settings.data?.hasAccessKeyId ? "Đã cấu hình · nhập mới nếu muốn thay" : "R2 Access Key ID"} autoComplete="off" /></label>
           <label>Secret Access Key<small>{settings.data?.hasSecretAccessKey ? "Không hiển thị secret đã lưu; để trống để giữ nguyên." : "Nhập Secret Access Key mới từ Cloudflare."}</small><input type="password" value={form.secretAccessKey} onChange={event => updateField("secretAccessKey", event.target.value)} placeholder={settings.data?.hasSecretAccessKey ? "Đã cấu hình · nhập mới nếu muốn thay" : "R2 Secret Access Key"} autoComplete="new-password" /></label>
+          <label className="is-wide">Cloudflare Account Analytics API token <span className="optional-label">(tuỳ chọn · chỉ đọc)</span><small>{settings.data?.hasCloudflareAnalyticsToken ? "Token đã được lưu mã hoá; để trống để giữ nguyên." : "Tạo token riêng với quyền Account → Account Analytics → Read. Không dùng Access Key của R2."}</small><input type="password" value={form.cloudflareAnalyticsApiToken} onChange={event => updateField("cloudflareAnalyticsApiToken", event.target.value)} placeholder={settings.data?.hasCloudflareAnalyticsToken ? "Đã cấu hình · nhập token mới nếu muốn thay" : "Cloudflare API token · Account Analytics:Read"} autoComplete="new-password" /></label>
           <label className="is-wide">S3 API endpoint<input value={form.endpoint} onChange={event => updateField("endpoint", event.target.value)} placeholder="https://ACCOUNT_ID.r2.cloudflarestorage.com" autoComplete="url" /></label>
         </div>
         <div className="admin-r2-note"><KeyRound size={14} /><span>Endpoint mặc định là <b>https://ACCOUNT_ID.r2.cloudflarestorage.com</b>. Nếu bucket thuộc jurisdiction riêng (EU/US/FedRAMP), dùng endpoint tương ứng của Cloudflare.</span></div>
+        <div className="admin-r2-note"><ShieldCheck size={14} /><span>Thống kê bucket cần token Cloudflare riêng với quyền <b>Account Analytics:Read</b>. Token này được mã hoá trên máy chủ cùng khóa ổn định <code>R2_SETTINGS_ENCRYPTION_KEY</code>, không trả về trình duyệt.</span><a href="https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/" target="_blank" rel="noreferrer">Cách tạo token Analytics ↗</a></div>
         {!encryptionReady && <div className="admin-r2-warning"><ShieldCheck size={15} /><span>Trước khi lưu credentials, đặt biến môi trường <code>R2_SETTINGS_ENCRYPTION_KEY</code> trong cấu hình Node.js cPanel (chuỗi bí mật ổn định, tối thiểu 32 ký tự), rồi restart. Không thay đổi khóa sau khi đã lưu R2 credentials.</span></div>}
         <div className="admin-r2-actions"><button type="button" className="button button-ghost" disabled={saveSettings.isPending || testConnection.isPending} onClick={() => void saveAndTest()}><TestTube2 size={14} /> {saveSettings.isPending || testConnection.isPending ? "Đang lưu & kiểm tra…" : "Lưu & kiểm tra kết nối"}</button><button type="button" className="button button-primary" disabled={saveSettings.isPending} onClick={() => void saveConfiguration()}><Save size={14} /> {saveSettings.isPending ? "Đang lưu…" : "Lưu cấu hình"}</button></div>
       </div>
@@ -256,7 +283,7 @@ export default function AdminR2Settings() {
           <label className="is-wide">Public base URL <span className="optional-label">(tuỳ chọn)</span><input value={form.publicBaseUrl} onChange={event => updateField("publicBaseUrl", event.target.value)} placeholder="https://cdn.example.com/cinemora" autoComplete="url" /></label>
         </div>
         <p className="admin-r2-field-hint">Để trống Public base URL nếu chưa cấu hình custom domain/public bucket; ảnh public sẽ được phục vụ qua endpoint của website. Chỉ điền khi domain đã trỏ đến vùng public của R2. Media chat và bản backup luôn ở vùng private, không dùng public URL.</p>
-        <div className="admin-r2-guide"><strong>Thiết lập backup tự động trên cPanel</strong><ol><li>Trong <b>Setup Node.js App → Environment variables</b>, thêm <code>R2_SETTINGS_ENCRYPTION_KEY</code> là chuỗi ngẫu nhiên ổn định ít nhất 32 byte; restart Node.js app sau khi lưu.</li><li>Nhập endpoint, bucket và R2 API credentials ở bên trái, sau đó bấm <b>Lưu &amp; kiểm tra kết nối</b>. Kiểm tra sẽ upload, đọc lại và xóa một object tạm.</li><li>Bật lịch hàng ngày/hàng tuần, chọn giờ Việt Nam (GMT+7) rồi bấm <b>Lưu lịch</b>. Tiến trình Node.js phải tiếp tục chạy để scheduler thực thi.</li><li>Nút <b>Backup ngay</b> dùng <code>mysqldump</code> có sẵn trên máy chủ, nén SQL và ghi backup private vào prefix <code>backups/</code>.</li></ol></div>
+          <div className="admin-r2-guide"><strong>Thiết lập backup tự động trên cPanel</strong><ol><li>Trong <b>Setup Node.js App → Environment variables</b>, thêm <code>R2_SETTINGS_ENCRYPTION_KEY</code> là chuỗi ngẫu nhiên ổn định ít nhất 32 byte; restart Node.js app sau khi lưu.</li><li>Nhập endpoint, bucket và R2 API credentials ở bên trái, sau đó bấm <b>Lưu &amp; kiểm tra kết nối</b>. Kiểm tra sẽ upload, đọc lại và xóa một object tạm.</li><li>Bật lịch hàng ngày/hàng tuần, chọn giờ Việt Nam (GMT+7) rồi bấm <b>Lưu lịch</b>. Tiến trình Node.js phải tiếp tục chạy để scheduler thực thi.</li><li>Nút <b>Backup ngay</b> dùng <code>mysqldump</code> có sẵn trên máy chủ, nén SQL và ghi backup private vào prefix <code>backups/</code>.</li></ol></div>
         <div className="admin-r2-schedule">
           <div className="admin-r2-schedule-title"><strong>Lịch tự động</strong><small>Giờ Việt Nam · GMT+7 · Asia/Ho_Chi_Minh</small></div>
           <label className="admin-switch"><input type="checkbox" checked={schedule.enabled} disabled={!r2Ready} onChange={event => setSchedule(current => ({ ...current, enabled: event.target.checked }))} /><span /></label>
@@ -265,6 +292,7 @@ export default function AdminR2Settings() {
           <button type="button" className="button button-ghost" disabled={updateBackupSchedule.isPending || !r2Ready} onClick={() => void saveSchedule()}><Save size={13} /> Lưu lịch</button>
         </div>
         <div className="admin-r2-timezone-note"><Clock3 size={14} /><span>Lịch chạy theo giờ địa phương Việt Nam (UTC+7), không phụ thuộc múi giờ trên máy chủ. Giờ cũ đã được quy đổi để giữ nguyên thời điểm chạy tương đương.</span></div>
+        <div className="admin-r2-timezone-note"><DatabaseBackup size={14} /><span>Nếu bấm <b>Backup ngay</b> và có bản backup thành công trong cùng ngày (lịch hàng ngày) hoặc cùng tuần GMT+7 (lịch hàng tuần), scheduler sẽ bỏ qua lượt tự động trong đúng khung đó để tránh tạo bản trùng. Nếu backup thủ công thất bại nhưng đã có bản thành công khác trong khung đó, lịch vẫn được xem là đã có backup.</span></div>
         <div className="admin-r2-retention"><strong>Giữ lại backup</strong><span>Backup không tự xóa để tránh mất dữ liệu. Nếu muốn giới hạn thời gian lưu, tạo lifecycle rule trong cài đặt bucket Cloudflare R2 cho prefix <code>backups/</code>; kiểm tra chính sách khôi phục trước khi bật xóa tự động.</span><a href="https://developers.cloudflare.com/r2/buckets/object-lifecycles/" target="_blank" rel="noreferrer">Hướng dẫn R2 Object Lifecycle</a></div>
       </div>
     </section>
@@ -307,12 +335,10 @@ export default function AdminR2Settings() {
         <button type="button" className="button button-ghost" disabled={artworkBackfillQuery.isFetching} onClick={() => void artworkBackfillQuery.refetch()}><RefreshCw size={14} /> Làm mới tiến trình</button>
         {artworkControlPending && <span className="admin-r2-backfill-busy"><Loader2 size={14} /> Đang cập nhật trạng thái…</span>}
       </div>
-      {(artworkBackfillQuery.data?.failureSamples.length || 0) > 0 && <div className="admin-r2-backfill-failures">
-        <strong><CircleAlert size={14} /> Ảnh cần kiểm tra gần đây</strong>
-        <ul>{artworkBackfillQuery.data?.failureSamples.map(item => <li key={item.id}><span>{item.movieName || item.movieSlug || "Không rõ phim"} · {item.sourceType}</span><small>{item.lastError || "Không lưu được vào R2"} · {item.attempts} lần thử</small></li>)}</ul>
-      </div>}
-      <p className="admin-r2-backfill-note">Tác vụ chỉ xử lý poster/thumbnail từ catalog API có host hợp lệ; không xóa hay sửa URL nguồn trong dữ liệu phim. Quá trình chạy nền trên Node.js cPanel, có thể tạm dừng và tiếp tục từ checkpoint.</p>
+      <p className="admin-r2-backfill-note">Tác vụ chỉ xử lý poster/thumbnail từ catalog API có host hợp lệ; không xóa hay sửa URL nguồn trong dữ liệu phim. Sau khi quét xong catalog, hệ thống tự thử lại các ảnh lỗi thêm một lần; lỗi còn lại được ghi nhận và có thể thử lại bằng nút phía trên. Quá trình chạy nền trên Node.js cPanel, có thể tạm dừng và tiếp tục từ checkpoint.</p>
     </section>
+
+    <AdminR2AnalyticsPanel configured={r2Ready} hasToken={Boolean(settings.data?.hasCloudflareAnalyticsToken)} />
 
     <section className="admin-r2-status-card">
       <div className="admin-r2-status-heading"><div><span className="eyebrow">BACKUP STATUS</span><h2>Trạng thái database backup</h2></div><button className="button button-primary" disabled={runBackup.isPending || Boolean(status?.running) || !r2Ready} onClick={() => void backupNow()}><DatabaseBackup size={14} /> {runBackup.isPending || status?.running ? "Đang chuẩn bị…" : "Backup ngay"}</button></div>

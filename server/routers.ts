@@ -45,6 +45,7 @@ import { checkR2Connection, getBackupStatus, runR2Backup } from "./r2Backup";
 import { getR2PublicSettings, saveR2Settings } from "./r2Storage";
 import { getAdminDashboardStats } from "./adminDashboard";
 import { getPosterBackfillStatus, pausePosterBackfill, resumePosterBackfill, retryFailedPosterBackfill, startPosterBackfill } from "./movieArtworkBackfill";
+import { getR2Analytics } from "./r2Analytics";
 
 const pageInput = z.number().int().min(1).max(MAX_CINEMA_PAGE).optional();
 const slugInput = z.string().trim().min(2).max(120).regex(/^[a-z0-9-]+$/i);
@@ -626,6 +627,7 @@ export const appRouter = router({
       region: z.string().trim().max(80).nullable().optional(),
       accessKeyId: z.string().trim().max(300).nullable().optional(),
       secretAccessKey: z.string().trim().max(500).nullable().optional(),
+      cloudflareAnalyticsApiToken: z.string().trim().max(1000).nullable().optional(),
       publicBaseUrl: z.string().trim().url().max(1000).nullable().optional(),
       backupEnabled: z.boolean().optional(),
       backupFrequency: z.enum(["daily", "weekly"]).optional(),
@@ -640,6 +642,7 @@ export const appRouter = router({
     pausePosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => pausePosterBackfill()),
     resumePosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => resumePosterBackfill()),
     retryFailedPosterBackfill: adminProcedure.input(z.object({}).optional()).mutation(() => retryFailedPosterBackfill()),
+    getAnalytics: adminProcedure.input(z.object({ period: z.enum(["monthToDate", "last7Days", "last30Days"]).optional() }).optional()).query(({ input }) => getR2Analytics(input?.period ?? "monthToDate")),
   }),
   // Phim admin thêm thủ công bằng link (chỉ admin).
   customMovies: router({

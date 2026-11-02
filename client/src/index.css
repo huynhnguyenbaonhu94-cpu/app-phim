@@ -5187,3 +5187,44 @@ select:-webkit-autofill {
   .admin-r2-backfill-track > span { transition: none; }
   .admin-r2-backfill-busy svg { animation: none; }
 }
+
+/* Backfill controls and R2 analytics dashboard */
+.admin-r2-analytics-card { margin-top: 16px; }
+.admin-r2-analytics-card .admin-r2-status-heading { align-items: flex-start; }
+.admin-r2-analytics-card .admin-r2-status-heading > div:first-child { display: grid; gap: 3px; }
+.admin-r2-analytics-card .admin-r2-status-heading p { margin: 5px 0 0; color: #8993a0; font-size: 9px; }
+.admin-r2-analytics-actions { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.admin-r2-analytics-period { display: grid; gap: 4px; color: #8993a0; font-size: 8px; }
+.admin-r2-analytics-period select { min-width: 155px; height: 34px; padding: 0 28px 0 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #dfe5eb; background: #141720; font: inherit; font-size: 9px; }
+.admin-r2-analytics-empty { display: flex; align-items: flex-start; gap: 11px; padding: 15px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; color: #c1ed62; background: rgba(0,0,0,.11); }
+.admin-r2-analytics-empty > div { display: grid; gap: 6px; }
+.admin-r2-analytics-empty strong { color: #e0e5eb; font-size: 10px; }
+.admin-r2-analytics-empty p { margin: 0; color: #929ca9; font-size: 9px; line-height: 1.5; }
+.admin-r2-analytics-empty a { color: #c1ed62; font-size: 9px; }
+.admin-r2-analytics-kpis { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; }
+.admin-r2-analytics-kpis > div { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid rgba(255,255,255,.075); border-radius: 11px; background: rgba(0,0,0,.1); }
+.admin-r2-analytics-kpis span { color: #8993a0; font-size: 8px; }
+.admin-r2-analytics-kpis strong { overflow-wrap: anywhere; color: #e5ebef; font: 600 15px 'Space Grotesk'; font-variant-numeric: tabular-nums; }
+.admin-r2-analytics-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.admin-r2-analytics-chart { min-width: 0; padding: 13px; border: 1px solid rgba(255,255,255,.075); border-radius: 12px; background: rgba(0,0,0,.105); }
+.admin-r2-analytics-chart h3 { margin: 0 0 4px; color: #dfe5eb; font-size: 10px; }
+.admin-r2-analytics-chart > small { display: block; min-height: 24px; color: #788391; font-size: 8px; line-height: 1.45; }
+.admin-r2-chart { width: 100%; height: 220px; margin-top: 8px; font-size: 9px; }
+.admin-r2-analytics-chart--wide { grid-column: 1 / -1; }
+.admin-r2-analytics-chart--wide .admin-r2-chart { height: 280px; }
+.admin-r2-analytics-note { margin: 0; color: #7d8794; font-size: 8px; line-height: 1.55; }
+.admin-r2-analytics-loading { display: flex; align-items: center; gap: 7px; margin: 0; color: #c6e888; font-size: 9px; }
+.admin-r2-analytics-status-breakdown { margin: 0; color: #8792a0; font-size: 8px; line-height: 1.5; }
+.admin-r2-analytics-status-breakdown strong { color: #c5ced8; }
+.admin-r2-analytics-warning { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 10px; border: 1px solid rgba(255,189,89,.24); border-radius: 9px; color: #f1c984; background: rgba(255,189,89,.06); font-size: 8px; line-height: 1.5; }
+.admin-r2-analytics-freshness { display: grid; gap: 4px; padding: 10px 11px; border: 1px solid rgba(255,255,255,.06); border-radius: 9px; color: #7f8a98; background: rgba(0,0,0,.09); font-size: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-r2-analytics-freshness span:first-child { color: #a6b3c1; }
+.admin-r2-refresh-spinning { animation: admin-r2-spin .8s linear infinite; }
+@keyframes admin-r2-spin { to { transform: rotate(360deg); } }
+@media (max-width: 680px) {
+  .admin-r2-analytics-kpis { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .admin-r2-analytics-chart-grid { grid-template-columns: 1fr; }
+  .admin-r2-analytics-chart--wide { grid-column: auto; }
+  .admin-r2-analytics-card .admin-r2-status-heading { flex-direction: column; }
+  .admin-r2-analytics-actions { width: 100%; align-items: flex-end; justify-content: space-between; }
+}

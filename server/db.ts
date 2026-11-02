@@ -217,6 +217,7 @@ export async function ensureR2Compatibility(db: ReturnType<typeof drizzle>) {
     region varchar(80) NOT NULL DEFAULT 'auto',
     accessKeyIdEncrypted mediumtext NULL,
     secretAccessKeyEncrypted mediumtext NULL,
+    cloudflareAnalyticsTokenEncrypted mediumtext NULL,
     publicBaseUrl text NULL,
     backupEnabled tinyint(1) NOT NULL DEFAULT 0,
     backupFrequency varchar(20) NOT NULL DEFAULT 'daily',
@@ -241,6 +242,9 @@ export async function ensureR2Compatibility(db: ReturnType<typeof drizzle>) {
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'r2_settings'
   `);
   const existingColumns = new Set(((rawColumns as unknown) as Array<{ COLUMN_NAME?: string }>).map((row) => String(row.COLUMN_NAME || "")));
+  if (!existingColumns.has("cloudflareAnalyticsTokenEncrypted")) {
+    await db.execute(sql.raw("ALTER TABLE `r2_settings` ADD COLUMN `cloudflareAnalyticsTokenEncrypted` mediumtext NULL"));
+  }
   if (!existingColumns.has("scheduleHourVietnam")) {
     await db.execute(sql.raw("ALTER TABLE `r2_settings` ADD COLUMN `scheduleHourVietnam` int NOT NULL DEFAULT 9"));
     if (existingColumns.has("scheduleHourUtc")) {

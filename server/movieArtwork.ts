@@ -237,6 +237,14 @@ export function getRememberedMovieArtworkUrl(source: string): string | null {
   return publicRouteForKey(manifest.key);
 }
 
+/** Resolve a previously mirrored artwork URL from its private manifest when an admin explicitly opens a result page. */
+export async function lookupMovieArtworkUrl(source: string): Promise<string | null> {
+  if (!isAllowedMovieArtworkSource(source)) return null;
+  const sourceHash = sha256(new URL(source).toString());
+  const manifest = await readManifest(sourceHash);
+  return manifest ? publicRouteForKey(manifest.key) : null;
+}
+
 /**
  * Mirror one allowlisted API image into R2. Image objects are content-addressed and
  * indexed by a private stable manifest. If refresh fails, the previous R2 image

@@ -64,9 +64,14 @@ unzip -o /duong/dan/Cinemora-Backend-Cpanel.zip
 # 2. Chỉ cài dependency chạy thật (không cần dev, không cần build)
 source /home/vfviehep/nodevenv/cinemora2/22/bin/activate
 npm install --omit=dev --legacy-peer-deps
+
+# 3. Xác nhận website shell và mọi bundle mà shell tham chiếu đều có mặt
+node -e 'const fs=require("fs");const h=fs.readFileSync("dist/public/index.html","utf8");const a=[...h.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(m=>m[1]);if(!a.length)throw new Error("Không tìm thấy bundle frontend trong index.html");for(const p of a)if(!fs.existsSync("dist/public"+p))throw new Error("Thiếu frontend asset: "+p);console.log("Frontend shell và",a.length,"asset(s) hợp lệ")'
 ```
 
-Sau đó vào cPanel Node.js Selector bấm **Restart**.
+Sau đó vào cPanel Node.js Selector bấm **Restart**. Không restart giữa lúc đang giải nén.
+
+Mọi đường dẫn SPA/admin (`/admin`, `/admin/accounts`, `/admin/r2-settings`, …) phải trả về cùng một `dist/public/index.html`; máy chủ đã tắt hành vi tự phục vụ `admin/.../index.html` cũ còn sót sau lần giải nén đè. HTML shell đặt `Cache-Control: no-store`, còn bundle có hash được cache dài hạn. Nếu vừa deploy mà trang vẫn tham chiếu tên CSS/JS cũ hoặc CSS trả 404, hãy purge cache HTML ở LiteSpeed/Cloudflare một lần rồi kiểm tra lại; không xóa riêng CSS/JS mới khỏi `dist/public/assets`.
 
 Nếu lần trước bạn đã xoá `dist` hoặc `node_modules` thì làm đúng ba bước trên là app chạy lại:
 `dist/` nằm trong gói, chỉ còn thiếu dependency nên `npm install` là đủ.
