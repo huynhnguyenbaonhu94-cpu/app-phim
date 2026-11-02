@@ -23,13 +23,15 @@ final class CinemaStore {
         var movies: [Movie]
         var page: Int
         var reachedEnd: Bool
+        var latestUsesDailyUpdates: Bool?
+        var noProgressPages: Int
     }
     private(set) var sectionLists: [String: SectionListCache] = [:]
 
     func sectionList(_ kind: String) -> SectionListCache? { sectionLists[kind] }
 
-    func storeSectionList(kind: String, movies: [Movie], page: Int, reachedEnd: Bool) {
-        sectionLists[kind] = SectionListCache(movies: movies, page: page, reachedEnd: reachedEnd)
+    func storeSectionList(kind: String, movies: [Movie], page: Int, reachedEnd: Bool, latestUsesDailyUpdates: Bool? = nil, noProgressPages: Int = 0) {
+        sectionLists[kind] = SectionListCache(movies: movies, page: page, reachedEnd: reachedEnd, latestUsesDailyUpdates: latestUsesDailyUpdates, noProgressPages: noProgressPages)
     }
     private(set) var homeLoading = false
     private(set) var homeLoadingMore = false
@@ -60,6 +62,7 @@ final class CinemaStore {
     private(set) var catalogError: String?
     private(set) var catalogHasMore = false
     private(set) var catalogPage = 1
+    @ObservationIgnored private var catalogNoProgressPages = 0
     private(set) var localFavorites: [LocalMovieRecord] = []
     private(set) var localHistory: [LocalWatchRecord] = []
     private(set) var accountUser: RemoteAccountUser?
@@ -79,6 +82,7 @@ final class CinemaStore {
     private let deviceSubtitlePreferencesKey = "cinemora.subtitle.preferences.device.v1"
     private var deviceSubtitlePreferences = SubtitlePreferences()
     @ObservationIgnored private var homePage = 1
+    @ObservationIgnored private var homeUsesDailyUpdates = true
     @ObservationIgnored private var detailTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var catalogTask: Task<Void, Never>?
     @ObservationIgnored private var catalogRequestID = 0
@@ -603,35 +607,38 @@ final class CinemaStore {
         defer { homeLoading = false }
 
         let config = homeSectionConfig
-        var results: [(Int, [Movie], String?)] = []
+        let preferDailyUpdates = homeUsesDailyUpdates
+        var results: [(Int, [Movie], String?, Bool)] = []
         for batchStart in stride(from: 0, to: config.count, by: 4) {
             let batchEnd = min(batchStart + 4, config.count)
-            let batch = await withTaskGroup(of: (Int, [Movie], String?).self, returning: [(Int, [Movie], String?)].self) { group in
+            let batch = await withTaskGroup(of: (Int, [Movie], String?, Bool).self, returning: [(Int, [Movie], String?, Bool)].self) { group in
                 for index in batchStart..<batchEnd {
                     let section = config[index]
                     group.addTask {
                         do {
                             let page: MoviePage
+                            var usesDailyUpdates = false
                             // Kệ "Phim Mới" luôn lấy danh sách sắp theo thời gian
                             // cập nhật, để phim mới/được cập nhật nằm đầu trang chủ.
-                            if section.kind == "latest" {
+                            if section.kind == "latest", preferDailyUpdates {
                                 do {
                                     page = try await self.api.dailyUpdates()
+                                    usesDailyUpdates = true
                                 } catch {
-                                    if Self.isCancellation(error) { return (index, [], nil) }
+                                    if Self.isCancellation(error) { return (index, [], nil, false) }
                                     page = try await self.api.list(kind: "latest")
                                 }
                             } else {
                                 page = try await self.api.list(kind: section.kind)
                             }
-                            return (index, page.items, nil)
+                            return (index, page.items, nil, usesDailyUpdates)
                         } catch {
-                            if Self.isCancellation(error) { return (index, [], nil) }
-                            return (index, [], error.localizedDescription)
+                            if Self.isCancellation(error) { return (index, [], nil, false) }
+                            return (index, [], error.localizedDescription, false)
                         }
                     }
                 }
-                var collected: [(Int, [Movie], String?)] = []
+                var collected: [(Int, [Movie], String?, Bool)] = []
                 for await result in group { collected.append(result) }
                 return collected
             }
@@ -640,14 +647,17 @@ final class CinemaStore {
         }
         results.sort { $0.0 < $1.0 }
 
-        let previousLatest = Set(homeSections.first(where: { $0.id == "latest" })?.movies.map(\.id) ?? [])
-        let nextLatest = Set(results.first(where: { $0.0 == 0 })?.1.map(\.id) ?? [])
+        let previousLatest = Set(homeSections.first(where: { $0.id == "latest" })?.movies.map(\.catalogIdentity) ?? [])
+        let nextLatest = Set(results.first(where: { $0.0 == 0 })?.1.map(\.catalogIdentity) ?? [])
+        homeUsesDailyUpdates = results.first(where: { $0.0 == 0 })?.3 ?? true
         if refresh && !previousLatest.isEmpty && !nextLatest.isEmpty && previousLatest != nextLatest {
             hasNewHomeContent = true
         }
+        var seenHomeMovies = Set<String>()
         homeSections = results.enumerated().compactMap { index, result in
-            guard !result.1.isEmpty else { return nil }
-            return HomeSection(id: config[index].kind, title: config[index].title, movies: result.1)
+            let uniqueMovies = result.1.filter { seenHomeMovies.insert($0.catalogIdentity).inserted }
+            guard !uniqueMovies.isEmpty else { return nil }
+            return HomeSection(id: config[index].kind, title: config[index].title, movies: uniqueMovies)
         }
         homeMovies = homeSections.first(where: { $0.id == "latest" })?.movies ?? []
         homePage = 1
@@ -669,9 +679,20 @@ final class CinemaStore {
         defer { homeLoadingMore = false }
         let next = homePage + 1
         do {
-            let page = try await api.list(page: next, kind: "latest")
-            let existing = Set(homeMovies.map(\.slug))
-            homeMovies.append(contentsOf: page.items.filter { !existing.contains($0.slug) })
+            let page: MoviePage
+            if homeUsesDailyUpdates {
+                do {
+                    page = try await api.dailyUpdates(page: next)
+                } catch {
+                    if Self.isCancellation(error) { throw error }
+                    homeUsesDailyUpdates = false
+                    page = try await api.list(page: next, kind: "latest")
+                }
+            } else {
+                page = try await api.list(page: next, kind: "latest")
+            }
+            var existing = Set(homeMovies.map(\.catalogIdentity))
+            homeMovies.append(contentsOf: page.items.filter { existing.insert($0.catalogIdentity).inserted })
             homePage = next
             homeHasMore = page.pagination?.hasMore(page: next, received: page.items.count) ?? (page.items.count >= 12)
         } catch { homeError = error.localizedDescription }
@@ -840,23 +861,41 @@ final class CinemaStore {
         catalogRequestID += 1
         let requestID = catalogRequestID
         let nextPage = reset ? 1 : catalogPage + 1
-        if reset { catalogMovies = []; catalogPage = 1; catalogHasMore = false; catalogTotal = nil }
+        if reset {
+            catalogMovies = []
+            catalogPage = 1
+            catalogHasMore = false
+            catalogTotal = nil
+            catalogNoProgressPages = 0
+        }
         catalogLoading = true; catalogError = nil
         catalogTask = Task {
             defer { if requestID == catalogRequestID { catalogLoading = false } }
             do {
                 let page = try await api.list(page: nextPage, kind: kind, category: category, country: country, year: year, kinds: kinds, categories: categories, countries: countries, years: years)
                 guard !Task.isCancelled, requestID == catalogRequestID else { return }
+                let previousCount = catalogMovies.count
                 if reset {
-                    catalogMovies = page.items
+                    var seen = Set<String>()
+                    catalogMovies = page.items.filter { seen.insert($0.catalogIdentity).inserted }
                     catalogTotal = page.pagination?.totalItems
                 }
                 else {
-                    let existing = Set(catalogMovies.map(\.slug))
-                    catalogMovies.append(contentsOf: page.items.filter { !existing.contains($0.slug) })
+                    var existing = Set(catalogMovies.map(\.catalogIdentity))
+                    catalogMovies.append(contentsOf: page.items.filter { existing.insert($0.catalogIdentity).inserted })
                 }
                 catalogPage = nextPage
-                catalogHasMore = page.pagination?.hasMore(page: nextPage, received: page.items.count) ?? (page.items.count >= 12)
+                let addedCount = catalogMovies.count - previousCount
+                if page.items.isEmpty || addedCount > 0 {
+                    catalogNoProgressPages = 0
+                } else {
+                    catalogNoProgressPages += 1
+                }
+                let serverHasMore = page.pagination?.hasMore(page: nextPage, received: page.items.count) ?? (page.items.count >= 12)
+                catalogHasMore = serverHasMore && catalogNoProgressPages < 2
+                if serverHasMore && catalogNoProgressPages >= 2 {
+                    catalogError = "Máy chủ liên tiếp trả về các trang chỉ có phim trùng. Chạm Thử lại để tiếp tục kiểm tra trang sau."
+                }
             } catch {
                 guard !Task.isCancelled, requestID == catalogRequestID else { return }
                 catalogError = error.localizedDescription

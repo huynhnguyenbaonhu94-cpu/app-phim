@@ -64,8 +64,8 @@ private final class PosterMemoryGuard: NSObject {
 }
 
 private final class PosterImageCache {
-    static let shared: NSCache<NSURL, UIImage> = {
-        let cache = NSCache<NSURL, UIImage>()
+    static let shared: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 160
         cache.totalCostLimit = 32 * 1024 * 1024
         _ = PosterMemoryGuard.shared
@@ -77,8 +77,8 @@ private final class PosterImageCache {
         configuration.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, diskPath: "cinemora-posters")
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 45
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 30
         return URLSession(configuration: configuration)
     }()
 
@@ -99,9 +99,179 @@ private final class PosterImageCache {
                 kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
             ]
             guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-            return UIImage(cgImage: thumbnail)
+        return UIImage(cgImage: thumbnail)
         }.value
     }
+
+    static func pixelBucket(for requestedSize: CGFloat) -> Int {
+        let pixels = Int(ceil(requestedSize / 160) * 160)
+        return min(max(pixels, 240), 1400)
+    }
+
+    static func cacheKey(for url: URL, maxPixelSize: CGFloat) -> NSString {
+        "\(url.absoluteString)|pixels=\(pixelBucket(for: maxPixelSize))" as NSString
+    }
+
+    static func fetchAndDecode(_ url: URL, maxPixelSize: CGFloat) async -> UIImage? {
+        let maximumAttempts = 2
+        for attempt in 0..<maximumAttempts {
+            guard !Task.isCancelled else { return nil }
+            do {
+                var request = URLRequest(url: url)
+                request.cachePolicy = .returnCacheDataElseLoad
+                request.timeoutInterval = 12
+                request.httpShouldHandleCookies = true
+                request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                let (data, response) = try await session.data(for: request)
+                guard !Task.isCancelled else { return nil }
+                guard let http = response as? HTTPURLResponse else { return nil }
+                guard (200..<300).contains(http.statusCode) else {
+                    let transientStatus = http.statusCode == 408 || http.statusCode == 429 || (500..<600).contains(http.statusCode)
+                    guard transientStatus, attempt < maximumAttempts - 1 else { return nil }
+                    try? await Task.sleep(for: .milliseconds(350))
+                    continue
+                }
+                guard http.mimeType?.lowercased().hasPrefix("image/") == true else { return nil }
+                guard let image = await downsample(data, maxPixelSize: maxPixelSize) else { return nil }
+                return image
+            } catch is CancellationError {
+                return nil
+            } catch {
+                guard attempt < maximumAttempts - 1 else { return nil }
+                try? await Task.sleep(for: .milliseconds(350))
+            }
+        }
+        return nil
+    }
+}
+
+/// Coalesces identical remote artwork requests across separate lazy-grid cells.
+/// A shared fetch continues while at least one visible cell is waiting, but is
+/// cancelled if every cell scrolls away before it finishes.
+private actor PosterImageRequestPool {
+    private struct InFlightRequest {
+        let id: UUID
+        let task: Task<Void, Never>
+        var waiters: [UUID: CheckedContinuation<UIImage?, Never>]
+    }
+
+    private struct LoadWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
+    static let shared = PosterImageRequestPool()
+    private let maximumConcurrentLoads = 6
+    private var inFlight: [String: InFlightRequest] = [:]
+    private var activeLoads = 0
+    private var waitingLoads: [LoadWaiter] = []
+
+    func image(for url: URL, maxPixelSize: CGFloat) async -> UIImage? {
+        let key = PosterImageCache.cacheKey(for: url, maxPixelSize: maxPixelSize)
+        if let cached = PosterImageCache.shared.object(forKey: key) { return cached }
+        let taskKey = key as String
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
+                registerWaiter(waiterID, key: taskKey, url: url, cacheKey: key, maxPixelSize: maxPixelSize, continuation: continuation)
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(taskKey, id: waiterID) }
+        }
+    }
+
+    private func registerWaiter(
+        _ waiterID: UUID,
+        key: String,
+        url: URL,
+        cacheKey: NSString,
+        maxPixelSize: CGFloat,
+        continuation: CheckedContinuation<UIImage?, Never>
+    ) {
+        if Task.isCancelled {
+            continuation.resume(returning: nil)
+            return
+        }
+        if var existing = inFlight[key] {
+            existing.waiters[waiterID] = continuation
+            inFlight[key] = existing
+            return
+        }
+        let requestID = UUID()
+        let pixelSize = CGFloat(PosterImageCache.pixelBucket(for: maxPixelSize))
+        let task = Task<Void, Never> { await self.performLoad(key, requestID: requestID, url: url, cacheKey: cacheKey, pixelSize: pixelSize) }
+        inFlight[key] = InFlightRequest(id: requestID, task: task, waiters: [waiterID: continuation])
+    }
+
+    private func performLoad(_ key: String, requestID: UUID, url: URL, cacheKey: NSString, pixelSize: CGFloat) async {
+        guard await acquireLoadSlot() else {
+            completeRequest(key, requestID: requestID, image: nil)
+            return
+        }
+        defer { releaseLoadSlot() }
+        guard !Task.isCancelled else {
+            completeRequest(key, requestID: requestID, image: nil)
+            return
+        }
+        guard let image = await PosterImageCache.fetchAndDecode(url, maxPixelSize: pixelSize) else {
+            completeRequest(key, requestID: requestID, image: nil)
+            return
+        }
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        PosterImageCache.shared.setObject(image, forKey: cacheKey, cost: cost)
+        completeRequest(key, requestID: requestID, image: image)
+    }
+
+    private func completeRequest(_ key: String, requestID: UUID, image: UIImage?) {
+        guard let request = inFlight[key], request.id == requestID else { return }
+        inFlight[key] = nil
+        for continuation in request.waiters.values { continuation.resume(returning: image) }
+    }
+
+    private func cancelWaiter(_ key: String, id: UUID) {
+        guard var request = inFlight[key], let continuation = request.waiters.removeValue(forKey: id) else { return }
+        continuation.resume(returning: nil)
+        guard request.waiters.isEmpty else {
+            inFlight[key] = request
+            return
+        }
+        inFlight[key] = nil
+        request.task.cancel()
+    }
+
+    private func acquireLoadSlot() async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if activeLoads < maximumConcurrentLoads {
+            activeLoads += 1
+            return true
+        }
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                if Task.isCancelled {
+                    continuation.resume(returning: false)
+                } else {
+                    waitingLoads.append(LoadWaiter(id: waiterID, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelQueuedLoad(waiterID) }
+        }
+    }
+
+    private func releaseLoadSlot() {
+        guard !waitingLoads.isEmpty else {
+            activeLoads = max(0, activeLoads - 1)
+            return
+        }
+        waitingLoads.removeFirst().continuation.resume(returning: true)
+    }
+
+    private func cancelQueuedLoad(_ id: UUID) {
+        guard let index = waitingLoads.firstIndex(where: { $0.id == id }) else { return }
+        waitingLoads.remove(at: index).continuation.resume(returning: false)
+    }
+
 }
 
 struct PosterArt: View {
@@ -113,6 +283,8 @@ struct PosterArt: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let width = proxy.size.width > 1 ? proxy.size.width : 300
+            let pixelBucket = PosterImageCache.pixelBucket(for: min(max(width * displayScale, 240), 1400))
             ZStack {
                 if let image {
                     Image(uiImage: image)
@@ -129,7 +301,7 @@ struct PosterArt: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
             .clipped()
-            .task(id: "\(url?.absoluteString ?? "")|\(fallbackURL?.absoluteString ?? "")") {
+            .task(id: "\(url?.absoluteString ?? "")|\(fallbackURL?.absoluteString ?? "")|pixels=\(pixelBucket)") {
                 await loadImage(targetWidth: proxy.size.width)
             }
         }
@@ -153,68 +325,37 @@ struct PosterArt: View {
         let width = targetWidth > 1 ? targetWidth : 300
         let neededPixels = min(max(width * displayScale, 240), 1400)
 
-        for candidate in candidates {
-            if let cached = PosterImageCache.shared.object(forKey: candidate as NSURL),
-               cached.size.width * cached.scale >= neededPixels * 0.9 {
-                // `.task` re-runs whenever the view re-appears, so never write a
-                // value that is already set: each write would invalidate this view
-                // again immediately after a tab switch.
-                if image !== cached { image = cached }
-                if isLoading { isLoading = false }
-                return
-            }
-        }
-
         image = nil
         isLoading = true
         defer { isLoading = false }
-        let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(700), .seconds(1.5)]
         for candidate in candidates {
-            for attempt in 0..<retryDelays.count {
-                do {
-                    if candidate.isFileURL {
-                        let loadTask = Task.detached(priority: .utility) { () -> Data? in
-                            guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-                                  values.isRegularFile == true,
-                                  let size = values.fileSize,
-                                  size > 0, size <= 5 * 1024 * 1024 else { return nil }
-                            return try? Data(contentsOf: candidate)
-                        }
-                        let loaded: Data? = await loadTask.value
-                        guard let data = loaded, !Task.isCancelled,
-                              let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { break }
-                        guard !Task.isCancelled else { return }
-                        PosterImageCache.shared.setObject(decoded, forKey: candidate as NSURL)
-                        image = decoded
-                        return
-                    }
-                    var request = URLRequest(url: candidate)
-                    request.cachePolicy = .returnCacheDataElseLoad
-                    request.timeoutInterval = 20
-                    request.httpShouldHandleCookies = true
-                    request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
-                    let (data, response) = try await PosterImageCache.session.data(for: request)
-                    guard !Task.isCancelled else { return }
-                    guard let http = response as? HTTPURLResponse,
-                          (200..<300).contains(http.statusCode),
-                          (http.mimeType?.lowercased().hasPrefix("image/") == true) else {
-                        // A missing legacy upload can return the website's HTML
-                        // shell with status 200. Do not treat that as artwork;
-                        // move on to the thumbnail/poster alternative immediately.
-                        break
-                    }
-                    guard let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { break }
-                    guard !Task.isCancelled else { return }
-                    let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
-                    PosterImageCache.shared.setObject(decoded, forKey: candidate as NSURL, cost: cost)
-                    withAnimation(.easeOut(duration: 0.3)) { image = decoded }
+            guard !Task.isCancelled else { return }
+            if candidate.isFileURL {
+                let cacheKey = PosterImageCache.cacheKey(for: candidate, maxPixelSize: neededPixels)
+                if let cached = PosterImageCache.shared.object(forKey: cacheKey) {
+                    image = cached
                     return
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard attempt < retryDelays.count - 1, !Task.isCancelled else { break }
-                    try? await Task.sleep(for: retryDelays[attempt])
                 }
+                let loadTask = Task.detached(priority: .utility) { () -> Data? in
+                    guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                          values.isRegularFile == true,
+                          let size = values.fileSize,
+                          size > 0, size <= 5 * 1024 * 1024 else { return nil }
+                    return try? Data(contentsOf: candidate)
+                }
+                let loaded: Data? = await loadTask.value
+                guard let data = loaded, !Task.isCancelled,
+                      let decoded = await PosterImageCache.downsample(data, maxPixelSize: neededPixels) else { continue }
+                guard !Task.isCancelled else { return }
+                let cost = Int(decoded.size.width * decoded.size.height * decoded.scale * decoded.scale * 4)
+                PosterImageCache.shared.setObject(decoded, forKey: cacheKey, cost: cost)
+                withAnimation(.easeOut(duration: 0.3)) { image = decoded }
+                return
+            }
+            if let decoded = await PosterImageRequestPool.shared.image(for: candidate, maxPixelSize: neededPixels) {
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.3)) { image = decoded }
+                return
             }
         }
     }

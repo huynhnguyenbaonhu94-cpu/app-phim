@@ -3,6 +3,8 @@ import { storageBackend, storagePutPublicStable, storagePutStable, storageRead }
 
 const IMAGE_HOSTS = new Set(["phimimg.com", "www.phimimg.com", "phimapi.com", "www.phimapi.com", "image.tmdb.org"]);
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const ORIGIN_FETCH_TIMEOUT_MS = 10_000;
+const ORIGIN_FETCH_ATTEMPTS = 3;
 const MIRROR_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
 const POSITIVE_MEMORY_MS = 30 * 60 * 1000;
 const NEGATIVE_MEMORY_MS = 2 * 60 * 1000;
@@ -12,6 +14,7 @@ const MAX_PENDING_MIRRORS = 500;
 const MAX_ARTWORK_MEMORY_ENTRIES = 5_000;
 
 type SupportedImage = { contentType: string; extension: "jpg" | "png" | "webp" | "gif" | "avif" };
+export type MovieArtworkImage = { bytes: Buffer; type: SupportedImage };
 type ArtworkManifest = {
   version: 1;
   key: string;
@@ -58,13 +61,13 @@ function imageType(contentType: string | null): SupportedImage | null {
   }
 }
 
-function matchesImageSignature(bytes: Buffer, type: SupportedImage): boolean {
-  if (type.extension === "jpg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (type.extension === "png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (type.extension === "webp") return bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
-  if (type.extension === "gif") return bytes.toString("ascii", 0, 6) === "GIF87a" || bytes.toString("ascii", 0, 6) === "GIF89a";
-  if (type.extension === "avif") return bytes.length >= 12 && bytes.toString("ascii", 4, 8) === "ftyp" && /^(avif|avis)$/.test(bytes.toString("ascii", 8, 12));
-  return false;
+function detectImageType(bytes: Buffer): SupportedImage | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { contentType: "image/jpeg", extension: "jpg" };
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { contentType: "image/png", extension: "png" };
+  if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") return { contentType: "image/webp", extension: "webp" };
+  if (bytes.toString("ascii", 0, 6) === "GIF87a" || bytes.toString("ascii", 0, 6) === "GIF89a") return { contentType: "image/gif", extension: "gif" };
+  if (bytes.length >= 12 && bytes.toString("ascii", 4, 8) === "ftyp" && /^(avif|avis)$/.test(bytes.toString("ascii", 8, 12))) return { contentType: "image/avif", extension: "avif" };
+  return null;
 }
 
 async function readBodyLimited(response: Response): Promise<Buffer> {
@@ -93,9 +96,9 @@ async function readBodyLimited(response: Response): Promise<Buffer> {
   return Buffer.concat(chunks, total);
 }
 
-async function fetchArtwork(source: string): Promise<{ bytes: Buffer; type: SupportedImage }> {
+async function fetchArtworkOnce(source: string): Promise<MovieArtworkImage> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), ORIGIN_FETCH_TIMEOUT_MS);
   let current = new URL(source);
   try {
     for (let redirect = 0; redirect <= 4; redirect += 1) {
@@ -116,19 +119,41 @@ async function fetchArtwork(source: string): Promise<{ bytes: Buffer; type: Supp
         await response.body?.cancel().catch(() => undefined);
         throw new Error(`Artwork origin returned ${response.status}`);
       }
-      const type = imageType(response.headers.get("content-type"));
-      if (!type) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new Error("Artwork content type is not a supported raster image");
-      }
       const bytes = await readBodyLimited(response);
-      if (!matchesImageSignature(bytes, type)) throw new Error("Artwork bytes do not match their image type");
+      const type = detectImageType(bytes);
+      if (!type) throw new Error("Artwork bytes are not a supported raster image");
       return { bytes, type };
     }
     throw new Error("Artwork redirect limit exceeded");
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function retryableArtworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const status = message.match(/Artwork origin returned (\d{3})/i);
+  if (status) {
+    const code = Number(status[1]);
+    return code === 408 || code === 429 || code >= 500;
+  }
+  return !/redirect|not allowed|not a supported raster image|exceeds size limit|response is empty/i.test(message);
+}
+
+/** Uses the public image proxy's bounded retry model so visible art and R2 backfill agree. */
+export async function fetchMovieArtwork(source: string): Promise<MovieArtworkImage> {
+  if (!isAllowedMovieArtworkSource(source)) throw new Error("Artwork source is not allowed");
+  let lastError: unknown;
+  for (let attempt = 0; attempt < ORIGIN_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchArtworkOnce(source);
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= ORIGIN_FETCH_ATTEMPTS || !retryableArtworkError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Artwork origin could not be reached");
 }
 
 function manifestKey(sourceHash: string) {
@@ -250,7 +275,7 @@ export async function lookupMovieArtworkUrl(source: string): Promise<string | nu
  * indexed by a private stable manifest. If refresh fails, the previous R2 image
  * remains usable. If R2 is unavailable, callers may fall back to the old image proxy.
  */
-export async function mirrorMovieArtwork(source: string): Promise<MirroredArtworkResult> {
+export async function mirrorMovieArtwork(source: string, initialImage?: MovieArtworkImage): Promise<MirroredArtworkResult> {
   if (!isAllowedMovieArtworkSource(source) || !(await isR2Ready())) return null;
   const normalizedSource = new URL(source).toString();
   const sourceHash = sha256(normalizedSource);
@@ -263,15 +288,17 @@ export async function mirrorMovieArtwork(source: string): Promise<MirroredArtwor
     if (previous && Date.now() - previous.cachedAt <= MIRROR_REFRESH_MS) {
       return { url: publicRouteForKey(previous.key) };
     }
-    let downloaded: { bytes: Buffer; type: SupportedImage } | null = null;
+    let downloaded: MovieArtworkImage | null = initialImage ?? null;
+    let phase = downloaded ? "R2 object upload" : "origin fetch";
     try {
-      downloaded = await fetchArtwork(normalizedSource);
+      downloaded ??= await fetchMovieArtwork(normalizedSource);
       const { bytes, type } = downloaded;
       const contentHash = sha256(bytes);
       const key = `movie-artwork/${sourceHash}/${contentHash}.${type.extension}`;
       const stored = await storagePutPublicStable(key, bytes, type.contentType);
       if (stored.backend !== "r2") throw new Error("R2 upload did not complete");
       const manifest: ArtworkManifest = { version: 1, key: stored.key, contentType: type.contentType, cachedAt: Date.now() };
+      phase = "R2 manifest write";
       await saveManifest(sourceHash, manifest);
       return { url: publicRouteForKey(stored.key) };
     } catch (error) {
@@ -279,7 +306,7 @@ export async function mirrorMovieArtwork(source: string): Promise<MirroredArtwor
         rememberArtwork(sourceHash, previous, POSITIVE_MEMORY_MS);
         return { url: publicRouteForKey(previous.key) };
       }
-      console.warn(`[movie-artwork] R2 mirror unavailable for ${sourceHash.slice(0, 12)}; retaining upstream proxy`, error instanceof Error ? error.message : "unknown error");
+      console.warn(`[movie-artwork] ${phase} failed for ${sourceHash.slice(0, 12)}; retaining upstream proxy`, error instanceof Error ? error.message : "unknown error");
       if (downloaded) return { bytes: downloaded.bytes, contentType: downloaded.type.contentType };
       return null;
     }

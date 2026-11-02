@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { extractMovieArtworkCandidates, getStreamSource, MAX_CINEMA_PAGE, protectImageSource, registerStreamSource } from "./cinema";
+import { extractMovieArtworkCandidates, getStreamSource, matchesMovieKind, MAX_CINEMA_PAGE, protectImageSource, registerStreamSource } from "./cinema";
 import type { TrpcContext } from "./_core/context";
 
 function caller() {
@@ -65,5 +65,18 @@ describe("cinema proxy guardrails", () => {
     const phim1280 = registerStreamSource("https://s3.phim1280.tv/20241118/V0Q6I8l3/index.m3u8");
     expect(phim1280).toMatch(/^\/api\/cinema\/stream\/[a-f0-9-]+$/);
     expect(getStreamSource(phim1280!.split("/").pop()!)).toContain("phim1280.tv");
+  });
+});
+
+describe("cinema multi-kind filtering", () => {
+  it("filters ongoing and completed series per selected source instead of using one global kind", () => {
+    const ongoing = { status: "Đang cập nhật", episodeCurrent: "5/12", episodeTotal: 12 } as any;
+    const completed = { status: "Hoàn Tất", episodeCurrent: "12/12", episodeTotal: 12 } as any;
+
+    expect(matchesMovieKind(ongoing, "ongoing")).toBe(true);
+    expect(matchesMovieKind(ongoing, "completed")).toBe(false);
+    expect(matchesMovieKind(completed, "ongoing")).toBe(false);
+    expect(matchesMovieKind(completed, "completed")).toBe(true);
+    expect(matchesMovieKind(ongoing, "series")).toBe(true);
   });
 });

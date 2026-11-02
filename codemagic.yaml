@@ -49,6 +49,26 @@ workflows:
           grep -Fq 'onSubmitQuery: { query in' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           grep -Fq 'store.search(query, recordHistory: true)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           grep -Fq 'func search(_ keyword: String, recordHistory: Bool = false) async' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'var catalogIdentity: String' mobile-swiftui/Sources/Cinemora/Models/CinemaModels.swift
+          grep -Fq 'var seenHomeMovies = Set<String>()' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'seenHomeMovies.insert($0.catalogIdentity).inserted' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'homeUsesDailyUpdates' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'api.dailyUpdates(page: next)' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'section.movies.dropFirst().prefix(14)' mobile-swiftui/Sources/Cinemora/Views/HomeScreen.swift
+          grep -Fq 'section-page-trigger-' mobile-swiftui/Sources/Cinemora/Views/HomeScreen.swift
+          grep -Fq 'nextNoProgressPages >= 2' mobile-swiftui/Sources/Cinemora/Views/HomeScreen.swift
+          grep -Fq 'Trang tiếp theo đang lặp phim' mobile-swiftui/Sources/Cinemora/Views/HomeScreen.swift
+          grep -Fq 'private actor PosterImageRequestPool' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'maximumConcurrentLoads = 6' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'let maximumAttempts = 2' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'request.timeoutInterval = 12' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'let transientStatus = http.statusCode == 408' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'private func cancelWaiter' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq 'PosterImageRequestPool.shared.image(for: candidate, maxPixelSize: neededPixels)' mobile-swiftui/Sources/Cinemora/Design/CinemaComponents.swift
+          grep -Fq '.task(id: store.catalogPage)' mobile-swiftui/Sources/Cinemora/Views/LibraryScreen.swift
+          grep -Fq 'catalogNoProgressPages < 2' mobile-swiftui/Sources/Cinemora/State/CinemaStore.swift
+          grep -Fq 'guard kinds.count <= 1, (kind == "ongoing" || kind == "completed")' mobile-swiftui/Sources/Cinemora/API/CinemaAPI.swift
+          grep -Fq 'matchesMovieKind(movie, result.combo.kind)' server/cinema.ts
           grep -Fq '.frame(maxHeight: 224, alignment: .top)' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           grep -Fq 'onEditing: { hasQuery in' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift
           grep -Fq 'if !isSearchEntryActive,' mobile-swiftui/Sources/Cinemora/Views/SearchScreen.swift

@@ -181,7 +181,7 @@ struct CinemaAPI {
         if !countries.isEmpty { input["countries"] = countries }
         if !years.isEmpty { input["years"] = years }
         let pageResult: MoviePage = try await query("cinema.list", input: input)
-        guard kind == "ongoing" || kind == "completed" else { return pageResult }
+        guard kinds.count <= 1, (kind == "ongoing" || kind == "completed") else { return pageResult }
         let items = kind == "completed" ? pageResult.items.filter(isCompletedSeries) : pageResult.items.filter { !isCompletedSeries($0) }
         return MoviePage(items: items, pagination: pageResult.pagination)
     }

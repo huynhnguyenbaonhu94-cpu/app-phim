@@ -459,10 +459,18 @@ function isCompletedSeries(movie: Movie) {
   if (/(hoàn tất|hoan tat|hoàn thành|hoan thanh|full|completed|complete|end)/i.test(marker)) return true;
   if (movie.episodeTotal && movie.episodeCurrent) {
     const numbers = movie.episodeCurrent.match(/\d+/g)?.map(Number) || [];
-    const current = numbers[numbers.length - 1];
+    // Many catalog feeds format this as `5/12` (current/total); using the last
+    // number incorrectly marks episode 5 as complete whenever the season has 12.
+    const current = numbers[0];
     if (current && current >= movie.episodeTotal) return true;
   }
   return false;
+}
+
+export function matchesMovieKind(movie: Movie, kind: string): boolean {
+  if (kind === "ongoing") return !isCompletedSeries(movie);
+  if (kind === "completed") return isCompletedSeries(movie);
+  return true;
 }
 type MovieListResult = { items: Movie[]; pagination: ReturnType<typeof unwrapItems>["pagination"] };
 
@@ -625,6 +633,7 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
     for (const movie of result.items) {
       if (!movie.slug || seen.has(movie.slug)) continue;
       if (!matchesCombo(movie, result.combo)) continue;
+      if (!matchesMovieKind(movie, result.combo.kind)) continue;
       seen.add(movie.slug);
       merged.push(movie);
     }
@@ -634,11 +643,8 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
     // Bộ lọc một lựa chọn gửi ở `kind` (số ít), lọc nhiều lựa chọn gửi ở `kinds`.
     // Trước đây chỉ đọc `kinds` nên khi chọn một mục, phim thủ công bỏ qua hẳn bước
     // kiểm tra kiểu nguồn và lọt vào sai danh sách (vietsub hiện trong thuyết minh).
-    const requestedKinds = uniqueStrings(
-      [...(input.kinds || []), ...(input.kind ? [input.kind] : [])].filter(
-        (value) => value && value in listEndpoints,
-      ),
-    );
+    const selectedKinds = input.kinds?.length ? input.kinds : input.kind ? [input.kind] : [];
+    const requestedKinds = uniqueStrings(selectedKinds.filter((value) => value && value in listEndpoints));
     const custom = await customMoviesForFilter({
       kinds: requestedKinds,
       categories: uniqueStrings(input.categories?.length ? input.categories : input.category ? [input.category] : []),
@@ -653,13 +659,7 @@ export async function getMovies(input: MovieFilterInput): Promise<MovieListResul
   }
   const ordered = sortByFreshness(merged);
 
-  const kindKey = combos[0]?.kind ?? "latest";
-  const filtered =
-    kindKey === "ongoing"
-      ? ordered.filter((movie) => !isCompletedSeries(movie))
-      : kindKey === "completed"
-        ? ordered.filter(isCompletedSeries)
-        : ordered;
+  const filtered = ordered;
 
   // Một tổ hợp: nguồn cho số liệu chính xác (tổng số phim, tổng số trang).
   // Nhiều tổ hợp: không có tổng chính xác nên trả `null` thay vì con số sai.

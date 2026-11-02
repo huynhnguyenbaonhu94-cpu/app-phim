@@ -19,7 +19,7 @@ import { initializeDatabase } from "../db";
 import { registerSpecialChatMediaRoute } from "../specialChat";
 import { startR2BackupScheduler } from "../r2Backup";
 import { registerPrivateStorageRoute, registerPublicStorageRoute } from "../storage";
-import { mirrorMovieArtwork } from "../movieArtwork";
+import { fetchMovieArtwork, lookupMovieArtworkUrl, mirrorMovieArtwork } from "../movieArtwork";
 import { startPosterBackfillRecovery } from "../movieArtworkBackfill";
 import { attachSidecarSubtitlesToMaster, buildSubtitleMediaPlaylist, buildSubtitledPlaylist } from "../subtitledPlaylist";
 
@@ -82,34 +82,6 @@ function isPortAvailable(port: number): Promise<boolean> {
     });
     server.on("error", () => resolve(false));
   });
-}
-
-function wait(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function fetchImageWithRetry(source: string) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch(source, {
-        headers: { accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8", "user-agent": "Cinemora/1.0" },
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) throw new Error(`Image upstream ${response.status}`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (!bytes.length) throw new Error("Image upstream returned an empty body");
-      return { contentType: response.headers.get("content-type") || "image/jpeg", bytes };
-    } catch (error) {
-      lastError = error;
-      if (attempt < 2) await wait(180 * (attempt + 1));
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  throw lastError;
 }
 
 async function findAvailablePort(startPort: number = 3000): Promise<number> {
@@ -238,18 +210,18 @@ async function startServer() {
     const source = getImageSource(req.params.token);
     if (!source) return res.status(404).send("Not found");
     try {
-      const mirrored = await mirrorMovieArtwork(source);
-      if (mirrored?.url) return res.redirect(302, mirrored.url);
-      if (mirrored?.bytes && mirrored.contentType) {
-        res.setHeader("Cache-Control", "public, max-age=7200, stale-while-revalidate=86400");
-        res.setHeader("Content-Type", mirrored.contentType);
-        res.setHeader("X-Content-Type-Options", "nosniff");
-        return res.status(200).send(mirrored.bytes);
+      const savedUrl = await lookupMovieArtworkUrl(source);
+      if (savedUrl) {
+        void mirrorMovieArtwork(source).catch(() => undefined);
+        return res.redirect(302, savedUrl);
       }
-      const image = await fetchImageWithRetry(source);
+      const image = await fetchMovieArtwork(source);
       res.setHeader("Cache-Control", "public, max-age=7200, stale-while-revalidate=86400"); // match 2h token TTL
-      res.setHeader("Content-Type", image.contentType);
-      return res.status(200).send(image.bytes);
+      res.setHeader("Content-Type", image.type.contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      const response = res.status(200).send(image.bytes);
+      void mirrorMovieArtwork(source, image).catch(() => undefined);
+      return response;
     } catch (error) {
       console.warn("[cinema] image proxy failed after retries", error instanceof Error ? error.message : "unknown");
       return res.status(502).send("Image unavailable");

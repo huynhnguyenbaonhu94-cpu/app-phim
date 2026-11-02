@@ -186,13 +186,16 @@ struct HomeScreen: View {
             .auroraReveal(index + 2)
 
             if index == 0 {
-                MovieShelf(movies: Array(section.movies.prefix(14)))
-                    .padding(.horizontal, -20)
+                let shelfMovies = Array(section.movies.dropFirst().prefix(14))
+                if !shelfMovies.isEmpty {
+                    MovieShelf(movies: shelfMovies)
+                        .padding(.horizontal, -20)
+                }
             } else {
                 LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(Array(section.movies.enumerated()), id: \.element.id) { cardIndex, movie in
+                    ForEach(Array(section.movies.enumerated()), id: \.element.catalogIdentity) { cardIndex, movie in
                         MoviePosterCard(movie: movie, revealIndex: cardIndex)
-                            .id("home-movie-\(movie.id)")
+                            .id("home-movie-\(movie.catalogIdentity)")
                     }
                 }
             }
@@ -227,8 +230,8 @@ struct SectionListScreen: View {
     @State private var reachedEnd = false
     @State private var loadError: String?
     @State private var restored = false
-    /// Mốc của lần nạp gần nhất, để vừa quay về màn này không nạp thêm ngay.
-    @State private var lastLoadAt: Date = .distantPast
+    @State private var latestUsesDailyUpdates = true
+    @State private var noProgressPages = 0
 
     private let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
@@ -249,17 +252,34 @@ struct SectionListScreen: View {
                         }
                     } else {
                         LazyVGrid(columns: columns, spacing: 20) {
-                            ForEach(Array(movies.enumerated()), id: \.element.id) { index, movie in
+                            ForEach(Array(movies.enumerated()), id: \.element.catalogIdentity) { index, movie in
                                 MoviePosterCard(movie: movie, revealIndex: index)
-                                    .id("section-movie-\(movie.id)")
+                                    .id("section-movie-\(movie.catalogIdentity)")
                             }
                         }
-                        if !reachedEnd {
+                        if let loadError {
+                            StateMessage(icon: "wifi.exclamationmark", title: "Chưa tải được trang tiếp theo", detail: loadError, actionTitle: "Thử lại") {
+                                self.loadError = nil
+                                Task { await load(reset: false) }
+                            }
+                        } else if reachedEnd && noProgressPages >= 2 {
+                            StateMessage(icon: "arrow.triangle.2.circlepath", title: "Trang tiếp theo đang lặp phim", detail: "Đã dừng tự tải để tránh hiển thị trùng. Bạn có thể yêu cầu kiểm tra trang kế tiếp.", actionTitle: "Tiếp tục") {
+                                reachedEnd = false
+                            }
+                        } else if !reachedEnd {
                             ProgressView()
                                 .tint(.auroraViolet)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
-                                .onAppear { autoLoadNextPage() }
+                                .task(id: "section-page-trigger-\(page)") {
+                                    while loading {
+                                        do { try await Task.sleep(for: .milliseconds(100)) }
+                                        catch { return }
+                                        guard !Task.isCancelled else { return }
+                                    }
+                                    guard !reachedEnd else { return }
+                                    await load(reset: false)
+                                }
                         }
                     }
                 }
@@ -291,15 +311,12 @@ struct SectionListScreen: View {
         guard !restored else { return }
         restored = true
         guard let cache = store.sectionList(kind) else { return }
-        movies = cache.movies
+        var seen = Set<String>()
+        movies = cache.movies.filter { seen.insert($0.catalogIdentity).inserted }
         page = cache.page
         reachedEnd = cache.reachedEnd
-    }
-
-    /// Cuộn tới cuối thì nạp thêm, nhưng bỏ qua ngay sau khi màn vừa hiện lại.
-    private func autoLoadNextPage() {
-        guard Date().timeIntervalSince(lastLoadAt) > 1.5 else { return }
-        Task { await load(reset: false) }
+        latestUsesDailyUpdates = cache.latestUsesDailyUpdates ?? (kind == "latest")
+        noProgressPages = cache.noProgressPages
     }
 
     private func load(reset: Bool) async {
@@ -309,23 +326,60 @@ struct SectionListScreen: View {
             page = 1
             reachedEnd = false
             loadError = nil
+            latestUsesDailyUpdates = true
+            noProgressPages = 0
         }
         guard !reachedEnd else { return }
         loading = true
-        lastLoadAt = Date()
         defer { loading = false }
         do {
-            let result = try await CinemaAPI.shared.list(page: page, kind: kind)
-            let known = Set(movies.map(\.id))
-            let fresh = result.items.filter { !known.contains($0.id) }
-            movies += fresh
-            page += 1
-            if fresh.isEmpty { reachedEnd = true }
+            let requestedPage = page
+            let result: MoviePage
+            if kind == "latest", latestUsesDailyUpdates {
+                do {
+                    result = try await CinemaAPI.shared.dailyUpdates(page: requestedPage)
+                } catch {
+                    guard !Task.isCancelled else { throw error }
+                    latestUsesDailyUpdates = false
+                    result = try await CinemaAPI.shared.list(page: requestedPage, kind: kind)
+                }
+            } else {
+                result = try await CinemaAPI.shared.list(page: requestedPage, kind: kind)
+            }
+            var known = Set((reset ? [] : movies).map(\.catalogIdentity))
+            let baseMovies = reset ? [] : movies
+            let nextMovies = baseMovies + result.items.filter { known.insert($0.catalogIdentity).inserted }
+            let addedCount = nextMovies.count - baseMovies.count
+            let serverHasMore = result.pagination?.hasMore(page: requestedPage, received: result.items.count) ?? (result.items.count >= 12)
+            var nextNoProgressPages = reset ? 0 : noProgressPages
+            if addedCount == 0 && !result.items.isEmpty {
+                nextNoProgressPages += 1
+            } else {
+                nextNoProgressPages = 0
+            }
+            let nextReachedEnd = result.items.isEmpty || !serverHasMore || nextNoProgressPages >= 2
+            let nextPage = requestedPage + 1
+            guard !Task.isCancelled else { return }
+            store.storeSectionList(
+                kind: kind,
+                movies: nextMovies,
+                page: nextPage,
+                reachedEnd: nextReachedEnd,
+                latestUsesDailyUpdates: kind == "latest" ? latestUsesDailyUpdates : nil,
+                noProgressPages: nextNoProgressPages
+            )
+            // Commit cache first: updating the footer state below changes the page
+            // sentinel ID and can cancel this .task(id:) after it has done its work.
+            movies = nextMovies
+            noProgressPages = nextNoProgressPages
+            reachedEnd = nextReachedEnd
+            loadError = nil
+            page = nextPage
         } catch {
+            if Task.isCancelled { return }
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
             loadError = error.localizedDescription
-            reachedEnd = true
         }
-        // Giữ lại cho lần quay về sau.
-        store.storeSectionList(kind: kind, movies: movies, page: page, reachedEnd: reachedEnd)
     }
 }

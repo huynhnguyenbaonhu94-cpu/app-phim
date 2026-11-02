@@ -164,6 +164,10 @@ struct Movie: Decodable, Identifiable, Hashable {
     var episodeGroups: [MovieServer]?
 
     var id: String { apiID ?? slug }
+    var catalogIdentity: String {
+        let normalizedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedSlug.isEmpty ? id : normalizedSlug
+    }
     /// The backend marks movies created from the admin's manual-movie form as
     /// `custom-<id>`; regular catalog movies and TV entries use other IDs.
     var isAdminManuallyAdded: Bool { apiID?.hasPrefix("custom-") == true }

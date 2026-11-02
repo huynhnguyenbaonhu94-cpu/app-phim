@@ -36,7 +36,7 @@ struct LibraryScreen: View {
         selectedKinds.count + categories.count + countries.count + years.count
     }
     /// Nguồn chính gửi lên máy chủ; rỗng nghĩa là "phim mới" (tất cả).
-    private var primaryKind: String { selectedKinds.first ?? "latest" }
+    private var primaryKind: String { selectedKinds.sorted().first ?? "latest" }
 
     var body: some View {
         ZStack {
@@ -206,19 +206,28 @@ struct LibraryScreen: View {
             StateMessage(icon: "film", title: "Chưa có kết quả", detail: "Hãy đổi bộ lọc để khám phá thêm phim.")
         } else {
             LazyVGrid(columns: columns, spacing: 20) {
-                ForEach(Array(store.catalogMovies.enumerated()), id: \.element.id) { index, movie in
+                ForEach(Array(store.catalogMovies.enumerated()), id: \.element.catalogIdentity) { index, movie in
                     MoviePosterCard(movie: movie, revealIndex: index % 12)
-                        .id("library-movie-\(movie.id)")
-                        .task {
-                            if store.catalogHasMore && store.catalogMovies.suffix(4).contains(where: { $0.id == movie.id }) {
-                                store.loadCatalog(kind: primaryKind, reset: false, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years))
+                        .id("library-movie-\(movie.catalogIdentity)")
+                        .task(id: store.catalogPage) {
+                            guard store.catalogMovies.suffix(4).contains(where: { $0.catalogIdentity == movie.catalogIdentity }) else { return }
+                            while store.catalogLoading {
+                                do { try await Task.sleep(for: .milliseconds(100)) }
+                                catch { return }
+                                guard !Task.isCancelled else { return }
                             }
+                            guard store.catalogHasMore, !Task.isCancelled else { return }
+                            store.loadCatalog(kind: primaryKind, reset: false, kinds: selectedKinds.sorted(), categories: categories.sorted(), countries: countries.sorted(), years: years.sorted())
                         }
                 }
             }
-            .id("library-results-\(primaryKind)-\(categories.sorted().joined())-\(countries.sorted().joined())-\(years.sorted().map(String.init).joined())")
+            .id("library-results-\(filterSignature)")
 
-            if store.catalogLoading {
+            if let error = store.catalogError, !store.catalogLoading, !store.catalogMovies.isEmpty {
+                StateMessage(icon: "wifi.exclamationmark", title: "Chưa tải được trang tiếp theo", detail: error, actionTitle: "Thử lại") {
+                    store.loadCatalog(kind: primaryKind, reset: false, kinds: selectedKinds.sorted(), categories: categories.sorted(), countries: countries.sorted(), years: years.sorted())
+                }
+            } else if store.catalogLoading {
                 HStack(spacing: 9) {
                     ProgressView().tint(.auroraViolet).scaleEffect(0.85)
                     Text("Đang tải thêm…")
@@ -254,11 +263,17 @@ struct LibraryScreen: View {
     private func load() {
         loadedSignature = filterSignature
         lastLoadAt = Date()
-        store.loadCatalog(kind: primaryKind, kinds: Array(selectedKinds), categories: Array(categories), countries: Array(countries), years: Array(years))
+        store.loadCatalog(kind: primaryKind, kinds: selectedKinds.sorted(), categories: categories.sorted(), countries: countries.sorted(), years: years.sorted())
     }
 
     private var filterSignature: String {
-        "\(primaryKind)|\(selectedKinds.sorted().joined() )|\(categories.sorted().joined())|\(countries.sorted().joined())|\(years.sorted().map(String.init).joined())"
+        [
+            primaryKind,
+            selectedKinds.sorted().joined(separator: "\u{1F}"),
+            categories.sorted().joined(separator: "\u{1F}"),
+            countries.sorted().joined(separator: "\u{1F}"),
+            years.sorted().map(String.init).joined(separator: "\u{1F}")
+        ].joined(separator: "\u{1E}")
     }
 
     /// `TabView` re-runs `.task` every time the tab becomes visible again.
